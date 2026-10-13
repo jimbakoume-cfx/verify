@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1202 860" role="img" aria-label="Confiance, la mobilité en toute sérénité">
+  <g fill="#FFFFFF">
+    <!-- C -->
+    <path d="M804.4 136A227.5 227.5 0 0 0 412.7 361.2M571.2 493.7A227.5 227.5 0 0 0 804.4 408" fill="none" stroke="#FFFFFF" stroke-width="89"/>
+    <!-- pin -->
+    <path fill-rule="evenodd" d="M614 155C658 155 695 190 695 235C695 275 665 310 612 362C560 310 535 275 535 235C535 190 570 155 614 155ZM614 197A38 38 0 1 0 614 273A38 38 0 1 0 614 197Z"/>
+    <!-- road -->
+    <path d="M395 428L380 397C420 350 480 325 548 305L548 316C490 340 430 375 395 428Z"/>
+    <path d="M505 377C525 360 545 345 565 333L572 345C555 360 540 372 527 380Z"/>
+    <path d="M438 472C445 440 460 418 475 402L500 405C480 425 465 450 460 495Z"/>
+    <path d="M610 360C540 405 510 460 530 520C540 535 570 540 588 546C555 520 548 470 580 425C595 400 610 385 612 360Z"/>
+  </g>
+  <text x="8" y="765" textLength="1187" lengthAdjust="spacingAndGlyphs" font-family="Montserrat, Poppins, 'Segoe UI', Arial, sans-serif" font-weight="800" font-size="207" fill="#FFFFFF">CONFIANCE</text>
+  <text x="120" y="848" textLength="998" lengthAdjust="spacing" font-family="Montserrat, Poppins, 'Segoe UI', Arial, sans-serif" font-weight="300" font-size="52" fill="#FFFFFF">La mobilité en toute sérénité</text>
+</svg>

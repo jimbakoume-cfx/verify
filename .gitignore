@@ -1,0 +1,17 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+supabase/.temp/
+supabase/.branches/
+# Never commit ID images or test data
+test-data/
+*.jpg
+*.jpeg
+*.png
+*.heic
+!apps/*/public/*.png
+.netlify/

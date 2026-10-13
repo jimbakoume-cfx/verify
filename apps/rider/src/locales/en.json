@@ -1,0 +1,23 @@
+{
+  "welcome": {
+    "title": "Let's verify your identity",
+    "intro": "For your safety and our drivers', Confiance verifies every rider's identity once, before their first ride."
+  },
+  "steps": {
+    "title": "How it works",
+    "consent": "You read and accept how your data will be used.",
+    "document": "You take a photo of your ID document (front, and back if needed).",
+    "selfie": "You do a short camera check (turn your head, blink).",
+    "result": "You get the result in the app.",
+    "duration": "Takes about 2 minutes."
+  },
+  "start": "Start",
+  "comingSoon": "Test version: capture arrives in the next step (M1).",
+  "build": "Build",
+  "server": {
+    "checking": "Connecting to server…",
+    "ok": "Server connected",
+    "not-configured": "Server not configured",
+    "unreachable": "Server unreachable"
+  }
+}

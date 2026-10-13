@@ -1,0 +1,23 @@
+{
+  "title": "KYC dashboard",
+  "intro": "Internal tool for the Confiance verification team: review queue, decisions, appeals and metrics.",
+  "staffOnly": "Authorised staff only. Every access is logged.",
+  "planned": {
+    "title": "Planned modules",
+    "queue": "Review queue sorted by priority and age",
+    "caseView": "Case view: ID document, selfie, extracted data and risk flags side by side",
+    "search": "Search by rider",
+    "metrics": "Metrics: volume, decision times, auto vs manual rate, rejection reasons",
+    "thresholds": "Decision threshold settings (no redeploy needed)",
+    "audit": "Audit log"
+  },
+  "signIn": "Sign in",
+  "comingSoon": "Test version: staff sign-in arrives in milestone M9.",
+  "build": "Build",
+  "server": {
+    "checking": "Connecting to server…",
+    "ok": "Server connected",
+    "not-configured": "Server not configured",
+    "unreachable": "Server unreachable"
+  }
+}
