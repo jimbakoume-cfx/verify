@@ -19,6 +19,8 @@
     "licenses": "node scripts/check-licenses.mjs"
   },
   "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "deno": "2.9.6",
     "typescript": "6.0.3",
     "vitest": "5.0.2"
   }
