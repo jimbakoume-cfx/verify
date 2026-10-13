@@ -76,7 +76,7 @@ Route = path after `/flow` (Supabase passes the full path `/flow/...`; tolerate 
   - `path` must start with `<this verification id>/` and match `^[0-9a-f-]{36}/(document_front|document_back)-[0-9a-f-]{36}\.jpg$`, with the kind in the path equal to `kind`;
   - downloads the object (`404 upload_missing` if absent);
   - validates: byte size between `minBytes` and `maxBytes` (`422 image_too_small` / `image_too_large`), JPEG magic (`422 invalid_image`), SOF dimensions with long side ≥ `minLongSide` (`422 image_resolution_too_low`); on any failure the object is deleted;
-  - computes sha256; `reusedElsewhere` = the same sha256 exists in another verification's capture;
+  - computes sha256; `reusedElsewhere` = the same sha256 exists in another verification's capture (stored for staff, never returned to the rider);
   - inserts the `capture` row: `quality` = the client quality object (validated and clamped to finite numbers) plus `{"server": {"validated": true, "reusedElsewhere": bool}}`;
   - audit `capture.create` with actor `rider` and actor_id = the verification id.
 - `POST /submit`:

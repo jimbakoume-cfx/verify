@@ -1,0 +1,311 @@
+/* Rider flow. Builds on @verify/shared/src/styles.css (Confiance tokens, .page, .card, buttons). */
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* Titles take focus when a screen appears (for screen readers); no ring for that. */
+h1[tabindex="-1"]:focus,
+.camera-error .card:focus { outline: none; }
+
+.subtitle { margin-top: -8px; }
+.center { text-align: center; }
+
+button.secondary {
+  width: 100%;
+  font-weight: 600;
+  color: var(--brand);
+  border-color: var(--border-strong);
+  background: var(--surface);
+}
+button.secondary:hover:not(:disabled) { background: var(--brand-soft); }
+
+button.primary, button.secondary { min-height: 52px; font-size: 1rem; }
+
+/* Riders tap with a thumb, often outdoors: every control is at least 44 x 44 px. */
+.lang-toggle button { min-height: 44px; min-width: 44px; }
+
+.actions { display: flex; flex-direction: column; gap: 10px; }
+
+.badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--brand-soft);
+  color: var(--brand);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.badge.warn { background: #fef0c7; color: #93370d; }
+
+.notice {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid;
+  font-size: 0.95rem;
+}
+.notice p { margin: 4px 0 0; }
+.notice.error { background: #fef3f2; border-color: #fecdca; color: var(--bad); }
+.notice.warn { background: #fffaeb; border-color: #fedf89; color: #93370d; }
+.notice.placeholder { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+
+.welcome-status { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.welcome-status:empty { display: none; }
+.welcome-status > * { align-self: stretch; }
+.welcome-status > .badge { align-self: flex-start; }
+.welcome-status p { margin: 0; }
+
+/* Consent */
+.consent-text h2 { font-size: 1rem; margin: 0 0 4px; color: var(--brand); }
+.consent-text p { color: var(--text-2); }
+.consent-text > div + div { margin-top: 12px; }
+
+.check {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 14px;
+  min-height: 56px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.check input { width: 24px; height: 24px; margin: 0; flex: none; accent-color: var(--brand); }
+.check:has(input:checked) { border-color: var(--brand); background: var(--brand-soft); }
+
+/* Document choice */
+.choices { border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.choice {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 64px;
+  padding: 12px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.choice input { width: 22px; height: 22px; margin: 0; flex: none; accent-color: var(--brand); }
+.choice:has(input:checked) { border: 2px solid var(--brand); padding: 11px 13px; background: var(--brand-soft); }
+.choice:has(input:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
+.choice-text { display: flex; flex-direction: column; min-width: 0; }
+.choice-name { font-weight: 600; color: var(--text); }
+.choice-sub { font-size: 0.85rem; color: var(--text-3); }
+.choices:disabled .choice { opacity: 0.6; cursor: default; }
+
+/* Turn over */
+.illustration { display: block; width: min(240px, 80%); height: auto; margin: 4px auto 12px; }
+
+/* Review */
+.review-photo { margin: 0; border-radius: var(--radius); overflow: hidden; background: #1d2939; min-height: 120px; }
+.review-photo img { display: block; width: 100%; height: auto; max-height: 52vh; object-fit: contain; }
+.checklist-intro { margin: 0 0 6px; font-weight: 600; }
+.checklist { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; color: var(--text-2); }
+.checklist li { display: flex; gap: 8px; align-items: center; }
+.checklist svg { color: var(--ok); flex: none; }
+
+/* Upload */
+.progress { height: 12px; border-radius: 999px; background: var(--border); overflow: hidden; }
+.progress-bar { height: 100%; background: var(--brand); border-radius: inherit; transition: width 0.3s ease; }
+.progress.failed .progress-bar { background: var(--bad); }
+.upload-status { margin: 12px 0 0; font-weight: 600; min-height: 3em; }
+.progress + .notice { margin-top: 12px; }
+
+/* Done / session error */
+.end-icon {
+  width: 64px;
+  height: 64px;
+  margin: 16px auto 0;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 2rem;
+  font-weight: 800;
+  color: #fff;
+}
+.end-icon svg { width: 36px; height: 36px; }
+.end-icon.ok { background: var(--ok); }
+.end-icon.bad { background: var(--bad); }
+.end-icon + h1 { text-align: center; }
+
+.debug-box { font-size: 0.8rem; color: var(--text-2); }
+.debug-box summary { cursor: pointer; font-weight: 600; min-height: 44px; display: flex; align-items: center; }
+.debug-box dl, .capture-debug { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; }
+.debug-box dl > div, .capture-debug > div { display: contents; }
+.debug-box dt, .capture-debug dt { opacity: 0.75; }
+.debug-box dd, .capture-debug dd { margin: 0; font-family: ui-monospace, monospace; overflow-wrap: anywhere; }
+
+/* ------------------------------------------------------------------------------------------------
+   Camera. The stage fills the screen; the <video> fills the stage (object-fit: cover). The free
+   area for the guide is a grid cell, measured by CaptureView. Text sits on the dark mask and on
+   solid black pills so it stays readable in bright sunlight.
+   --------------------------------------------------------------------------------------------- */
+.capture {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  background: #000;
+  color: #fff;
+  touch-action: manipulation;
+}
+.capture-loading { display: grid; place-items: center; }
+
+.capture-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: #000; }
+
+.guide-overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.guide-mask { fill: rgba(0, 0, 0, 0.62); }
+.guide-frame { fill: none; stroke: rgba(255, 255, 255, 0.45); stroke-width: 1.5; }
+.guide-progress { fill: none; stroke: #32d74b; stroke-width: 4; transition: stroke-dasharray 0.12s linear; }
+.guide-corners { fill: none; stroke: #fff; stroke-width: 6; stroke-linecap: round; transition: stroke 0.15s; }
+.guide-corners.adjust { stroke: #ffb020; }
+.guide-corners.ready { stroke: #32d74b; }
+
+.capture-ui {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  /* minmax(0, 1fr): the column never grows to fit unwrapped text (e.g. a long document name). */
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-areas: "top" "hint" "area" "bottom";
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+.capture-top {
+  grid-area: top;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+}
+.capture-back {
+  min-height: 44px;
+  min-width: 44px;
+  padding: 8px 12px;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  color: #fff;
+  font-weight: 600;
+  border-radius: 999px;
+}
+.capture-title { flex: 1; min-width: 0; text-align: center; line-height: 1.2; }
+.capture-title h1 { margin: 0; font-size: 1.1rem; color: #fff; }
+.capture-title span { display: block; font-size: 0.8rem; opacity: 0.85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.capture .lang-toggle button {
+  min-height: 44px;
+  min-width: 44px;
+  background: rgba(0, 0, 0, 0.55);
+  border-color: rgba(255, 255, 255, 0.35);
+  color: #fff;
+}
+.capture .lang-toggle button[aria-pressed="true"] { background: #fff; color: #000; border-color: #fff; }
+
+.capture-hint { grid-area: hint; padding: 4px 16px 0; text-align: center; }
+.capture-hint p { margin: 0; }
+/* Two lines are always reserved, so a longer hint never moves the guide (border-box: the 20 px
+   of padding and the 4 px of border count in the height). */
+.hint-pill {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: calc(2 * 1.3em + 24px);
+  padding: 10px 16px;
+  border-radius: 16px;
+  background: rgba(0, 0, 0, 0.86);
+  border: 2px solid #fff;
+  color: #fff;
+  font-size: 1.2rem;
+  font-weight: 700;
+  line-height: 1.3;
+}
+.hint-pill.adjust { border-color: #ffb020; }
+.hint-pill.ready { border-color: #32d74b; }
+.hint-tip { min-height: 2.6em; padding-top: 6px; font-size: 0.9rem; font-weight: 600; text-shadow: 0 1px 3px #000; }
+.capture-alert {
+  margin: 0 0 8px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: #b42318;
+  color: #fff;
+  font-weight: 600;
+}
+
+.capture-area { grid-area: area; min-height: 0; }
+
+.capture-bottom {
+  grid-area: bottom;
+  display: grid;
+  place-items: center;
+  min-height: 112px;
+  padding: 8px 16px 16px;
+}
+.capture-auto { margin: 0; font-weight: 600; text-shadow: 0 1px 3px #000; text-align: center; }
+.shutter {
+  width: 76px;
+  height: 76px;
+  padding: 0;
+  border-radius: 50%;
+  border: 4px solid #fff;
+  background: transparent;
+  display: grid;
+  place-items: center;
+}
+.shutter span { width: 58px; height: 58px; border-radius: 50%; background: #fff; }
+.shutter:active span { transform: scale(0.92); }
+
+.camera-error {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.75);
+}
+.camera-error .card { width: min(420px, 100%); color: var(--text); }
+.camera-error h2 { color: var(--brand); }
+
+/* The camera code could not be downloaded. */
+.capture-load-failed { width: min(420px, calc(100% - 32px)); color: var(--text); }
+.capture-load-failed h1 { color: var(--brand); font-size: 1.25rem; }
+
+/* ?debug=1 values: two per row, at the top of the free area (above the guide), clear of the hint
+   and the shutter. It shares the grid cell with .capture-area, so it never changes the guide. */
+.capture-debug {
+  grid-area: area;
+  align-self: start;
+  z-index: 1;
+  margin: 0 8px;
+  grid-template-columns: max-content 1fr max-content 1fr;
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.72);
+  font-size: 11px;
+  line-height: 1.25;
+  pointer-events: none;
+}
+
+/* Phone held sideways: the hint and the controls move to a right-hand column, so the guide gets
+   the full height under the top bar (a sideways 1080p stream gives the photo few pixels: every
+   row counts). The guide spans both rows of that column, so the hint's height never moves it. */
+@media (orientation: landscape) and (max-height: 560px) {
+  .capture-ui {
+    grid-template-columns: minmax(0, 1fr) 200px;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    grid-template-areas: "top top" "area hint" "area bottom";
+  }
+  .capture-top { padding: 4px 12px; }
+  .capture-hint { min-height: 0; overflow-y: auto; padding: 4px 12px 0 0; }
+  .hint-pill { min-height: calc(2 * 1.3em + 16px); padding: 6px 12px; font-size: 1.05rem; }
+  .hint-tip { min-height: 1.6em; padding-bottom: 4px; }
+  .capture-bottom { min-height: 0; padding: 8px; }
+  .capture-auto { font-size: 0.85rem; }
+}

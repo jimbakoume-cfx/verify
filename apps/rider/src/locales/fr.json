@@ -1,7 +1,12 @@
 {
   "welcome": {
     "title": "Vérifions votre identité",
-    "intro": "Pour votre sécurité et celle des chauffeurs, Confiance vérifie l'identité de chaque passager une seule fois, avant la première course."
+    "intro": "Pour votre sécurité et celle des chauffeurs, Confiance vérifie l'identité de chaque passager une seule fois, avant la première course.",
+    "loading": "Chargement de votre session…",
+    "noSession": "Pour commencer, ouvrez cette page depuis l'application Confiance.",
+    "noSessionTest": "Vous testez ? Demandez un lien de test à un membre de l'équipe.",
+    "testBadge": "Session de test",
+    "logoAlt": "Confiance, la mobilité en toute sérénité"
   },
   "steps": {
     "title": "Comment ça marche",
@@ -12,12 +17,201 @@
     "duration": "Durée : environ 2 minutes."
   },
   "start": "Commencer",
-  "comingSoon": "Version de test : la capture arrive à l'étape suivante (M1).",
   "build": "Version",
   "server": {
     "checking": "Connexion au serveur…",
     "ok": "Serveur connecté",
     "not-configured": "Serveur non configuré",
     "unreachable": "Serveur injoignable"
+  },
+  "common": {
+    "back": "Retour",
+    "retry": "Réessayer",
+    "saving": "Enregistrement…"
+  },
+  "consent": {
+    "title": "Votre accord",
+    "placeholderBadge": "Texte provisoire",
+    "placeholderNote": "Ce texte sert uniquement aux tests. Le texte définitif sera rédigé par notre juriste.",
+    "whatTitle": "Ce que nous collectons",
+    "what": "Des photos de votre pièce d'identité (recto, et verso si nécessaire). Plus tard, un court contrôle de votre visage devant la caméra.",
+    "whyTitle": "Pourquoi",
+    "why": "Pour confirmer que vous êtes bien la personne que vous dites être, pour la sécurité des passagers et des chauffeurs.",
+    "howTitle": "Comment elles sont protégées",
+    "how": "Vos photos sont envoyées directement dans l'espace de stockage privé de Confiance. Seul le personnel autorisé peut les voir, et chaque consultation est enregistrée.",
+    "keepTitle": "Combien de temps",
+    "keep": "Seulement le temps nécessaire à la vérification, puis elles sont supprimées (durée exacte à confirmer).",
+    "rightsTitle": "Vos droits",
+    "rights": "Vous pouvez demander à voir ou à supprimer vos données en contactant le service client de Confiance.",
+    "checkbox": "J'ai lu ces informations et j'accepte que Confiance vérifie mon identité avec ces photos.",
+    "accept": "Continuer",
+    "decline": "Je refuse"
+  },
+  "declined": {
+    "title": "Vous avez refusé",
+    "body": "Sans votre accord, nous ne pouvons pas vérifier votre identité : vous ne pouvez donc pas encore voyager avec Confiance. Rien n'a été enregistré.",
+    "hint": "Vous pouvez fermer cette page et revenir à l'application Confiance.",
+    "review": "Relire les conditions"
+  },
+  "document": {
+    "title": "Quelle pièce allez-vous utiliser ?",
+    "intro": "Choisissez la pièce originale que vous avez avec vous.",
+    "bothSides": "Recto et verso",
+    "photoPage": "Page avec la photo",
+    "continue": "Continuer"
+  },
+  "documents": {
+    "cni": "Carte nationale d'identité (CNI)",
+    "passport": "Passeport",
+    "residence_permit": "Carte de séjour",
+    "driving_licence": "Permis de conduire",
+    "voter_card": "Carte d'électeur"
+  },
+  "sides": {
+    "document_front": "Recto",
+    "document_back": "Verso",
+    "passportPage": "Page photo"
+  },
+  "capture": {
+    "starting": "Démarrage de la caméra…",
+    "ready": "Ne bougez plus…",
+    "processing": "Prise de la photo…",
+    "auto": "La photo est prise automatiquement",
+    "shutter": "Prendre la photo",
+    "tipSurface": "Astuce : tenez la pièce bien droite, sur une surface unie et sombre.",
+    "loading": "Chargement de la caméra…",
+    "loadFailedTitle": "Impossible de charger la caméra",
+    "loadFailed": "Vérifiez votre connexion, puis réessayez.",
+    "turnUpright": "Tenez le téléphone à la verticale",
+    "tooLittleDetail": "Résolution trop basse : changez de téléphone"
+  },
+  "hints": {
+    "no_document": "Placez la pièce bien droite dans le cadre",
+    "move_closer": "Rapprochez le téléphone",
+    "move_back": "Éloignez un peu le téléphone",
+    "center_document": "Centrez la pièce et tenez-la droite",
+    "too_dark": "Trop sombre : allez vers la lumière",
+    "too_bright": "Trop de lumière : évitez le soleil direct",
+    "glare": "Reflet sur la pièce : inclinez-la légèrement",
+    "blurry": "Image floue : attendez la mise au point",
+    "hold_still": "Ne bougez plus"
+  },
+  "camera": {
+    "deniedTitle": "L'accès à la caméra est bloqué",
+    "denied": "Autorisez Confiance à utiliser la caméra (dans les réglages du navigateur ou de l'application), puis réessayez.",
+    "no_cameraTitle": "Aucune caméra trouvée",
+    "no_camera": "Nous n'avons trouvé aucune caméra sur cet appareil. Utilisez un téléphone avec une caméra arrière.",
+    "insecureTitle": "Lien sécurisé nécessaire",
+    "insecure": "La caméra ne fonctionne que sur une page sécurisée (https). Ouvrez le lien depuis l'application Confiance.",
+    "busyTitle": "Caméra indisponible",
+    "busy": "Une autre application utilise peut-être la caméra. Fermez-la, puis réessayez.",
+    "unsupportedTitle": "Caméra non prise en charge",
+    "unsupported": "Ce navigateur ne peut pas utiliser la caméra. Ouvrez le lien dans Chrome.",
+    "unknownTitle": "Problème de caméra",
+    "unknown": "La caméra n'a pas pu démarrer. Réessayez."
+  },
+  "turnOver": {
+    "title": "Maintenant, le verso",
+    "body": "Le recto est pris. Retournez votre pièce pour photographier le verso.",
+    "continue": "Photographier le verso"
+  },
+  "review": {
+    "title": "Vérifiez la photo",
+    "alt": "Photo prise : {{side}}",
+    "checkIntro": "Vérifiez que :",
+    "checkSharp": "Tout le texte est net et lisible",
+    "checkGlare": "Aucun reflet ne cache le texte",
+    "checkWhole": "La pièce entière est visible",
+    "use": "Utiliser cette photo",
+    "useAnyway": "L'utiliser quand même",
+    "retake": "Reprendre la photo",
+    "refused": "Cette photo ne peut pas être utilisée. Reprenez-la.",
+    "lowResolution": "Cette photo manque de détails et ne peut pas être envoyée. Tenez votre téléphone à la verticale et reprenez-la. Si le problème persiste, utilisez un autre téléphone.",
+    "refusedOverride": "Cette photo semble floue ou présente un reflet. Reprenez-la si possible."
+  },
+  "upload": {
+    "title": "Envoi de vos photos",
+    "link": "Préparation de la photo {{n}} sur {{total}}…",
+    "send": "Envoi de la photo {{n}} sur {{total}}…",
+    "check": "Vérification de la photo {{n}} sur {{total}}…",
+    "submit": "Finalisation…",
+    "retrying": "Problème de connexion, nouvel essai ({{attempt}}/{{tries}})…",
+    "keepOpen": "Gardez cette page ouverte pendant l'envoi.",
+    "failedTitle": "Les photos n'ont pas pu être envoyées",
+    "progressLabel": "Progression de l'envoi"
+  },
+  "done": {
+    "title": "Photos reçues",
+    "next": "Prochaine étape : le contrôle du visage (arrive en M5).",
+    "close": "Vous pouvez maintenant revenir à l'application Confiance."
+  },
+  "sessionError": {
+    "invalidTitle": "Lien non valide",
+    "invalid": "Ce lien de vérification n'est pas valide ou a été mal copié.",
+    "expiredTitle": "Lien expiré",
+    "expired": "Ce lien de vérification a expiré. Par sécurité, les liens ne restent valables que peu de temps.",
+    "already_submittedTitle": "Déjà envoyé",
+    "already_submitted": "Les photos de cette vérification ont déjà été envoyées.",
+    "hint": "Revenez à l'application Confiance pour obtenir un nouveau lien.",
+    "testHint": "Vous testez ? Demandez un nouveau lien de test à un membre de l'équipe.",
+    "already_submittedClose": "Vos photos ont bien été reçues. Vous pouvez revenir à l'application Confiance."
+  },
+  "errors": {
+    "bad_request": "La demande n'a pas été acceptée. Réessayez.",
+    "unauthorized": "Votre accès a expiré. Rouvrez le lien depuis l'application Confiance.",
+    "forbidden": "Accès refusé.",
+    "forbidden_role": "Votre rôle ne permet pas cette action.",
+    "not_found": "Élément introuvable.",
+    "invalid_session": "Ce lien de vérification n'est pas valide.",
+    "session_expired": "Ce lien de vérification a expiré.",
+    "already_submitted": "Les photos de cette vérification ont déjà été envoyées.",
+    "consent_required": "Veuillez d'abord accepter les conditions.",
+    "document_type_required": "Veuillez d'abord choisir votre pièce d'identité.",
+    "invalid_kind": "Cette face n'est pas demandée pour cette pièce. Choisissez à nouveau votre pièce.",
+    "missing_sides": "Une photo manque. Reprenez les photos, s'il vous plaît.",
+    "too_many_uploads": "Trop de photos ont été envoyées pour cette vérification. Revenez à l'application Confiance pour recommencer.",
+    "upload_missing": "La photo n'est pas arrivée. Réessayez.",
+    "invalid_image": "Le fichier de la photo est abîmé. Reprenez la photo.",
+    "image_too_small": "Le fichier de la photo est trop petit (sans doute vide). Reprenez la photo.",
+    "image_too_large": "Le fichier de la photo est trop lourd. Reprenez la photo.",
+    "image_resolution_too_low": "La photo manque de détails. Tenez votre téléphone à la verticale et reprenez-la ; si le problème persiste, utilisez un autre téléphone.",
+    "audit_failed": "L'action n'a pas pu être enregistrée. Réessayez.",
+    "invalid_invite": "L'adresse e-mail ou le code d'invitation n'est pas valide.",
+    "weak_password": "Le mot de passe ne respecte pas les règles.",
+    "server_error": "Le serveur a rencontré un problème. Réessayez.",
+    "network": "Pas de connexion au serveur. Vérifiez vos données mobiles, puis réessayez.",
+    "timeout": "Le serveur met trop de temps à répondre. Vérifiez votre connexion, puis réessayez.",
+    "not_configured": "Cette version de test n'est reliée à aucun serveur.",
+    "unexpected": "Une erreur s'est produite. Réessayez.",
+    "storage_failed": "La photo n'a pas pu être envoyée. Réessayez."
+  },
+  "debug": {
+    "title": "Débogage",
+    "mode": "analyse",
+    "video": "vidéo",
+    "fps": "images/s",
+    "ms": "ms/image",
+    "sharpness": "netteté",
+    "focus": "mise au point",
+    "noise": "bruit",
+    "glare": "reflet",
+    "glareTile": "reflet max (tuile)",
+    "luma": "luminosité",
+    "framing": "cadrage",
+    "offset": "Décentrage / dépassement",
+    "confidence": "confiance",
+    "tilt": "Inclinaison",
+    "motion": "mouvement",
+    "hints": "conseils",
+    "file": "fichier",
+    "quality": "qualité JPEG",
+    "scale": "échelle",
+    "size": "dimensions",
+    "attempts": "essais"
+  },
+  "fatal": {
+    "title": "Un problème est survenu",
+    "text": "Rechargez la page pour continuer. Votre lien reste valable.",
+    "reload": "Recharger"
   }
 }

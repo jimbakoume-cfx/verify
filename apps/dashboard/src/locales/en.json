@@ -1,23 +1,199 @@
 {
-  "title": "KYC dashboard",
-  "intro": "Internal tool for the Confiance verification team: review queue, decisions, appeals and metrics.",
-  "staffOnly": "Authorised staff only. Every access is logged.",
-  "planned": {
-    "title": "Planned modules",
-    "queue": "Review queue sorted by priority and age",
-    "caseView": "Case view: ID document, selfie, extracted data and risk flags side by side",
-    "search": "Search by rider",
-    "metrics": "Metrics: volume, decision times, auto vs manual rate, rejection reasons",
-    "thresholds": "Decision threshold settings (no redeploy needed)",
-    "audit": "Audit log"
-  },
-  "signIn": "Sign in",
-  "comingSoon": "Test version: staff sign-in arrives in milestone M9.",
-  "build": "Build",
+  "build": "Build: {{id}}",
+  "loading": "Loading…",
+  "retry": "Try again",
   "server": {
     "checking": "Connecting to server…",
     "ok": "Server connected",
     "not-configured": "Server not configured",
     "unreachable": "Server unreachable"
+  },
+  "nav": {
+    "home": "Verify Ops home",
+    "signOut": "Sign out",
+    "signingOut": "Signing out…"
+  },
+  "roles": {
+    "reviewer": "Reviewer",
+    "supervisor": "Supervisor",
+    "admin": "Admin"
+  },
+  "fields": {
+    "email": "Email address",
+    "password": "Password",
+    "inviteCode": "Invite code",
+    "newPassword": "New password",
+    "confirmPassword": "Confirm password"
+  },
+  "signIn": {
+    "title": "Staff sign-in",
+    "intro": "Authorised Confiance staff only. Every access is logged.",
+    "submit": "Sign in",
+    "busy": "Signing in…",
+    "accountReady": "Your account is ready. Sign in with your new password.",
+    "firstTimeTitle": "First time here?",
+    "firstTimeBody": "An administrator gave you an invite code: use it to create your password.",
+    "setUp": "Set up my account",
+    "forgotten": "Forgotten your password? Ask an administrator for a new invite code, then choose “Set up my account”.",
+    "errors": {
+      "invalidCredentials": "Incorrect email address or password.",
+      "rateLimited": "Too many attempts. Wait a few minutes before trying again."
+    }
+  },
+  "enroll": {
+    "title": "Set up my account",
+    "intro": "Enter your work email address, the invite code an administrator gave you, and the password you want to use.",
+    "codeHint": "Dashes, spaces and capital letters do not matter.",
+    "showPasswords": "Show passwords",
+    "ruleLength": "Between {{min}} and {{max}} characters (currently {{length}})",
+    "ruleBytes": "At most {{maxBytes}} bytes: an accented letter counts 2, some symbols 3 or 4 (currently {{bytes}})",
+    "ruleNotEmailName": "Does not contain the part of your email before the @",
+    "ruleMatches": "Both passwords match",
+    "ruleMet": "(met)",
+    "ruleNotMet": "(not met yet)",
+    "submit": "Create my account",
+    "busy": "Creating your account…",
+    "back": "Back to sign-in"
+  },
+  "notConfigured": {
+    "title": "Server not configured",
+    "body": "This build of the dashboard has no Supabase settings (VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY). Tell the technical team."
+  },
+  "noAccess": {
+    "title": "No staff access yet",
+    "body": "You are signed in as {{email}}, but this account has no active staff profile.",
+    "next": "Ask an administrator to activate your access, then sign in again."
+  },
+  "profileError": {
+    "title": "Could not check your access"
+  },
+  "copy": {
+    "copied": "Link copied.",
+    "failed": "Could not copy: select the link and copy it by hand."
+  },
+  "testSession": {
+    "title": "Test sessions",
+    "intro": "Creates a rider link to try the capture flow on a phone. The session is flagged as a test and the link expires after a few minutes.",
+    "create": "New test session",
+    "creating": "Creating…",
+    "qrLabel": "QR code of the rider link",
+    "scan": "Scan this QR code with the phone's camera, or send the link to the phone.",
+    "linkLabel": "Rider link",
+    "copy": "Copy link",
+    "expiresIn": "Link expires in {{time}}",
+    "expired": "This link has expired. Create a new test session.",
+    "openCase": "Open this session's case"
+  },
+  "recent": {
+    "title": "Recent verifications",
+    "refresh": "Refresh",
+    "assignedOnly": "You only see the verifications assigned to you.",
+    "empty": "No verifications yet.",
+    "noDocument": "Document not chosen yet",
+    "photos_one": "{{count}} photo",
+    "photos_other": "{{count}} photos"
+  },
+  "badges": {
+    "test": "Test",
+    "linkExpired": "Link expired"
+  },
+  "status": {
+    "created": "Created",
+    "in_progress": "In progress",
+    "submitted": "Submitted",
+    "processing": "Processing",
+    "in_review": "In review",
+    "approved": "Approved",
+    "rejected": "Rejected",
+    "expired": "Expired",
+    "cancelled": "Cancelled"
+  },
+  "documents": {
+    "cni": "National ID card",
+    "passport": "Passport",
+    "residence_permit": "Residence permit",
+    "driving_licence": "Driving licence",
+    "voter_card": "Voter card"
+  },
+  "kinds": {
+    "document_front": "Front",
+    "document_back": "Back",
+    "selfie": "Selfie",
+    "liveness_frame": "Liveness frame"
+  },
+  "case": {
+    "back": "All verifications",
+    "title": "Verification {{id}}",
+    "notFoundTitle": "Case not found",
+    "notFoundBody": "This case does not exist or is not available to you.",
+    "document": "Declared document",
+    "created": "Created",
+    "submitted": "Submitted",
+    "notSubmitted": "Not submitted yet",
+    "riderLink": "Rider link",
+    "linkOpenUntil": "Valid until {{time}}",
+    "linkExpired": "Expired",
+    "linkUsed": "No longer usable (case submitted or closed)",
+    "reference": "Reference",
+    "photos": "Photos",
+    "noPhotos": "No photos uploaded yet.",
+    "viewsLogged": "Every photo view is recorded in the audit log. Each link works for 60 seconds.",
+    "viewPhoto": "View photo",
+    "opening": "Opening…",
+    "hidePhoto": "Hide photo",
+    "photoAlt": "ID document photo: {{kind}}",
+    "photoExpiresIn": "Photo disappears in {{time}}",
+    "photoExpired": "The link has expired.",
+    "photoRemoved": "The link expired and the photo was removed from the page. Open it again if needed.",
+    "photoLoadFailed": "The photo could not be loaded. The link may have expired: open it again.",
+    "photoLoading": "Loading the photo…"
+  },
+  "capture": {
+    "size": "Size",
+    "dimensions": "Dimensions (px)",
+    "sharpness": "Sharpness",
+    "glare": "Glare",
+    "brightness": "Brightness",
+    "framing": "Framing",
+    "camera": "Camera (px)",
+    "elapsed": "Time to capture",
+    "seconds": "{{value}} s",
+    "sha256": "SHA-256 fingerprint",
+    "reused": "Image already used in another verification",
+    "deleted": "Image erased",
+    "source": {
+      "auto": "Automatic capture",
+      "manual": "Manual capture"
+    }
+  },
+  "errors": {
+    "bad_request": "The request was not accepted. Check the details and try again.",
+    "unauthorized": "Your session has expired. Sign out, then sign in again.",
+    "forbidden": "Your account has no active staff access.",
+    "forbidden_role": "Your role does not allow this action.",
+    "not_found": "Not found, or not visible to you.",
+    "invalid_session": "This verification link is not valid.",
+    "session_expired": "This verification link has expired.",
+    "already_submitted": "This verification has already been submitted.",
+    "consent_required": "The rider has not given consent yet.",
+    "document_type_required": "The document type has not been chosen yet.",
+    "invalid_kind": "This side is not expected for this document.",
+    "missing_sides": "One or more sides of the document are missing.",
+    "too_many_uploads": "Too many uploads for this session.",
+    "upload_missing": "The uploaded photo could not be found.",
+    "invalid_image": "The file is not a valid JPEG image.",
+    "image_too_small": "The image file is too small.",
+    "image_too_large": "The image file is too large.",
+    "image_resolution_too_low": "The image resolution is too low.",
+    "audit_failed": "The access could not be recorded in the audit log, so the photo is not shown. Try again in a moment.",
+    "invalid_invite": "This invite code is not valid for this email address: it may be mistyped, expired or already used. Ask an administrator for a new code.",
+    "weak_password": "This password is not accepted. Use between {{min}} and {{max}} characters and at most {{maxBytes}} bytes (an accented letter counts 2), without the part of your email before the @, and avoid common passwords.",
+    "server_error": "Something went wrong on the server. Try again in a moment.",
+    "network": "Cannot reach the server. Check your connection and try again.",
+    "not_configured": "This build has no server settings. Tell the technical team.",
+    "enrollBadRequest": "Check the email address and the invite code.",
+    "testSessionRole": "Only supervisors and administrators can create test sessions.",
+    "adminNoImageAccess": "Administrators have no routine access to ID images. A supervisor or the assigned reviewer can open them.",
+    "photoNotFound": "This photo is no longer available, or this case is not assigned to you."
   }
 }

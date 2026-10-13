@@ -1,0 +1,18 @@
+# Supabase CLI settings for this project's Edge Functions (only what differs from the defaults).
+#
+# verify_jwt = false: both functions authenticate every request themselves, and the gateway's JWT
+# check would block legitimate callers that have no Supabase JWT.
+#   flow  - riders never sign in. Each request carries the single-use session token in the
+#           x-session-token header; the function looks up its SHA-256 and enforces expiry and status.
+#   admin - validates the staff access token itself (auth.getUser, then an active staff_profile),
+#           except POST /admin/enroll, which is public by design and protected by the one-time
+#           invite code (attempt-limited in the database).
+# import_map: both functions share supabase/functions/deno.json (pinned supabase-js).
+
+[functions.flow]
+verify_jwt = false
+import_map = "./functions/deno.json"
+
+[functions.admin]
+verify_jwt = false
+import_map = "./functions/deno.json"

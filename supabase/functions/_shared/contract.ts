@@ -49,8 +49,13 @@ export const CAPTURE_LIMITS = {
   maxBytes: 5 * 1024 * 1024,
   /** Longest side of the uploaded crop, in pixels. */
   maxLongSide: 1600,
-  /** Server rejects crops whose longest side is smaller (too little detail for OCR/MRZ). */
-  minLongSide: 800,
+  /**
+   * Server rejects crops whose longest side is smaller (too little detail for OCR/MRZ).
+   * 720 px across an ID-1 card is about 8.4 px/mm (MRZ characters about 20 px tall). 800 px excluded
+   * common 20:9 / 21:9 phones whose 1080p stream gives about 790 px when held upright.
+   * To be confirmed against real OCR results in M2/M3.
+   */
+  minLongSide: 720,
   /** Upload links a single session may request (bounds storage abuse). */
   maxUploadUrlsPerSession: 20,
 } as const;
@@ -154,8 +159,8 @@ export interface CaptureCompleteResponse {
   width: number;
   height: number;
   sha256: string;
-  /** True when the identical image was already uploaded in another verification. */
-  reusedElsewhere: boolean;
+  // Whether the same image was used in another verification is recorded server-side only
+  // (capture.quality.server.reusedElsewhere): telling the rider would let a fraudster probe for it.
 }
 
 // ---------------------------------------------------------------------------
@@ -168,7 +173,8 @@ export interface CaptureCompleteResponse {
 
 /** Staff passwords: at least this many characters (Supabase's own minimum is lower). */
 export const STAFF_PASSWORD_MIN_LENGTH = 12;
-export const STAFF_PASSWORD_MAX_LENGTH = 128;
+/** Supabase Auth (bcrypt) refuses passwords over 72 bytes; see also STAFF_PASSWORD_MAX_BYTES. */
+export const STAFF_PASSWORD_MAX_LENGTH = 72;
 
 export interface EnrollRequest {
   email: string;

@@ -1,23 +1,199 @@
 {
-  "title": "Tableau de bord KYC",
-  "intro": "Outil interne de l'équipe de vérification Confiance : file de revue, décisions, recours et indicateurs.",
-  "staffOnly": "Accès réservé au personnel autorisé. Chaque consultation est enregistrée.",
-  "planned": {
-    "title": "Modules prévus",
-    "queue": "File de revue triée par priorité et ancienneté",
-    "caseView": "Dossier : pièce d'identité, selfie, données extraites et alertes côte à côte",
-    "search": "Recherche par passager",
-    "metrics": "Indicateurs : volumes, délais, taux auto/manuel, motifs de refus",
-    "thresholds": "Réglage des seuils de décision (sans redéploiement)",
-    "audit": "Journal d'audit"
-  },
-  "signIn": "Se connecter",
-  "comingSoon": "Version de test : la connexion du personnel arrive à l'étape M9.",
-  "build": "Version",
+  "build": "Version : {{id}}",
+  "loading": "Chargement…",
+  "retry": "Réessayer",
   "server": {
     "checking": "Connexion au serveur…",
     "ok": "Serveur connecté",
     "not-configured": "Serveur non configuré",
     "unreachable": "Serveur injoignable"
+  },
+  "nav": {
+    "home": "Accueil Verify Ops",
+    "signOut": "Se déconnecter",
+    "signingOut": "Déconnexion…"
+  },
+  "roles": {
+    "reviewer": "Vérificateur",
+    "supervisor": "Superviseur",
+    "admin": "Administrateur"
+  },
+  "fields": {
+    "email": "Adresse e-mail",
+    "password": "Mot de passe",
+    "inviteCode": "Code d'invitation",
+    "newPassword": "Nouveau mot de passe",
+    "confirmPassword": "Confirmez le mot de passe"
+  },
+  "signIn": {
+    "title": "Connexion du personnel",
+    "intro": "Accès réservé au personnel autorisé de Confiance. Chaque consultation est enregistrée.",
+    "submit": "Se connecter",
+    "busy": "Connexion…",
+    "accountReady": "Votre compte est prêt. Connectez-vous avec votre nouveau mot de passe.",
+    "firstTimeTitle": "Première connexion ?",
+    "firstTimeBody": "Un administrateur vous a remis un code d'invitation : utilisez-le pour créer votre mot de passe.",
+    "setUp": "Configurer mon compte",
+    "forgotten": "Mot de passe oublié : demandez un nouveau code d'invitation à un administrateur, puis choisissez « Configurer mon compte ».",
+    "errors": {
+      "invalidCredentials": "Adresse e-mail ou mot de passe incorrect.",
+      "rateLimited": "Trop de tentatives. Patientez quelques minutes avant de réessayer."
+    }
+  },
+  "enroll": {
+    "title": "Configurer mon compte",
+    "intro": "Saisissez votre adresse e-mail professionnelle, le code d'invitation reçu d'un administrateur et le mot de passe de votre choix.",
+    "codeHint": "Les tirets, les espaces et les majuscules ne comptent pas.",
+    "showPasswords": "Afficher les mots de passe",
+    "ruleLength": "Entre {{min}} et {{max}} caractères (actuellement {{length}})",
+    "ruleBytes": "Au plus {{maxBytes}} octets : une lettre accentuée compte 2, certains symboles 3 ou 4 (actuellement {{bytes}})",
+    "ruleNotEmailName": "Ne contient pas la partie de votre e-mail avant le @",
+    "ruleMatches": "Les deux mots de passe sont identiques",
+    "ruleMet": "(respecté)",
+    "ruleNotMet": "(pas encore respecté)",
+    "submit": "Créer mon compte",
+    "busy": "Création du compte…",
+    "back": "Retour à la connexion"
+  },
+  "notConfigured": {
+    "title": "Serveur non configuré",
+    "body": "Cette version du tableau de bord a été construite sans les paramètres Supabase (VITE_SUPABASE_URL et VITE_SUPABASE_PUBLISHABLE_KEY). Prévenez l'équipe technique."
+  },
+  "noAccess": {
+    "title": "Pas encore d'accès personnel",
+    "body": "Vous êtes connecté avec {{email}}, mais ce compte n'a pas de profil personnel actif.",
+    "next": "Demandez à un administrateur d'activer votre accès, puis reconnectez-vous."
+  },
+  "profileError": {
+    "title": "Impossible de vérifier votre accès"
+  },
+  "copy": {
+    "copied": "Lien copié.",
+    "failed": "Copie impossible : sélectionnez le lien et copiez-le à la main."
+  },
+  "testSession": {
+    "title": "Sessions de test",
+    "intro": "Crée un lien passager pour essayer la capture sur un téléphone. La session est marquée comme test et le lien expire au bout de quelques minutes.",
+    "create": "Nouvelle session de test",
+    "creating": "Création…",
+    "qrLabel": "QR code du lien passager",
+    "scan": "Scannez ce QR code avec l'appareil photo du téléphone, ou envoyez-lui le lien.",
+    "linkLabel": "Lien passager",
+    "copy": "Copier le lien",
+    "expiresIn": "Le lien expire dans {{time}}",
+    "expired": "Ce lien a expiré. Créez une nouvelle session de test.",
+    "openCase": "Ouvrir le dossier de cette session"
+  },
+  "recent": {
+    "title": "Vérifications récentes",
+    "refresh": "Actualiser",
+    "assignedOnly": "Vous ne voyez que les vérifications qui vous sont assignées.",
+    "empty": "Aucune vérification pour le moment.",
+    "noDocument": "Document pas encore choisi",
+    "photos_one": "{{count}} photo",
+    "photos_other": "{{count}} photos"
+  },
+  "badges": {
+    "test": "Test",
+    "linkExpired": "Lien expiré"
+  },
+  "status": {
+    "created": "Créée",
+    "in_progress": "En cours",
+    "submitted": "Envoyée",
+    "processing": "En traitement",
+    "in_review": "En revue",
+    "approved": "Approuvée",
+    "rejected": "Refusée",
+    "expired": "Expirée",
+    "cancelled": "Annulée"
+  },
+  "documents": {
+    "cni": "Carte nationale d'identité",
+    "passport": "Passeport",
+    "residence_permit": "Titre de séjour",
+    "driving_licence": "Permis de conduire",
+    "voter_card": "Carte d'électeur"
+  },
+  "kinds": {
+    "document_front": "Recto",
+    "document_back": "Verso",
+    "selfie": "Selfie",
+    "liveness_frame": "Image du test de présence"
+  },
+  "case": {
+    "back": "Toutes les vérifications",
+    "title": "Vérification {{id}}",
+    "notFoundTitle": "Dossier introuvable",
+    "notFoundBody": "Ce dossier n'existe pas ou ne vous est pas accessible.",
+    "document": "Document déclaré",
+    "created": "Créée le",
+    "submitted": "Envoyée le",
+    "notSubmitted": "Pas encore envoyée",
+    "riderLink": "Lien passager",
+    "linkOpenUntil": "Valable jusqu'au {{time}}",
+    "linkExpired": "Expiré",
+    "linkUsed": "Plus utilisable (dossier envoyé ou clos)",
+    "reference": "Référence",
+    "photos": "Photos",
+    "noPhotos": "Aucune photo envoyée pour le moment.",
+    "viewsLogged": "Chaque ouverture de photo est enregistrée dans le journal d'audit. Le lien est valable 60 secondes.",
+    "viewPhoto": "Voir la photo",
+    "opening": "Ouverture…",
+    "hidePhoto": "Masquer la photo",
+    "photoAlt": "Photo de la pièce d'identité : {{kind}}",
+    "photoExpiresIn": "La photo disparaît dans {{time}}",
+    "photoExpired": "Le lien a expiré.",
+    "photoRemoved": "Le lien a expiré et la photo a été retirée de la page. Rouvrez-la si besoin.",
+    "photoLoadFailed": "La photo n'a pas pu être chargée. Le lien a peut-être expiré : rouvrez-la.",
+    "photoLoading": "Chargement de la photo…"
+  },
+  "capture": {
+    "size": "Taille",
+    "dimensions": "Dimensions (px)",
+    "sharpness": "Netteté",
+    "glare": "Reflets",
+    "brightness": "Luminosité",
+    "framing": "Cadrage",
+    "camera": "Caméra (px)",
+    "elapsed": "Temps de capture",
+    "seconds": "{{value}} s",
+    "sha256": "Empreinte SHA-256",
+    "reused": "Image déjà utilisée dans une autre vérification",
+    "deleted": "Image effacée",
+    "source": {
+      "auto": "Capture automatique",
+      "manual": "Capture manuelle"
+    }
+  },
+  "errors": {
+    "bad_request": "La demande n'a pas été acceptée. Vérifiez les informations et réessayez.",
+    "unauthorized": "Votre session a expiré. Déconnectez-vous puis reconnectez-vous.",
+    "forbidden": "Votre compte n'a pas d'accès personnel actif.",
+    "forbidden_role": "Votre rôle ne permet pas cette action.",
+    "not_found": "Introuvable, ou non visible pour vous.",
+    "invalid_session": "Ce lien de vérification n'est pas valide.",
+    "session_expired": "Ce lien de vérification a expiré.",
+    "already_submitted": "Cette vérification a déjà été envoyée.",
+    "consent_required": "Le passager n'a pas encore donné son consentement.",
+    "document_type_required": "Le type de document n'a pas encore été choisi.",
+    "invalid_kind": "Cette face n'est pas attendue pour ce document.",
+    "missing_sides": "Il manque une ou plusieurs faces du document.",
+    "too_many_uploads": "Trop d'envois pour cette session.",
+    "upload_missing": "La photo envoyée est introuvable.",
+    "invalid_image": "Le fichier n'est pas une image JPEG valide.",
+    "image_too_small": "Le fichier image est trop petit.",
+    "image_too_large": "Le fichier image est trop volumineux.",
+    "image_resolution_too_low": "La résolution de l'image est trop faible.",
+    "audit_failed": "L'accès n'a pas pu être enregistré dans le journal d'audit : la photo n'est donc pas affichée. Réessayez dans un instant.",
+    "invalid_invite": "Ce code d'invitation n'est pas valide pour cette adresse e-mail : il est peut-être mal saisi, expiré ou déjà utilisé. Demandez un nouveau code à un administrateur.",
+    "weak_password": "Ce mot de passe n'est pas accepté. Utilisez entre {{min}} et {{max}} caractères et au plus {{maxBytes}} octets (une lettre accentuée compte 2), sans la partie de votre e-mail avant le @, et évitez les mots de passe courants.",
+    "server_error": "Un problème est survenu sur le serveur. Réessayez dans un instant.",
+    "network": "Impossible de joindre le serveur. Vérifiez votre connexion et réessayez.",
+    "not_configured": "Cette version n'a pas de paramètres serveur. Prévenez l'équipe technique.",
+    "enrollBadRequest": "Vérifiez l'adresse e-mail et le code d'invitation.",
+    "testSessionRole": "Seuls les superviseurs et les administrateurs peuvent créer des sessions de test.",
+    "adminNoImageAccess": "Les administrateurs n'ont pas d'accès courant aux images des pièces d'identité. Un superviseur ou le vérificateur assigné peut les ouvrir.",
+    "photoNotFound": "Cette photo n'est plus disponible, ou ce dossier ne vous est pas assigné."
   }
 }

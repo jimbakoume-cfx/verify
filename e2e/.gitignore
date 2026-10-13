@@ -1,0 +1,2 @@
+# Build, test results and report written by Playwright (npm run e2e).
+/out/

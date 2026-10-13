@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   web:
-    name: Web apps (typecheck, tests, build, licences)
+    name: Web apps and Edge Functions (typecheck, lint, tests, build, licences)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -21,8 +21,39 @@ jobs:
       - run: npm ci
       - run: npm run licenses
       - run: npm run typecheck
+      # Deno comes from devDependencies (pinned in the lockfile). The workspace tsconfigs do not cover
+      # supabase/functions and vitest does not type-check, so Deno checks the entrypoints and the tests.
+      - name: Edge Functions type check (Deno)
+        run: npx deno check supabase/functions/flow/index.ts supabase/functions/admin/index.ts supabase/functions/*/*.test.ts
+      - name: Edge Functions lint (Deno)
+        run: npx deno lint supabase/functions
       - run: npm test
       - run: npm run build
+
+  e2e:
+    name: Rider capture flow in Chromium (fake camera, emulated backend)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # Playwright's own Chromium, matching the @playwright/test version in the lockfile.
+      - run: npx playwright install --with-deps chromium
+      # python3 (preinstalled) writes the fake camera videos; the tests build and serve the rider app.
+      - run: npm run e2e
+      - name: Upload the Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: |
+            e2e/out/report
+            e2e/out/results
+          retention-days: 14
 
   database:
     name: Database schema and security rules
