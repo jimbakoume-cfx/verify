@@ -7,7 +7,9 @@ import {
   parseTtlMinutes,
   readConfig,
   resolveServiceKey,
+  withDefaults,
 } from "./config.ts";
+import { TEST_ENVIRONMENT_DEFAULTS } from "./environment.ts";
 
 describe("parseAllowedOrigins", () => {
   it("keeps exact origins, trimmed, without a trailing slash", () => {
@@ -103,5 +105,24 @@ describe("configProblems", () => {
     expect(configProblems({ ...good, allowedOrigins: new Set() })).toHaveLength(1);
     expect(configProblems({ ...good, riderAppUrl: null })).toEqual([]);
     expect(configProblems({ ...good, riderAppUrl: null }, { needsRiderAppUrl: true })).toHaveLength(1);
+  });
+});
+
+describe("withDefaults", () => {
+  const env = (values: Record<string, string>) => (name: string) => values[name];
+
+  it("uses the environment value when set", () => {
+    const get = withDefaults(env({ RIDER_APP_URL: "https://riders.example" }), TEST_ENVIRONMENT_DEFAULTS);
+    expect(readConfig(get).riderAppUrl).toBe("https://riders.example");
+  });
+
+  it("falls back to the test-environment defaults when unset or blank", () => {
+    const config = readConfig(withDefaults(env({ ALLOWED_ORIGINS: "  " }), TEST_ENVIRONMENT_DEFAULTS));
+    expect(config.riderAppUrl).toBe("https://confiance-verify.netlify.app");
+    expect([...config.allowedOrigins].sort()).toEqual([
+      "https://confiance-verify-ops.netlify.app",
+      "https://confiance-verify.netlify.app",
+    ]);
+    expect(configProblems(config, { needsRiderAppUrl: true })).toEqual([]);
   });
 });

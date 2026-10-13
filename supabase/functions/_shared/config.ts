@@ -23,6 +23,14 @@ export interface FunctionConfig {
   testSessionTtlMinutes: number;
 }
 
+/** Reads `get`, falling back to `defaults` for variables that are unset or blank. */
+export function withDefaults(get: EnvReader, defaults: Readonly<Record<string, string>>): EnvReader {
+  return (name) => {
+    const value = get(name);
+    return value !== undefined && value.trim() !== "" ? value : defaults[name];
+  };
+}
+
 export function readConfig(get: EnvReader): FunctionConfig {
   return {
     allowedOrigins: parseAllowedOrigins(get("ALLOWED_ORIGINS")),

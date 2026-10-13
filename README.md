@@ -65,7 +65,9 @@ Both sites build from the repository root using the root `netlify.toml`. Each si
 Security headers and page routing ship with each app (`apps/*/public/_headers`, `_redirects`). The sites are private: you must be logged in to the Netlify team to open them.
 
 ### Edge Function settings (Supabase secrets)
-Both functions are deployed with `verify_jwt = false` (`supabase/config.toml`): they check the rider's session token or the staff member's sign-in themselves. Supabase provides `SUPABASE_URL` and the service key; set these secrets:
+Both functions are deployed with `verify_jwt = false` (`supabase/config.toml`): they check the rider's session token or the staff member's sign-in themselves. Supabase provides `SUPABASE_URL` and the service key.
+
+The hosted **test** environment needs no secrets: when `ALLOWED_ORIGINS` or `RIDER_APP_URL` is unset, the functions fall back to the public test-site URLs in `supabase/functions/_shared/environment.ts`. **Production must set them explicitly:**
 
 | Secret | Value | Used by |
 |---|---|---|
