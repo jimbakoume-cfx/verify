@@ -56,7 +56,7 @@ do $$ begin
 exception when insufficient_privilege then raise notice 'ok: anon cannot read verification';
 end $$;
 do $$ begin
-  perform public.current_staff_role();
+  perform private.current_staff_role();
   raise exception 'FAIL: anon could call current_staff_role()';
 exception when insufficient_privilege then raise notice 'ok: anon cannot call role helper';
 end $$;

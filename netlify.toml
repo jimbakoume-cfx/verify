@@ -1,0 +1,13 @@
+# One config for both Netlify sites. Each site sets the VERIFY_APP environment variable:
+#   confiance-verify      -> VERIFY_APP=rider      (rider verification flow)
+#   confiance-verify-ops  -> VERIFY_APP=dashboard  (staff ops dashboard)
+# Security headers and SPA routing live in each app's public/_headers and public/_redirects.
+[build]
+  command = "test -n \"$VERIFY_APP\" && npm run build -w @verify/$VERIFY_APP && rm -rf dist && cp -r apps/$VERIFY_APP/dist dist"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "22"
+  # These two values are public by design (they ship to every browser), so the secret
+  # scanner is told to ignore them. Real secrets must never be VITE_* variables.
+  SECRETS_SCAN_OMIT_KEYS = "VITE_SUPABASE_URL,VITE_SUPABASE_PUBLISHABLE_KEY"

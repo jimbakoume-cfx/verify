@@ -14,3 +14,4 @@ test-data/
 *.png
 *.heic
 !apps/*/public/*.png
+.netlify/

@@ -48,9 +48,8 @@ DATABASE_URL=postgres://postgres:pw@localhost:5432/postgres scripts/test-db.sh  
 Supabase settings go in `apps/*/.env.local` (see `.env.example`). Only the **publishable** key belongs in the web apps. The service-role key must never be committed or put in a web app.
 
 ### Netlify setup (one site per app)
-For each app, create a Netlify site from this GitHub repository with:
-- **Base directory:** *(empty, repository root)*
-- **Package directory:** `apps/rider` or `apps/dashboard`
-- **Environment variables:** `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`
+Both sites build from the repository root using the root `netlify.toml`. Each site needs these environment variables:
+- `VERIFY_APP`: `rider` (site `confiance-verify`) or `dashboard` (site `confiance-verify-ops`)
+- `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`: public values from the Supabase project
 
-Build commands, headers and security settings come from each app's `netlify.toml`.
+Security headers and page routing ship with each app (`apps/*/public/_headers`, `_redirects`). The sites are private: you must be logged in to the Netlify team to open them.
