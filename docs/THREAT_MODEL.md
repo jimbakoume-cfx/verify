@@ -48,5 +48,5 @@ This is a starting point for the **human security engineer**, who must review it
 - Column encryption design for `extracted_document_data` (M2/M3).
 - Supabase Auth settings: 2FA enforcement, session lifetime, password policy, SSO.
 - Virtual camera / injected video detection for liveness.
-- Data residency (Supabase EU region) and contracts with Supabase and Netlify (with the lawyer).
+- Data residency (Supabase EU region) and contracts with Supabase and Vercel (with the lawyer). The test sites on Vercel are public (no data on them; access needs a session link or a staff sign-in); consider Vercel deployment protection before real riders.
 - Backups: they also contain images, so deletion must cover them.

@@ -10,8 +10,8 @@ In-house identity verification (KYC) for Confiance riders. It is a standalone we
 
 | Folder | What it is |
 |---|---|
-| `apps/rider` | The rider's verification flow (mobile web page, FR/EN), hosted on Netlify |
-| `apps/dashboard` | The internal ops dashboard for the KYC team, hosted on Netlify |
+| `apps/rider` | The rider's verification flow (mobile web page, FR/EN), hosted on Vercel: https://confiance-verify.vercel.app |
+| `apps/dashboard` | The internal ops dashboard for the KYC team, hosted on Vercel: https://confiance-verify-ops.vercel.app |
 | `packages/capture` | The camera quality engine: blur, glare, brightness and framing checks, card detection, auto-capture, compression (pure TypeScript, runs in the rider's browser) |
 | `packages/shared` | Code shared by both apps: languages, branding, Supabase connection, and the HTTP contract re-exported from `supabase/functions/_shared/contract.ts` |
 | `supabase/functions` | Edge Functions: `flow` (the rider's session API) and `admin` (staff enrollment, test sessions, audited photo links) |
@@ -33,7 +33,7 @@ In-house identity verification (KYC) for Confiance riders. It is a standalone we
 2. On the dashboard, choose **Set up my account**, then enter your email, the invite code and a new password (12 characters or more). Next time, just sign in with email and password.
    Forgotten password, or an invite that expired or was locked after 5 wrong codes: the administrator runs the same statement again with a new code (it updates the existing invite and resets its counter), and you choose **Set up my account** again; your account and role are kept.
 3. Press **New test session**: a QR code and a rider link appear, valid for 30 minutes.
-4. On your phone, scan the QR code or open the link. Both Netlify sites ask for a Netlify team login, which can lose the link's `#s=…` part, so log in on the phone first (open the rider site once), then open the link again.
+4. On your phone, scan the QR code or open the link (it opens the rider site, https://confiance-verify.vercel.app).
 5. Follow the rider flow: consent, document choice, front (and back), review, upload, done. Try good and bad light: bad photos get a clear hint.
 6. Back on the dashboard, open the case and press **View photo** for each side. Each view is recorded in the audit log, and the photo disappears after 60 seconds.
 
@@ -57,12 +57,14 @@ DATABASE_URL=postgres://postgres:pw@localhost:5432/postgres scripts/test-db.sh  
 
 Supabase settings go in `apps/*/.env.local` (see `.env.example`). Only the **publishable** key belongs in the web apps. The service-role key must never be committed or put in a web app.
 
-### Netlify setup (one site per app)
-Both sites build from the repository root using the root `netlify.toml`. Each site needs these environment variables:
-- `VERIFY_APP`: `rider` (site `confiance-verify`) or `dashboard` (site `confiance-verify-ops`)
-- `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`: public values from the Supabase project
+### Hosting (Vercel, test environment)
+Both sites are static builds published to the Vercel team "JB":
+- rider: https://confiance-verify.vercel.app (project `confiance-verify`)
+- dashboard: https://confiance-verify-ops.vercel.app (project `confiance-verify-ops`)
 
-Security headers and page routing ship with each app (`apps/*/public/_headers`, `_redirects`). The sites are private: you must be logged in to the Netlify team to open them.
+To publish: build the app with `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` set (public values from the Supabase project), copy `apps/<app>/vercel.json` into `apps/<app>/dist`, then run `vercel deploy --prod --scope suivix` from that folder. `vercel.json` carries the security headers and page routing; a test keeps it in sync with the Netlify files (`public/_headers`, `_redirects`, root `netlify.toml`), which still work if the sites move back to Netlify.
+
+The sites themselves hold no data: riders need a session link from staff, and the dashboard needs a staff sign-in.
 
 ### Edge Function settings (Supabase secrets)
 Both functions are deployed with `verify_jwt = false` (`supabase/config.toml`): they check the rider's session token or the staff member's sign-in themselves. Supabase provides `SUPABASE_URL` and the service key.
@@ -71,8 +73,8 @@ The hosted **test** environment needs no secrets: when `ALLOWED_ORIGINS` or `RID
 
 | Secret | Value | Used by |
 |---|---|---|
-| `ALLOWED_ORIGINS` | `https://confiance-verify.netlify.app,https://confiance-verify-ops.netlify.app` | both: browser origins allowed to call them, matched exactly (no wildcards). Add a Netlify preview origin such as `https://deploy-preview-12--confiance-verify.netlify.app`, or `http://localhost:5173` for local development, while you need it. |
-| `RIDER_APP_URL` | `https://confiance-verify.netlify.app` | `admin`: base of the rider link (`<RIDER_APP_URL>/#s=<token>`) |
+| `ALLOWED_ORIGINS` | `https://confiance-verify.vercel.app,https://confiance-verify-ops.vercel.app` | both: browser origins allowed to call them, matched exactly (no wildcards). Add a preview origin such as `https://confiance-verify-abc123-suivix.vercel.app`, or `http://localhost:5173` for local development, while you need it. |
+| `RIDER_APP_URL` | `https://confiance-verify.vercel.app` | `admin`: base of the rider link (`<RIDER_APP_URL>/#s=<token>`) |
 | `TEST_SESSION_TTL_MINUTES` | optional, default `30` | `admin`: lifetime of a test session |
 
 When a required secret is missing, the function refuses the requests that need it and logs a warning at startup.

@@ -118,10 +118,10 @@ describe("withDefaults", () => {
 
   it("falls back to the test-environment defaults when unset or blank", () => {
     const config = readConfig(withDefaults(env({ ALLOWED_ORIGINS: "  " }), TEST_ENVIRONMENT_DEFAULTS));
-    expect(config.riderAppUrl).toBe("https://confiance-verify.netlify.app");
+    expect(config.riderAppUrl).toBe("https://confiance-verify.vercel.app");
     expect([...config.allowedOrigins].sort()).toEqual([
-      "https://confiance-verify-ops.netlify.app",
-      "https://confiance-verify.netlify.app",
+      "https://confiance-verify-ops.vercel.app",
+      "https://confiance-verify.vercel.app",
     ]);
     expect(configProblems(config, { needsRiderAppUrl: true })).toEqual([]);
   });
