@@ -159,10 +159,29 @@ export interface CaptureCompleteResponse {
 }
 
 // ---------------------------------------------------------------------------
-// Admin API (staff dashboard). Edge Function "admin". Auth: `Authorization: Bearer <staff access token>`.
-//   POST /admin/test-sessions  TestSessionRequest -> TestSessionResponse   (supervisor or admin)
-//   POST /admin/captures/view  CaptureViewRequest -> CaptureViewResponse   (supervisor, or the assigned reviewer; never admin)
+// Admin API (staff dashboard). Edge Function "admin".
+//   POST /admin/enroll         EnrollRequest -> EnrollResponse             (public: proves possession of a one-time invite code)
+//   POST /admin/test-sessions  TestSessionRequest -> TestSessionResponse   (staff token; supervisor or admin)
+//   POST /admin/captures/view  CaptureViewRequest -> CaptureViewResponse   (staff token; supervisor, or the assigned reviewer; never admin)
+// Staff token = `Authorization: Bearer <access token>` from supabase.auth.signInWithPassword.
 // ---------------------------------------------------------------------------
+
+/** Staff passwords: at least this many characters (Supabase's own minimum is lower). */
+export const STAFF_PASSWORD_MIN_LENGTH = 12;
+export const STAFF_PASSWORD_MAX_LENGTH = 128;
+
+export interface EnrollRequest {
+  email: string;
+  /** One-time invite code given to the new staff member by an administrator. */
+  code: string;
+  password: string;
+}
+
+export interface EnrollResponse {
+  /** The account is ready; sign in with signInWithPassword(email, password). */
+  ok: true;
+}
+
 export interface TestSessionRequest {
   locale?: "fr" | "en";
 }
@@ -207,6 +226,8 @@ export const ERROR_CODES = [
   "image_too_large",
   "image_resolution_too_low",
   "audit_failed",
+  "invalid_invite",
+  "weak_password",
   "server_error",
 ] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number];

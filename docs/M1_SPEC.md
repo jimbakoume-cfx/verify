@@ -5,7 +5,8 @@ Goal (from `PLAN.md`): live camera with a card frame, blur / glare / framing hin
 The HTTP contract (types, limits, error codes) is `supabase/functions/_shared/contract.ts`. It is the single source of truth; web apps import it via `@verify/shared` (`packages/shared/src/flowApi.ts`). **Do not redefine these types elsewhere.**
 
 ## End-to-end test flow (what the PM does)
-1. Signs in to the dashboard (`apps/dashboard`) with a magic link (Supabase Auth, email). Access requires a `staff_invite` for that email; the staff profile is created automatically once the email is confirmed.
+1. First time only: an administrator creates a `staff_invite` (email, role, one-time code; only the code's SHA-256 is stored). The PM opens the dashboard, chooses **Set up my account**, and enters email + invite code + a new password (≥ 12 characters) → `POST /admin/enroll` creates a confirmed Supabase Auth user and the `staff_profile`. No email is sent, so no Supabase Auth URL configuration is needed.
+   Afterwards: sign in with email + password (`signInWithPassword`).
 2. Presses **New test session** → `POST /admin/test-sessions` → gets a rider link + QR code.
 3. Opens the link on the phone → rider flow: consent (placeholder wording) → choose document → capture front (→ back) → review → upload → done.
 4. Back on the dashboard, opens the case and views each photo through `POST /admin/captures/view` (audited, 60-second signed link).
@@ -20,12 +21,16 @@ Riders never sign in. Production sessions will be created by the Confiance backe
 ## Database changes (migration `supabase/migrations/20261014000000_m1_capture.sql`)
 - `verification`: add `declared_document text` (check in the 5 `DECLARED_DOCUMENTS`), `is_test boolean not null default false`, `upload_url_count integer not null default 0`.
   - `document_type` (enum) stays reserved for the classifier result in M3.
-- `staff_invite(email text primary key — stored lower-case, role staff_role not null, full_name text not null, invited_by uuid null references auth.users, created_at, accepted_at)`. RLS enabled; only admins can read.
-- Trigger on `auth.users` (after insert or update of `email_confirmed_at`): when `email_confirmed_at is not null` and an un-accepted invite matches `lower(email)`, insert `staff_profile` (role, full_name) if missing and set `accepted_at`. SECURITY DEFINER, `set search_path = ''`, function in schema `private`, execute revoked from public/anon/authenticated.
+- `staff_invite(email text primary key, check email = lower(email); role staff_role not null; full_name text not null; code_hash text not null (sha256 hex of the one-time code); expires_at timestamptz not null; failed_attempts integer not null default 0; invited_by uuid null references auth.users; created_at; accepted_at; accepted_user_id uuid null references auth.users)`. RLS enabled; only admins can read; no write policies (service role only). **No trigger on `auth.users`**: enrollment is explicit (below).
+- Enrollment RPCs (SECURITY DEFINER, `set search_path = ''`, execute revoked from public/anon/authenticated, granted to service_role only):
+  - `public.staff_invite_verify(p_email text, p_code_hash text) returns text`: `'ok'` when an invite exists for `lower(p_email)` with `accepted_at is null`, `expires_at > now()`, `failed_attempts < 5`, and a matching `code_hash`. On a code mismatch for an existing, open invite, increment `failed_attempts` and return `'invalid'`. Every other failure also returns `'invalid'`: no difference between "no invite", "expired", "used" and "locked".
+  - `public.staff_invite_accept(p_email text, p_code_hash text, p_user_id uuid) returns text`: in one transaction, locks the invite row and re-checks it exactly as verify does (failure → `'invalid'`, with no attempt increment here). It inserts `staff_profile(user_id, role, full_name)` (if a profile already exists for that user, keep it unchanged), sets `accepted_at` and `accepted_user_id`, writes audit `staff.enroll` (actor_type `staff`, actor_id = user id, target_type `staff_profile`, target_id = user id; details hold the role, never the code), and returns `'ok'`.
+  - `public.staff_find_auth_user(p_email text) returns table(user_id uuid, email_confirmed boolean)`: looks up `auth.users` by `lower(email)`. It is used by enroll to handle an auth user that already exists, for example from a stranger's unconfirmed sign-up attempt or an earlier half-finished enrollment.
 - Tests: `supabase/tests/20_m1_test.sql`. Update the stub (`00_supabase_stub.sql`) so `auth.users` has `email_confirmed_at timestamptz` and `raw_user_meta_data jsonb default '{}'`. Cover:
-  - an invited user gets a profile only after confirmation, with a case-insensitive email match;
-  - an uninvited user gets nothing;
-  - an invite is used once;
+  - `staff_invite_verify`: ok; wrong code (increments attempts); locked after 5; expired; accepted; unknown email; case-insensitive email;
+  - `staff_invite_accept`: ok, then a second call returns invalid; an existing profile is not overwritten; audit row written without the code;
+  - `staff_find_auth_user`;
+  - anon/authenticated cannot execute any of these RPCs;
   - the `staff_invite` RLS rules;
   - the new columns' constraints.
 
@@ -44,7 +49,7 @@ admin/handler.ts, admin/repo.ts, admin/index.ts   same pattern
 deno.json             import map: "@supabase/supabase-js": "npm:@supabase/supabase-js@2.117.2"
 ```
 - Relative imports use explicit `.ts` extensions (Deno requirement; Vite/vitest accept them too).
-- Both functions are deployed with `verify_jwt = false`: `flow` authenticates with the session token, `admin` validates the staff access token itself (`auth.getUser(token)`, then an active `staff_profile`).
+- Both functions are deployed with `verify_jwt = false`: `flow` authenticates with the session token; `admin` validates the staff access token itself (`auth.getUser(token)`, then an active `staff_profile`), except `/enroll`, which is public and protected by the invite code.
 - Every non-2xx body is `{ error: { code, message } }` using `ERROR_CODES`. Never leak internal errors or stack traces; log them server-side.
 - **CORS:** handle `OPTIONS` preflight. Allow only origins in `ALLOWED_ORIGINS`. Allowed headers: `content-type, authorization, apikey, x-session-token`. Methods: `GET, POST, OPTIONS`.
 
@@ -80,7 +85,13 @@ Route = path after `/flow` (Supabase passes the full path `/flow/...`; tolerate 
   - returns `FlowSession`.
 
 ### admin (staff)
-- Auth: `Authorization: Bearer <access_token>` → `auth.getUser(token)` → active `staff_profile`. Otherwise `401 unauthorized`, or `403 forbidden` when there is no staff profile.
+- `POST /enroll {email, code, password}` (public, no bearer token):
+  - normalise the email (trim, lower-case; max 254 characters, basic format). Password length must be within `STAFF_PASSWORD_MIN_LENGTH`..`STAFF_PASSWORD_MAX_LENGTH`, else `400 weak_password`; it must not contain the email's local part (`400 weak_password`). The code is trimmed and upper-cased, with spaces and dashes removed, then hashed: `code_hash = sha256Hex(normalisedCode)`;
+  - `staff_invite_verify` → anything but `'ok'` → `403 invalid_invite`, with the same message for every cause;
+  - `staff_find_auth_user(email)`: when no user exists, `auth.admin.createUser({email, password, email_confirm: true})`; when one exists, `auth.admin.updateUserById(id, {password, email_confirm: true})`. Holding the invite code proves the right to this address;
+  - `staff_invite_accept(email, code_hash, user_id)` → `'ok'` → `200 {ok: true}`; otherwise `403 invalid_invite`;
+  - never log the email, the code or the password.
+- Every other route — auth: `Authorization: Bearer <access_token>` → `auth.getUser(token)` → active `staff_profile`. Otherwise `401 unauthorized`, or `403 forbidden` when there is no staff profile.
 - `POST /test-sessions {locale?}`:
   - role `supervisor` or `admin`;
   - ensures an `api_client` named `internal-test` exists (`api_key_hash` = `disabled:` + random hex, so it can never authenticate);
@@ -174,11 +185,9 @@ Public types are in `packages/capture/src/types.ts` (exists). Implement and expo
 - Unit tests for pure logic: session token parsing from the hash, the state machine reducer, error-to-message mapping, and FR/EN key parity.
 
 ## Dashboard (`apps/dashboard`)
-- `getSupabase` gains options. The dashboard uses `auth: {persistSession: true, detectSessionInUrl: true, flowType: 'pkce'}`; the rider app uses `auth: {persistSession: false, autoRefreshToken: false, detectSessionInUrl: false}`.
-- **Sign-in:**
-  - email field → `signInWithOtp({email, options: {emailRedirectTo: window.location.origin, shouldCreateUser: true}})`;
-  - "Check your email" state; sign-out;
-  - note that the link must be opened in the same browser.
+- `configureSupabase` sets per-app options. The dashboard uses `auth: {persistSession: true, autoRefreshToken: true, detectSessionInUrl: false}`; the rider app uses `auth: {persistSession: false, autoRefreshToken: false, detectSessionInUrl: false}`.
+- **Sign-in:** email + password → `signInWithPassword`. Show one generic error for wrong credentials. Include sign-out.
+- **Set up my account** (first time): email, invite code, new password, and password confirmation, with live rules (≥ 12 characters, passwords match). It calls `POST /admin/enroll`, then signs in automatically with `signInWithPassword`. Map `invalid_invite` and `weak_password` to clear FR/EN messages.
 - **Access gate:** read your own `staff_profile`. If it is missing or inactive, show a "no staff access yet" screen.
 - **Test sessions page** (supervisor or admin):
   - **New test session** → shows the rider link and a QR code (`uqr` `encode()` matrix rendered as React SVG rects, no innerHTML), a copy button and an expiry countdown;
