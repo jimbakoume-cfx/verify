@@ -1,0 +1,23 @@
+{
+  "title": "Tableau de bord KYC",
+  "intro": "Outil interne de l'équipe de vérification Confiance : file de revue, décisions, recours et indicateurs.",
+  "staffOnly": "Accès réservé au personnel autorisé. Chaque consultation est enregistrée.",
+  "planned": {
+    "title": "Modules prévus",
+    "queue": "File de revue triée par priorité et ancienneté",
+    "caseView": "Dossier : pièce d'identité, selfie, données extraites et alertes côte à côte",
+    "search": "Recherche par passager",
+    "metrics": "Indicateurs : volumes, délais, taux auto/manuel, motifs de refus",
+    "thresholds": "Réglage des seuils de décision (sans redéploiement)",
+    "audit": "Journal d'audit"
+  },
+  "signIn": "Se connecter",
+  "comingSoon": "Version de test : la connexion du personnel arrive à l'étape M9.",
+  "build": "Version",
+  "server": {
+    "checking": "Connexion au serveur…",
+    "ok": "Serveur connecté",
+    "not-configured": "Serveur non configuré",
+    "unreachable": "Serveur injoignable"
+  }
+}

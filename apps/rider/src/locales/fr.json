@@ -1,0 +1,23 @@
+{
+  "welcome": {
+    "title": "Vérifions votre identité",
+    "intro": "Pour votre sécurité et celle des chauffeurs, Confiance vérifie l'identité de chaque passager une seule fois, avant la première course."
+  },
+  "steps": {
+    "title": "Comment ça marche",
+    "consent": "Vous lisez et acceptez les conditions d'utilisation de vos données.",
+    "document": "Vous photographiez votre pièce d'identité (recto, et verso si nécessaire).",
+    "selfie": "Vous faites un court test devant la caméra (tourner la tête, cligner des yeux).",
+    "result": "Vous recevez le résultat dans l'application.",
+    "duration": "Durée : environ 2 minutes."
+  },
+  "start": "Commencer",
+  "comingSoon": "Version de test : la capture arrive à l'étape suivante (M1).",
+  "build": "Version",
+  "server": {
+    "checking": "Connexion au serveur…",
+    "ok": "Serveur connecté",
+    "not-configured": "Serveur non configuré",
+    "unreachable": "Serveur injoignable"
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "name": "confiance-verify",
+  "private": true,
+  "description": "Confiance Verify: in-house identity verification (KYC) platform",
+  "license": "UNLICENSED",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev:rider": "npm run dev -w @verify/rider",
+    "dev:dashboard": "npm run dev -w @verify/dashboard",
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "vitest run",
+    "licenses": "node scripts/check-licenses.mjs"
+  },
+  "devDependencies": {
+    "typescript": "6.0.3",
+    "vitest": "5.0.2"
+  }
+}
