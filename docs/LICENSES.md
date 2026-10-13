@@ -8,23 +8,29 @@
 
 **Forbidden:** GPL, AGPL, SSPL, BUSL, any "non-commercial" / "research-only" licence (e.g. CC BY-NC), and any unknown licence.
 
-## In use now (M0)
+## In use now (M0, M1)
 
 | Component | Version | Licence | Where it runs | Source |
 |---|---|---|---|---|
 | React, React DOM | 19.3.0 | MIT | Web apps | npmjs.com/package/react |
 | i18next | 26.4.2 | MIT | Web apps (FR/EN) | npmjs.com/package/i18next |
 | react-i18next | 17.0.15 | MIT | Web apps | npmjs.com/package/react-i18next |
-| @supabase/supabase-js | 2.117.2 | MIT | Web apps | npmjs.com/package/@supabase/supabase-js |
+| @supabase/supabase-js | 2.117.2 | MIT | Web apps; Edge Functions (as `npm:@supabase/supabase-js@2.117.2`) | npmjs.com/package/@supabase/supabase-js |
+| uqr | 0.1.3 | MIT | Dashboard (QR code of the rider test link) | npmjs.com/package/uqr |
 | Vite | 8.3.1 | MIT | Build only | npmjs.com/package/vite |
 | @vitejs/plugin-react | 6.1.1 | MIT | Build only | npmjs.com/package/@vitejs/plugin-react |
 | TypeScript | 6.0.3 | Apache-2.0 | Build only | npmjs.com/package/typescript |
 | Vitest | 5.0.2 | MIT | Tests only | npmjs.com/package/vitest |
+| Deno (`deno` npm package and its `@deno/*` platform binaries) | 2.9.6 | MIT | Development and CI only (type check and lint of the Edge Functions) | npmjs.com/package/deno |
+| @playwright/test (with playwright, playwright-core) | 1.63.0 | Apache-2.0 | Tests only; the browsers it downloads are never shipped | npmjs.com/package/@playwright/test |
 | lightningcss (dependency of Vite) | (lockfile) | MPL-2.0 | Build only; never shipped to users | npmjs.com/package/lightningcss |
 | gitleaks | 8.29.1 | MIT | CI secret scan only | github.com/gitleaks/gitleaks |
 | PostgreSQL | 16 (CI) / 17 (Supabase) | PostgreSQL Licence | Database | postgresql.org |
 | Supabase platform | hosted | Apache-2.0 (open source; also self-hostable) | Backend | github.com/supabase/supabase |
+| Supabase Edge Runtime (Deno-based) | hosted | MIT | Backend: the `flow` and `admin` Edge Functions | github.com/supabase/edge-runtime |
 | Confiance logo (`packages/shared/assets/*.svg`) | — | Confiance property | Web apps | Confiance Kiosk console |
+
+The capture quality engine (`packages/capture`: blur, glare, framing and document detection) is our own code, built on textbook image maths (luma, Laplacian variance, Sobel gradients). It uses no third-party image library.
 
 The full list of every indirect npm package and its licence is in `package-lock.json`, and is checked on every CI run.
 

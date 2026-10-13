@@ -1,0 +1,897 @@
+// deno-lint-ignore-file require-await
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { AuditEntry } from "../_shared/audit.ts";
+import {
+  CAPTURE_LIMITS,
+  type CaptureSide,
+  type ClientQuality,
+  CONSENT_VERSION,
+  type FlowSession,
+  REQUIRED_SIDES,
+} from "../_shared/contract.ts";
+import { randomToken, sha256Hex } from "../_shared/crypto.ts";
+import { ALLOWED_ORIGIN, buildJpeg, type CallOptions, makeRequest, readJson } from "../_shared/test-helpers.ts";
+import {
+  type CaptureStorage,
+  checkImage,
+  createFlowHandler,
+  type FlowRepo,
+  type FlowVerification,
+  type NewCapture,
+  type StoredCapture,
+  type SubmitResult,
+} from "./handler.ts";
+
+// ---------------------------------------------------------------------------
+// In-memory fakes. submit() and claimUploadSlot() mirror the SQL functions in the M1 migration.
+// ---------------------------------------------------------------------------
+interface VerificationRecord extends FlowVerification {
+  tokenHash: string;
+  uploadUrlCount: number;
+  submittedAt: string | null;
+}
+
+interface CaptureRecord extends NewCapture {
+  id: string;
+  createdAt: string;
+  deletedAt: string | null;
+}
+
+class MemoryFlowRepo implements FlowRepo {
+  verifications = new Map<string, VerificationRecord>();
+  consents: { verificationId: string; consentVersion: string; language: string; userAgent: string | null }[] = [];
+  captures: CaptureRecord[] = [];
+  audits: AuditEntry[] = [];
+  reviewTasks: { verificationId: string; status: string }[] = [];
+  /** Name of a method that throws, to exercise the 500 path. */
+  failOn: keyof FlowRepo | null = null;
+  submitOverride: SubmitResult | null = null;
+  private clock = Date.parse("2026-10-13T09:00:00Z");
+
+  private maybeFail(method: keyof FlowRepo, detail: string) {
+    if (this.failOn === method) throw new Error(`relation failed for ${detail}`);
+  }
+
+  private get(id: string): VerificationRecord {
+    const v = this.verifications.get(id);
+    if (!v) throw new Error("no such verification");
+    return v;
+  }
+
+  async findVerificationByTokenHash(tokenHash: string) {
+    this.maybeFail("findVerificationByTokenHash", tokenHash);
+    for (const v of this.verifications.values()) if (v.tokenHash === tokenHash) return { ...v };
+    return null;
+  }
+
+  async getVerification(id: string) {
+    const v = this.verifications.get(id);
+    return v ? { ...v } : null;
+  }
+
+  async hasConsent(verificationId: string) {
+    return this.consents.some((c) => c.verificationId === verificationId);
+  }
+
+  async insertConsent(c: { verificationId: string; consentVersion: string; language: "fr" | "en"; userAgent: string | null }) {
+    this.maybeFail("insertConsent", c.verificationId);
+    this.consents.push({ ...c });
+  }
+
+  async markInProgress(id: string) {
+    const v = this.get(id);
+    if (v.status === "created") v.status = "in_progress";
+  }
+
+  /** Set by a test to simulate a submit that lands between the session lookup and the update. */
+  closeBeforeDeclare = false;
+
+  async setDeclaredDocument(id: string, document: VerificationRecord["declaredDocument"]) {
+    const v = this.get(id);
+    if (this.closeBeforeDeclare) v.status = "submitted";
+    if (v.status !== "created" && v.status !== "in_progress") return false;
+    v.declaredDocument = document;
+    return true;
+  }
+
+  async listActiveCaptures(verificationId: string) {
+    return this.captures.filter((c) => c.verificationId === verificationId && c.deletedAt === null)
+      .map((c) => ({ kind: c.kind as string, createdAt: c.createdAt }));
+  }
+
+  async claimUploadSlot(id: string, max: number) {
+    const v = this.get(id);
+    if (v.uploadUrlCount >= max) return false;
+    v.uploadUrlCount++;
+    return true;
+  }
+
+  async findCaptureByPath(verificationId: string, path: string): Promise<StoredCapture | null> {
+    const c = this.captures.find((x) => x.verificationId === verificationId && x.storagePath === path && !x.deletedAt);
+    if (!c) return null;
+    const server = (c.quality.server ?? {}) as { reusedElsewhere?: boolean };
+    return {
+      id: c.id,
+      byteSize: c.byteSize,
+      width: c.width,
+      height: c.height,
+      sha256: c.sha256,
+      reusedElsewhere: server.reusedElsewhere === true,
+    };
+  }
+
+  async isShaUsedElsewhere(sha256: string, verificationId: string) {
+    return this.captures.some((c) => c.sha256 === sha256 && c.verificationId !== verificationId);
+  }
+
+  async insertCapture(capture: NewCapture) {
+    this.maybeFail("insertCapture", capture.storagePath);
+    const id = crypto.randomUUID();
+    this.clock += 1000;
+    this.captures.push({ ...capture, id, createdAt: new Date(this.clock).toISOString(), deletedAt: null });
+    return id;
+  }
+
+  async submit(id: string, requiredSides: readonly CaptureSide[]): Promise<SubmitResult> {
+    if (this.submitOverride) return this.submitOverride;
+    const v = this.get(id);
+    if (v.status !== "created" && v.status !== "in_progress") return "already_submitted";
+    const live = (kind: string) => this.captures.some((c) => c.verificationId === id && c.kind === kind && !c.deletedAt);
+    if (requiredSides.length === 0 || !requiredSides.every(live)) return "missing_sides";
+    v.status = "submitted";
+    v.submittedAt = new Date().toISOString();
+    this.reviewTasks.push({ verificationId: id, status: "open" });
+    this.audits.push({
+      actorType: "rider",
+      actorId: id,
+      action: "verification.submit",
+      targetType: "verification",
+      targetId: id,
+    });
+    return "ok";
+  }
+
+  async audit(entry: AuditEntry) {
+    this.maybeFail("audit", entry.action);
+    this.audits.push(entry);
+  }
+}
+
+class MemoryStorage implements CaptureStorage {
+  objects = new Map<string, Uint8Array<ArrayBuffer>>();
+  signed: string[] = [];
+  removed: string[] = [];
+  failRemove = false;
+
+  async createSignedUploadUrl(path: string) {
+    this.signed.push(path);
+    return { path, token: `signed-upload-token-${this.signed.length}` };
+  }
+
+  async download(path: string) {
+    return this.objects.get(path) ?? null;
+  }
+
+  async remove(path: string) {
+    if (this.failRemove) throw new Error(`storage refused ${path}`);
+    this.removed.push(path);
+    this.objects.delete(path);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Harness
+// ---------------------------------------------------------------------------
+const NOW = new Date("2026-10-13T10:00:00Z");
+const IN_30_MIN = new Date(NOW.getTime() + 30 * 60_000).toISOString();
+const PATH_RE = /^([0-9a-f-]{36})\/(document_front|document_back)-([0-9a-f-]{36})\.jpg$/;
+const QUALITY: ClientQuality = {
+  source: "auto",
+  sharpness: 250,
+  glareRatio: 0.002,
+  meanLuma: 131,
+  framing: 0.94,
+  videoWidth: 1920,
+  videoHeight: 1080,
+  elapsedMs: 3500,
+};
+const GOOD_JPEG = buildJpeg({ width: 1600, height: 1009, padTo: 60_000 });
+
+function setup() {
+  const repo = new MemoryFlowRepo();
+  const storage = new MemoryStorage();
+  const log = { error: vi.fn() };
+  let clock = NOW;
+  const handler = createFlowHandler({
+    repo,
+    storage,
+    allowedOrigins: new Set([ALLOWED_ORIGIN]),
+    now: () => clock,
+    log,
+  });
+
+  async function seed(
+    overrides: Partial<VerificationRecord> = {},
+    { consent = false }: { consent?: boolean } = {},
+  ) {
+    const token = randomToken();
+    const id = crypto.randomUUID();
+    repo.verifications.set(id, {
+      id,
+      status: "created",
+      locale: "fr",
+      declaredDocument: null,
+      expiresAt: IN_30_MIN,
+      isTest: true,
+      tokenHash: await sha256Hex(token),
+      uploadUrlCount: 0,
+      submittedAt: null,
+      ...overrides,
+    });
+    if (consent) repo.consents.push({ verificationId: id, consentVersion: CONSENT_VERSION, language: "fr", userAgent: null });
+    return { id, token };
+  }
+
+  /** A session with consent and a declared CNI, ready for uploads. */
+  function ready(overrides: Partial<VerificationRecord> = {}) {
+    return seed({ status: "in_progress", declaredDocument: "cni", ...overrides }, { consent: true });
+  }
+
+  function call(path: string, token: string | null, options: CallOptions = {}) {
+    const headers: Record<string, string> = { ...options.headers };
+    if (token !== null) headers["x-session-token"] = token;
+    const method = options.method ?? (path === "/session" ? "GET" : "POST");
+    return handler(makeRequest(`https://ref.supabase.co/flow${path}`, { ...options, method, headers }));
+  }
+
+  async function upload(token: string, kind: CaptureSide, image: Uint8Array<ArrayBuffer> = GOOD_JPEG) {
+    const res = await call("/upload-url", token, { body: { kind } });
+    expect(res.status).toBe(200);
+    const { path } = await readJson(res) as { path: string };
+    storage.objects.set(path, image);
+    return path;
+  }
+
+  async function complete(token: string, kind: CaptureSide, image?: Uint8Array<ArrayBuffer>) {
+    const path = await upload(token, kind, image);
+    return call("/captures", token, { body: { path, kind, quality: QUALITY } });
+  }
+
+  return {
+    repo,
+    storage,
+    log,
+    handler,
+    seed,
+    ready,
+    call,
+    upload,
+    complete,
+    setClock: (d: Date) => (clock = d),
+  };
+}
+
+async function expectError(res: Response, status: number, code: string) {
+  expect(res.status).toBe(status);
+  const body = await readJson(res);
+  expect(body).toEqual({ error: { code, message: expect.any(String) } });
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+// ---------------------------------------------------------------------------
+// Session lookup
+// ---------------------------------------------------------------------------
+describe("session lookup", () => {
+  const routes: [string, CallOptions][] = [
+    ["/session", {}],
+    ["/consent", { body: { consentVersion: CONSENT_VERSION, language: "fr" } }],
+    ["/document-type", { body: { declaredDocument: "cni" } }],
+    ["/upload-url", { body: { kind: "document_front" } }],
+    ["/captures", { body: {} }],
+    ["/submit", {}],
+  ];
+
+  it.each(routes)("%s: no token -> 401 invalid_session", async (path, options) => {
+    const { call } = setup();
+    await expectError(await call(path, null, options), 401, "invalid_session");
+  });
+
+  it("malformed and unknown tokens get the same 401 response", async () => {
+    const { call, seed } = setup();
+    await seed();
+    const bodies = new Set<string>();
+    for (const token of ["", "short", "x".repeat(44), `${"a".repeat(42)}=`, `${"a".repeat(42)}+`, randomToken()]) {
+      const res = await call("/session", token);
+      expect(res.status).toBe(401);
+      bodies.add(await res.text());
+    }
+    expect(bodies.size).toBe(1);
+  });
+
+  it("expired session -> 410 session_expired, from the exact expiry instant", async () => {
+    const { call, seed, setClock } = setup();
+    const { token } = await seed();
+    setClock(new Date(IN_30_MIN));
+    await expectError(await call("/session", token), 410, "session_expired");
+    setClock(new Date(Date.parse(IN_30_MIN) - 1));
+    expect((await call("/session", token)).status).toBe(200);
+  });
+
+  it("a session without an expiry is treated as expired", async () => {
+    const { call, seed } = setup();
+    const { token } = await seed({ expiresAt: null });
+    await expectError(await call("/session", token), 410, "session_expired");
+  });
+
+  it("expiry is reported before the status", async () => {
+    const { call, seed } = setup();
+    const { token } = await seed({ status: "submitted", expiresAt: "2026-10-13T09:00:00Z" });
+    await expectError(await call("/consent", token, { body: {} }), 410, "session_expired");
+  });
+
+  it.each(["submitted", "processing", "in_review", "approved", "rejected", "expired", "cancelled"] as const)(
+    "status %s: every route but GET /session -> 409 already_submitted",
+    async (status) => {
+      const { call, seed } = setup();
+      const { token } = await seed({ status, declaredDocument: "cni" }, { consent: true });
+      expect((await call("/session", token)).status).toBe(200);
+      for (const [path, options] of routes.slice(1)) {
+        await expectError(await call(path, token, options), 409, "already_submitted");
+      }
+    },
+  );
+
+  it("never logs the token or its hash when the lookup fails", async () => {
+    const { seed, repo } = setup();
+    const { token } = await seed();
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const quiet = createFlowHandler({ repo, storage: new MemoryStorage(), allowedOrigins: new Set([ALLOWED_ORIGIN]) });
+    repo.failOn = "findVerificationByTokenHash";
+    const res = await quiet(makeRequest("https://ref.supabase.co/flow/session", {
+      method: "GET",
+      headers: { "x-session-token": token },
+    }));
+    await expectError(res, 500, "server_error");
+    const logged = spy.mock.calls.flat().join(" ");
+    expect(spy).toHaveBeenCalled();
+    expect(logged).not.toContain(token);
+    expect(logged).not.toContain(await sha256Hex(token));
+    expect(logged).not.toContain("relation failed");
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// GET /session
+// ---------------------------------------------------------------------------
+describe("GET /session", () => {
+  it("returns a fresh session", async () => {
+    const { call, seed } = setup();
+    const { id, token } = await seed({ locale: "en" });
+    const res = await call("/session", token);
+    expect(res.status).toBe(200);
+    const session: FlowSession = await res.json();
+    expect(session).toEqual({
+      verificationId: id,
+      status: "created",
+      locale: "en",
+      consentGiven: false,
+      declaredDocument: null,
+      requiredSides: null,
+      captures: [],
+      expiresAt: IN_30_MIN,
+      isTest: true,
+    });
+  });
+
+  it("lists the latest live capture per side, ignoring deleted rows and other kinds", async () => {
+    const { call, ready, repo, complete } = setup();
+    const { id, token } = await ready();
+    expect((await complete(token, "document_front")).status).toBe(200);
+    expect((await complete(token, "document_front", buildJpeg({ width: 1600, height: 1000, padTo: 30_000 }))).status)
+      .toBe(200);
+    expect((await complete(token, "document_back")).status).toBe(200);
+    const fronts = repo.captures.filter((c) => c.kind === "document_front");
+    repo.captures.find((c) => c.kind === "document_back")!.deletedAt = NOW.toISOString();
+    repo.captures.push({ ...fronts[0], id: crypto.randomUUID(), kind: "selfie" as CaptureSide, storagePath: "x" });
+
+    const session: FlowSession = await (await call("/session", token)).json();
+    expect(session.verificationId).toBe(id);
+    expect(session.consentGiven).toBe(true);
+    expect(session.declaredDocument).toBe("cni");
+    expect(session.requiredSides).toEqual(["document_front", "document_back"]);
+    expect(session.captures).toEqual([{ kind: "document_front", createdAt: fronts[1].createdAt }]);
+  });
+
+  it("still answers once submitted", async () => {
+    const { call, seed } = setup();
+    const { token } = await seed({ status: "approved" });
+    const session: FlowSession = await (await call("/session", token)).json();
+    expect(session.status).toBe("approved");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST /consent
+// ---------------------------------------------------------------------------
+describe("POST /consent", () => {
+  it.each([
+    ["a wrong version", { consentVersion: "v999", language: "fr" }],
+    ["a missing version", { language: "fr" }],
+    ["a non-string version", { consentVersion: 1, language: "fr" }],
+    ["an unknown language", { consentVersion: CONSENT_VERSION, language: "de" }],
+    ["a missing language", { consentVersion: CONSENT_VERSION }],
+  ])("%s -> 400 bad_request", async (_label, body) => {
+    const { call, seed, repo } = setup();
+    const { token } = await seed();
+    await expectError(await call("/consent", token, { body }), 400, "bad_request");
+    expect(repo.consents).toHaveLength(0);
+  });
+
+  it("requires a body", async () => {
+    const { call, seed } = setup();
+    const { token } = await seed();
+    await expectError(await call("/consent", token), 400, "bad_request");
+  });
+
+  it("records consent with the user agent, starts the verification and audits", async () => {
+    const { call, seed, repo } = setup();
+    const { id, token } = await seed();
+    const res = await call("/consent", token, {
+      body: { consentVersion: CONSENT_VERSION, language: "en" },
+      headers: { "user-agent": "Mozilla/5.0 " + "x".repeat(1000) },
+    });
+    expect(res.status).toBe(200);
+    const session: FlowSession = await res.json();
+    expect(session).toMatchObject({ status: "in_progress", consentGiven: true });
+    expect(repo.consents).toHaveLength(1);
+    expect(repo.consents[0]).toMatchObject({ verificationId: id, consentVersion: CONSENT_VERSION, language: "en" });
+    expect(repo.consents[0].userAgent).toHaveLength(512);
+    expect(repo.audits).toEqual([{
+      actorType: "rider",
+      actorId: id,
+      action: "consent.accept",
+      targetType: "verification",
+      targetId: id,
+      details: { consentVersion: CONSENT_VERSION, language: "en" },
+    }]);
+  });
+
+  it("stores a null user agent when the header is absent", async () => {
+    const { call, seed, repo } = setup();
+    const { token } = await seed();
+    await call("/consent", token, { body: { consentVersion: CONSENT_VERSION, language: "fr" } });
+    expect(repo.consents[0].userAgent).toBeNull();
+  });
+
+  it("is idempotent: no second row and no second audit", async () => {
+    const { call, seed, repo } = setup();
+    const { token } = await seed();
+    const body = { consentVersion: CONSENT_VERSION, language: "fr" };
+    expect((await call("/consent", token, { body })).status).toBe(200);
+    const again = await call("/consent", token, { body });
+    expect(again.status).toBe(200);
+    expect((await again.json() as FlowSession).consentGiven).toBe(true);
+    expect(repo.consents).toHaveLength(1);
+    expect(repo.audits.filter((a) => a.action === "consent.accept")).toHaveLength(1);
+  });
+
+  it("finishes a half-done consent (row written, status still created)", async () => {
+    const { call, seed, repo } = setup();
+    const { id, token } = await seed({}, { consent: true });
+    const res = await call("/consent", token, { body: { consentVersion: CONSENT_VERSION, language: "fr" } });
+    expect(res.status).toBe(200);
+    expect(repo.verifications.get(id)!.status).toBe("in_progress");
+    expect(repo.consents).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST /document-type
+// ---------------------------------------------------------------------------
+describe("POST /document-type", () => {
+  it("requires consent -> 403 consent_required", async () => {
+    const { call, seed } = setup();
+    const { token } = await seed();
+    await expectError(await call("/document-type", token, { body: { declaredDocument: "cni" } }), 403, "consent_required");
+  });
+
+  it.each([["unknown", { declaredDocument: "library_card" }], ["missing", {}], ["not a string", { declaredDocument: 3 }]])(
+    "%s document -> 400 bad_request",
+    async (_label, body) => {
+      const { call, seed } = setup();
+      const { token } = await seed({ status: "in_progress" }, { consent: true });
+      await expectError(await call("/document-type", token, { body }), 400, "bad_request");
+    },
+  );
+
+  it("declares the document, audits, and may change it before submit", async () => {
+    const { call, seed, repo } = setup();
+    const { id, token } = await seed({ status: "in_progress" }, { consent: true });
+    const first: FlowSession = await (await call("/document-type", token, { body: { declaredDocument: "cni" } })).json();
+    expect(first).toMatchObject({ declaredDocument: "cni", requiredSides: ["document_front", "document_back"] });
+    const second: FlowSession = await (await call("/document-type", token, { body: { declaredDocument: "passport" } }))
+      .json();
+    expect(second).toMatchObject({ declaredDocument: "passport", requiredSides: ["document_front"] });
+    expect(repo.verifications.get(id)!.declaredDocument).toBe("passport");
+    expect(repo.audits.map((a) => [a.action, a.details])).toEqual([
+      ["document.declare", { declaredDocument: "cni" }],
+      ["document.declare", { declaredDocument: "passport" }],
+    ]);
+    expect(repo.audits[0]).toMatchObject({ actorType: "rider", actorId: id, targetType: "verification", targetId: id });
+  });
+
+  it("a submit landing first wins: 409 already_submitted and no audit of a change that did not happen", async () => {
+    const { call, seed, repo } = setup();
+    const { id, token } = await seed({ status: "in_progress", declaredDocument: "cni" }, { consent: true });
+    repo.closeBeforeDeclare = true;
+    await expectError(
+      await call("/document-type", token, { body: { declaredDocument: "passport" } }),
+      409,
+      "already_submitted",
+    );
+    expect(repo.verifications.get(id)!.declaredDocument).toBe("cni");
+    expect(repo.audits.filter((a) => a.action === "document.declare")).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST /upload-url
+// ---------------------------------------------------------------------------
+describe("POST /upload-url", () => {
+  it("requires consent -> 403 consent_required", async () => {
+    const { call, seed } = setup();
+    const { token } = await seed({ declaredDocument: "cni" });
+    await expectError(await call("/upload-url", token, { body: { kind: "document_front" } }), 403, "consent_required");
+  });
+
+  it("requires a declared document -> 409 document_type_required", async () => {
+    const { call, seed } = setup();
+    const { token } = await seed({ status: "in_progress" }, { consent: true });
+    await expectError(await call("/upload-url", token, { body: { kind: "document_front" } }), 409, "document_type_required");
+  });
+
+  it("requires a kind -> 400 bad_request", async () => {
+    const { call, ready } = setup();
+    const { token } = await ready();
+    await expectError(await call("/upload-url", token, { body: {} }), 400, "bad_request");
+    await expectError(await call("/upload-url", token, { body: { kind: ["document_front"] } }), 400, "bad_request");
+  });
+
+  it("rejects a side the document does not have -> 400 invalid_kind", async () => {
+    const { call, ready, storage } = setup();
+    const { token } = await ready({ declaredDocument: "passport" });
+    await expectError(await call("/upload-url", token, { body: { kind: "document_back" } }), 400, "invalid_kind");
+    await expectError(await call("/upload-url", token, { body: { kind: "selfie" } }), 400, "invalid_kind");
+    expect(storage.signed).toHaveLength(0);
+  });
+
+  it("returns a signed upload for a fresh path inside the verification's folder", async () => {
+    const { call, ready, storage, repo } = setup();
+    const { id, token } = await ready();
+    const res = await call("/upload-url", token, { body: { kind: "document_back" } });
+    expect(res.status).toBe(200);
+    const body = await readJson(res);
+    expect(Object.keys(body).sort()).toEqual(["bucket", "path", "token"]);
+    expect(body.bucket).toBe("id-captures");
+    expect(body.token).toBe("signed-upload-token-1");
+    const match = PATH_RE.exec(body.path as string);
+    expect(match?.[1]).toBe(id);
+    expect(match?.[2]).toBe("document_back");
+    expect(storage.signed).toEqual([body.path]);
+    expect(repo.verifications.get(id)!.uploadUrlCount).toBe(1);
+    const other = await readJson(await call("/upload-url", token, { body: { kind: "document_back" } }));
+    expect(other.path).not.toBe(body.path);
+  });
+
+  it(`allows ${CAPTURE_LIMITS.maxUploadUrlsPerSession} links per session, then 429 too_many_uploads`, async () => {
+    const { call, ready, storage } = setup();
+    const { token } = await ready();
+    for (let i = 0; i < CAPTURE_LIMITS.maxUploadUrlsPerSession; i++) {
+      expect((await call("/upload-url", token, { body: { kind: "document_front" } })).status).toBe(200);
+    }
+    await expectError(await call("/upload-url", token, { body: { kind: "document_front" } }), 429, "too_many_uploads");
+    expect(storage.signed).toHaveLength(CAPTURE_LIMITS.maxUploadUrlsPerSession);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST /captures
+// ---------------------------------------------------------------------------
+describe("POST /captures", () => {
+  it("records a valid image, sanitises the quality object and audits", async () => {
+    const { call, ready, upload, repo } = setup();
+    const { id, token } = await ready();
+    const path = await upload(token, "document_front");
+    // 1e999 is valid JSON that parses to Infinity.
+    const json = JSON.stringify({
+      path,
+      kind: "document_front",
+      quality: { ...QUALITY, sharpness: "INF", server: { validated: false } },
+    }).replace('"INF"', "1e999");
+    const res = await call("/captures", token, { rawBody: json });
+    expect(res.status).toBe(200);
+    const body = await readJson(res);
+    const sha256 = await sha256Hex(GOOD_JPEG);
+    expect(body).toEqual({
+      captureId: expect.any(String),
+      byteSize: GOOD_JPEG.byteLength,
+      width: 1600,
+      height: 1009,
+      sha256,
+    });
+    expect(repo.captures).toHaveLength(1);
+    expect(repo.captures[0]).toMatchObject({
+      id: body.captureId,
+      verificationId: id,
+      kind: "document_front",
+      storagePath: path,
+      sha256,
+      byteSize: GOOD_JPEG.byteLength,
+      width: 1600,
+      height: 1009,
+    });
+    expect(repo.captures[0].quality).toEqual({
+      ...QUALITY,
+      sharpness: 1e6,
+      server: { validated: true, reusedElsewhere: false },
+    });
+    expect(repo.audits).toEqual([{
+      actorType: "rider",
+      actorId: id,
+      action: "capture.create",
+      targetType: "capture",
+      targetId: body.captureId,
+      details: { kind: "document_front", byteSize: GOOD_JPEG.byteLength, reusedElsewhere: false },
+    }]);
+  });
+
+  it("flags an image already uploaded in another verification", async () => {
+    const harness = setup();
+    const first = await harness.ready();
+    expect((await harness.complete(first.token, "document_front")).status).toBe(200);
+    const second = await harness.ready();
+    const res = await harness.complete(second.token, "document_front");
+    // Recorded for staff, never told to the rider (it would let a fraudster probe for reuse).
+    expect(await readJson(res)).not.toHaveProperty("reusedElsewhere");
+    expect(harness.repo.captures[1].quality.server).toEqual({ validated: true, reusedElsewhere: true });
+    // The first verification's next photo is the same image as the second verification's front.
+    const again = await harness.complete(first.token, "document_back");
+    expect(await readJson(again)).not.toHaveProperty("reusedElsewhere");
+    expect(harness.repo.captures[2].quality.server).toEqual({ validated: true, reusedElsewhere: true });
+  });
+
+  it("answers a retried request with the capture already recorded", async () => {
+    const { call, ready, upload, repo, storage } = setup();
+    const { token } = await ready();
+    const path = await upload(token, "document_front");
+    const body = { path, kind: "document_front", quality: QUALITY };
+    const first = await readJson(await call("/captures", token, { body }));
+    storage.objects.delete(path); // a retry must not need the object again
+    const second = await call("/captures", token, { body });
+    expect(second.status).toBe(200);
+    expect(await readJson(second)).toEqual(first);
+    expect(repo.captures).toHaveLength(1);
+    expect(repo.audits.filter((a) => a.action === "capture.create")).toHaveLength(1);
+  });
+
+  it("validates kind, path and quality -> 400 bad_request", async () => {
+    const { call, ready, upload, seed, storage, repo } = setup();
+    const { id, token } = await ready();
+    const path = await upload(token, "document_front");
+    const other = await seed();
+    const foreign = `${other.id}/document_front-${crypto.randomUUID()}.jpg`;
+    storage.objects.set(foreign, GOOD_JPEG);
+    const cases: unknown[] = [
+      { path, kind: "selfie", quality: QUALITY },
+      { path, kind: "document_back", quality: QUALITY },
+      { path: foreign, kind: "document_front", quality: QUALITY },
+      { path: `${id}/../${foreign}`, kind: "document_front", quality: QUALITY },
+      { path: path.replace(".jpg", ".png"), kind: "document_front", quality: QUALITY },
+      { path: 12, kind: "document_front", quality: QUALITY },
+      { kind: "document_front", quality: QUALITY },
+      { path, kind: "document_front" },
+      { path, kind: "document_front", quality: { ...QUALITY, source: "upload" } },
+      { path, kind: "document_front", quality: { ...QUALITY, meanLuma: "dark" } },
+    ];
+    for (const body of cases) {
+      await expectError(await call("/captures", token, { body }), 400, "bad_request");
+    }
+    expect(repo.captures).toHaveLength(0);
+    expect(storage.removed).toHaveLength(0);
+  });
+
+  it("missing object -> 404 upload_missing", async () => {
+    const { call, ready } = setup();
+    const { id, token } = await ready();
+    const path = `${id}/document_front-${crypto.randomUUID()}.jpg`;
+    await expectError(await call("/captures", token, { body: { path, kind: "document_front", quality: QUALITY } }), 404, "upload_missing");
+  });
+
+  const tooSmall = buildJpeg({ width: 1600, height: 1000, padTo: CAPTURE_LIMITS.minBytes - 1 });
+  const tooLarge = (() => {
+    const big = new Uint8Array(CAPTURE_LIMITS.maxBytes + 1);
+    big.set(buildJpeg({ width: 1600, height: 1000 }));
+    return big;
+  })();
+  const png = (() => {
+    const bytes = new Uint8Array(20_000);
+    bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    return bytes;
+  })();
+  const noFrame = (() => {
+    const bytes = new Uint8Array(20_000);
+    bytes.set([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
+    return bytes;
+  })();
+  const lowRes = buildJpeg({ width: CAPTURE_LIMITS.minLongSide - 1, height: 500, padTo: 20_000 });
+
+  it.each([
+    ["image_too_small", tooSmall],
+    ["image_too_large", tooLarge],
+    ["invalid_image", png],
+    ["invalid_image", noFrame],
+    ["image_resolution_too_low", lowRes],
+  ])("rejects with 422 %s and deletes the object", async (code, image) => {
+    const { call, ready, upload, storage, repo } = setup();
+    const { token } = await ready();
+    const path = await upload(token, "document_front", image);
+    await expectError(await call("/captures", token, { body: { path, kind: "document_front", quality: QUALITY } }), 422, code);
+    expect(storage.removed).toEqual([path]);
+    expect(storage.objects.has(path)).toBe(false);
+    expect(repo.captures).toHaveLength(0);
+    expect(repo.audits).toHaveLength(0);
+  });
+
+  it("still answers 422 when the cleanup fails, and logs it", async () => {
+    const { call, ready, upload, storage, log } = setup();
+    const { token } = await ready();
+    const path = await upload(token, "document_front", lowRes);
+    storage.failRemove = true;
+    await expectError(await call("/captures", token, { body: { path, kind: "document_front", quality: QUALITY } }), 422, "image_resolution_too_low");
+    expect(log.error).toHaveBeenCalledWith("flow.capture_remove_failed", expect.any(Error));
+  });
+
+  it("accepts a portrait crop whose long side is exactly the minimum", async () => {
+    const { complete, ready } = setup();
+    const { token } = await ready();
+    const res = await complete(token, "document_front", buildJpeg({ width: 600, height: CAPTURE_LIMITS.minLongSide, padTo: 20_000 }));
+    expect(res.status).toBe(200);
+  });
+
+  it("returns 500 server_error when the database insert fails", async () => {
+    const { call, ready, upload, repo } = setup();
+    const { token } = await ready();
+    const path = await upload(token, "document_front");
+    repo.failOn = "insertCapture";
+    await expectError(await call("/captures", token, { body: { path, kind: "document_front", quality: QUALITY } }), 500, "server_error");
+  });
+});
+
+describe("checkImage", () => {
+  it("checks size before format and format before resolution", () => {
+    expect(checkImage(new Uint8Array(10))).toEqual({ ok: false, code: "image_too_small" });
+    expect(checkImage(GOOD_JPEG)).toEqual({ ok: true, width: 1600, height: 1009 });
+    expect(checkImage(buildJpeg({ width: 800, height: 10, padTo: CAPTURE_LIMITS.minBytes }))).toMatchObject({ ok: true });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST /submit
+// ---------------------------------------------------------------------------
+describe("POST /submit", () => {
+  it("requires a declared document -> 409 document_type_required", async () => {
+    const { call, seed } = setup();
+    const { token } = await seed({ status: "in_progress" }, { consent: true });
+    await expectError(await call("/submit", token), 409, "document_type_required");
+  });
+
+  it("requires every side -> 409 missing_sides", async () => {
+    const { call, ready, complete, repo } = setup();
+    const { id, token } = await ready();
+    await expectError(await call("/submit", token), 409, "missing_sides");
+    expect((await complete(token, "document_front")).status).toBe(200);
+    await expectError(await call("/submit", token), 409, "missing_sides");
+    expect(repo.verifications.get(id)!.status).toBe("in_progress");
+    expect(repo.reviewTasks).toHaveLength(0);
+  });
+
+  it("does not count a deleted capture", async () => {
+    const { call, ready, complete, repo } = setup();
+    const { token } = await ready({ declaredDocument: "passport" });
+    await complete(token, "document_front");
+    repo.captures[0].deletedAt = NOW.toISOString();
+    await expectError(await call("/submit", token), 409, "missing_sides");
+  });
+
+  it("submits, opens a review task, audits and returns the session", async () => {
+    const { call, ready, complete, repo } = setup();
+    const { id, token } = await ready();
+    await complete(token, "document_front");
+    await complete(token, "document_back");
+    const res = await call("/submit", token);
+    expect(res.status).toBe(200);
+    const session: FlowSession = await res.json();
+    expect(session).toMatchObject({ verificationId: id, status: "submitted" });
+    expect(session.captures.map((c) => c.kind)).toEqual(["document_front", "document_back"]);
+    expect(repo.verifications.get(id)!.submittedAt).not.toBeNull();
+    expect(repo.reviewTasks).toEqual([{ verificationId: id, status: "open" }]);
+    expect(repo.audits.at(-1)).toMatchObject({ action: "verification.submit", actorType: "rider", actorId: id });
+    await expectError(await call("/submit", token), 409, "already_submitted");
+  });
+
+  it("passes the document's required sides to the database", async () => {
+    const { call, ready, complete, repo } = setup();
+    const { token } = await ready({ declaredDocument: "passport" });
+    await complete(token, "document_front");
+    const spy = vi.spyOn(repo, "submit");
+    expect((await call("/submit", token)).status).toBe(200);
+    expect(spy).toHaveBeenCalledWith(expect.any(String), REQUIRED_SIDES.passport);
+  });
+
+  it("maps a concurrent submit reported by the database to 409 already_submitted", async () => {
+    const { call, ready, repo } = setup();
+    const { token } = await ready();
+    repo.submitOverride = "already_submitted";
+    await expectError(await call("/submit", token), 409, "already_submitted");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// End to end through the handler
+// ---------------------------------------------------------------------------
+describe("rider flow", () => {
+  it("goes from a new session to submitted", async () => {
+    const { call, seed, upload } = setup();
+    const { token } = await seed();
+    expect((await call("/consent", token, { body: { consentVersion: CONSENT_VERSION, language: "fr" } })).status).toBe(200);
+    expect((await call("/document-type", token, { body: { declaredDocument: "voter_card" } })).status).toBe(200);
+    for (const kind of ["document_front", "document_back"] as const) {
+      const path = await upload(token, kind, buildJpeg({ width: 1600, height: 1009, padTo: kind === "document_front" ? 40_000 : 41_000 }));
+      expect((await call("/captures", token, { body: { path, kind, quality: QUALITY } })).status).toBe(200);
+    }
+    const submitted: FlowSession = await (await call("/submit", token)).json();
+    expect(submitted.status).toBe("submitted");
+    const later: FlowSession = await (await call("/session", token)).json();
+    expect(later).toMatchObject({ status: "submitted", declaredDocument: "voter_card", consentGiven: true });
+  });
+
+  it("accepts the path without the /flow prefix and refuses other origins", async () => {
+    const { handler, seed } = setup();
+    const { token } = await seed();
+    const plain = await handler(makeRequest("https://ref.supabase.co/session", {
+      method: "GET",
+      headers: { "x-session-token": token },
+    }));
+    expect(plain.status).toBe(200);
+    expect(plain.headers.get("access-control-allow-origin")).toBe(ALLOWED_ORIGIN);
+    const evil = await handler(makeRequest("https://ref.supabase.co/flow/session", {
+      method: "GET",
+      origin: "https://evil.example",
+      headers: { "x-session-token": token },
+    }));
+    expect(evil.status).toBe(403);
+    expect(evil.headers.get("access-control-allow-origin")).toBeNull();
+  });
+
+  it("answers preflight requests for every route", async () => {
+    const { handler } = setup();
+    for (const path of ["/session", "/consent", "/document-type", "/upload-url", "/captures", "/submit"]) {
+      const res = await handler(makeRequest(`https://ref.supabase.co/flow${path}`, { method: "OPTIONS" }));
+      expect(res.status, path).toBe(204);
+      expect(res.headers.get("access-control-allow-headers")).toContain("x-session-token");
+    }
+  });
+
+  it("returns 404 for unknown routes and 405 for wrong methods", async () => {
+    const { call, seed } = setup();
+    const { token } = await seed();
+    await expectError(await call("/admin", token), 404, "not_found");
+    await expectError(await call("/session", token, { method: "POST" }), 405, "bad_request");
+    await expectError(await call("/submit", token, { method: "GET" }), 405, "bad_request");
+    await expectError(await call("/session", token, { method: "DELETE" }), 405, "bad_request");
+  });
+});

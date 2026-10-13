@@ -132,13 +132,16 @@ Confiance ride app/backend ──(API key)──► Supabase Edge Function "sess
 - `GET /applicants/{external_user_id}` → `verified: true/false`. Riders are verified once, not on each ride.
 - Signed webhooks: `verification.approved`, `verification.rejected`, `verification.in_review`, `appeal.resolved`.
 
+The exact routes, request and response types, limits and error codes of the implemented APIs are in `supabase/functions/_shared/contract.ts`, the single source of truth. The lists below show what exists and what later milestones add.
+
 ### API 2: Rider web flow → Verify (single-use session token)
-`GET /flow` · `POST /flow/consent` · `POST /flow/upload-url` (returns a one-time upload link to private storage) · `POST /flow/captures/{id}/check` (server quality verdict) · `POST /flow/liveness/challenge` · `POST /flow/submit` · `GET /flow/status` (result, reason, retries left) · `POST /flow/appeal`
+- Since M1: `GET /flow/session` · `POST /flow/consent` · `POST /flow/document-type` · `POST /flow/upload-url` (a one-time upload link to private storage) · `POST /flow/captures {path, kind, quality}` (the server checks the uploaded image) · `POST /flow/submit`.
+- Planned: `POST /flow/liveness/challenge` (M5) · `GET /flow/status` (result, reason, retries left; M10) · `POST /flow/appeal` (M10). The server's own quality verdict on each capture arrives with the AI worker (M3).
 
 ### API 3: Ops dashboard → Verify (Supabase Auth with 2FA required; enforced by role)
 - Queue and case details: read directly via database rules. Each role sees only what it is allowed.
-- `POST /admin/captures/{id}/view` (audited, 60-second link)
-- `POST /admin/verifications/{id}/decision`
+- Since M1: `POST /admin/enroll {email, code, password}` (staff account set-up by one-time invite code) · `POST /admin/test-sessions` (test rider links, until M10) · `POST /admin/captures/view {captureId}` (audited, 60-second link).
+- Planned: `POST /admin/verifications/{id}/decision`
 - Search: supervisors and above.
 - Thresholds: admins only.
 - Metrics, audit log, appeals.

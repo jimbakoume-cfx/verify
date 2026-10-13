@@ -1,1 +1,5 @@
+# A missing build file (e.g. an old chunk after a redeploy) is a real 404, not the app's HTML:
+# the import then fails at once and the app offers "Try again". Existing files are served as
+# usual (these rules are not forced).
+/assets/*  /404.html  404
 /*  /index.html  200

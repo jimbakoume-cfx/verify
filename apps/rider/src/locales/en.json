@@ -1,7 +1,12 @@
 {
   "welcome": {
     "title": "Let's verify your identity",
-    "intro": "For your safety and our drivers', Confiance verifies every rider's identity once, before their first ride."
+    "intro": "For your safety and our drivers', Confiance verifies every rider's identity once, before their first ride.",
+    "loading": "Loading your session…",
+    "noSession": "To start, open this page from the Confiance app.",
+    "noSessionTest": "Testing? Ask a staff member for a test link.",
+    "testBadge": "Test session",
+    "logoAlt": "Confiance logo: mobility with peace of mind"
   },
   "steps": {
     "title": "How it works",
@@ -12,12 +17,201 @@
     "duration": "Takes about 2 minutes."
   },
   "start": "Start",
-  "comingSoon": "Test version: capture arrives in the next step (M1).",
   "build": "Build",
   "server": {
     "checking": "Connecting to server…",
     "ok": "Server connected",
     "not-configured": "Server not configured",
     "unreachable": "Server unreachable"
+  },
+  "common": {
+    "back": "Back",
+    "retry": "Try again",
+    "saving": "Saving…"
+  },
+  "consent": {
+    "title": "Your agreement",
+    "placeholderBadge": "Placeholder text",
+    "placeholderNote": "This wording is for testing only. The final text will be written by our lawyer.",
+    "whatTitle": "What we collect",
+    "what": "Photos of your identity document (front, and back if needed). Later, a short check of your face in front of the camera.",
+    "whyTitle": "Why",
+    "why": "To confirm that you are who you say you are, for the safety of riders and drivers.",
+    "howTitle": "How they are protected",
+    "how": "Your photos go straight to Confiance's private storage. Only authorised staff can see them, and every view is recorded.",
+    "keepTitle": "How long",
+    "keep": "Only as long as the verification needs, then they are deleted (exact period to be confirmed).",
+    "rightsTitle": "Your rights",
+    "rights": "You can ask to see or delete your data by contacting Confiance customer support.",
+    "checkbox": "I have read this information and I agree to Confiance verifying my identity with these photos.",
+    "accept": "Continue",
+    "decline": "I do not agree"
+  },
+  "declined": {
+    "title": "You did not agree",
+    "body": "Without your agreement we cannot verify your identity, so you cannot ride with Confiance yet. Nothing has been recorded.",
+    "hint": "You can close this page and return to the Confiance app.",
+    "review": "Read the terms again"
+  },
+  "document": {
+    "title": "Which document will you use?",
+    "intro": "Choose the original document you have with you.",
+    "bothSides": "Front and back",
+    "photoPage": "Photo page",
+    "continue": "Continue"
+  },
+  "documents": {
+    "cni": "National ID card (CNI)",
+    "passport": "Passport",
+    "residence_permit": "Residence permit",
+    "driving_licence": "Driving licence",
+    "voter_card": "Voter card"
+  },
+  "sides": {
+    "document_front": "Front",
+    "document_back": "Back",
+    "passportPage": "Photo page"
+  },
+  "capture": {
+    "starting": "Starting the camera…",
+    "ready": "Hold still…",
+    "processing": "Taking the photo…",
+    "auto": "The photo is taken automatically",
+    "shutter": "Take the photo",
+    "tipSurface": "Tip: hold the card straight, on a plain, dark surface.",
+    "loading": "Loading the camera…",
+    "loadFailedTitle": "Couldn't load the camera",
+    "loadFailed": "Check your connection, then try again.",
+    "turnUpright": "Hold your phone upright",
+    "tooLittleDetail": "Camera resolution too low: use another phone"
+  },
+  "hints": {
+    "no_document": "Place your ID straight inside the frame",
+    "move_closer": "Move the phone closer",
+    "move_back": "Move the phone back a little",
+    "center_document": "Centre the ID and keep it straight",
+    "too_dark": "Too dark: move to a brighter place",
+    "too_bright": "Too bright: avoid direct sunlight",
+    "glare": "Glare on the ID: tilt it slightly",
+    "blurry": "Blurry: let the camera focus",
+    "hold_still": "Hold still"
+  },
+  "camera": {
+    "deniedTitle": "Camera access is blocked",
+    "denied": "Allow Confiance to use the camera (in the browser or app settings), then try again.",
+    "no_cameraTitle": "No camera found",
+    "no_camera": "We could not find a camera on this device. Use a phone with a back camera.",
+    "insecureTitle": "Secure link needed",
+    "insecure": "The camera only works on a secure (https) page. Open the link from the Confiance app.",
+    "busyTitle": "Camera unavailable",
+    "busy": "Another app may be using the camera. Close it, then try again.",
+    "unsupportedTitle": "Camera not supported",
+    "unsupported": "This browser cannot use the camera. Open the link in Chrome.",
+    "unknownTitle": "Camera problem",
+    "unknown": "The camera could not start. Try again."
+  },
+  "turnOver": {
+    "title": "Now the back",
+    "body": "The front is done. Turn your card over to photograph the back.",
+    "continue": "Photograph the back"
+  },
+  "review": {
+    "title": "Check the photo",
+    "alt": "Photo taken: {{side}}",
+    "checkIntro": "Make sure that:",
+    "checkSharp": "All the text is sharp and readable",
+    "checkGlare": "No glare hides the text",
+    "checkWhole": "The whole document is visible",
+    "use": "Use this photo",
+    "useAnyway": "Use it anyway",
+    "retake": "Retake the photo",
+    "refused": "This photo cannot be used. Please take it again.",
+    "lowResolution": "This photo does not have enough detail to be sent. Hold your phone upright and take it again. If this keeps happening, use another phone.",
+    "refusedOverride": "This photo looks blurry or has glare. Take it again if you can."
+  },
+  "upload": {
+    "title": "Sending your photos",
+    "link": "Preparing photo {{n}} of {{total}}…",
+    "send": "Sending photo {{n}} of {{total}}…",
+    "check": "Checking photo {{n}} of {{total}}…",
+    "submit": "Finishing…",
+    "retrying": "Connection problem, trying again ({{attempt}}/{{tries}})…",
+    "keepOpen": "Please keep this page open while sending.",
+    "failedTitle": "The photos could not be sent",
+    "progressLabel": "Upload progress"
+  },
+  "done": {
+    "title": "Photos received",
+    "next": "Next step: face check (coming in M5).",
+    "close": "You can now return to the Confiance app."
+  },
+  "sessionError": {
+    "invalidTitle": "Link not valid",
+    "invalid": "This verification link is not valid or was not copied correctly.",
+    "expiredTitle": "Link expired",
+    "expired": "This verification link has expired. For your security, links are only valid for a short time.",
+    "already_submittedTitle": "Already sent",
+    "already_submitted": "The photos for this verification have already been sent.",
+    "hint": "Return to the Confiance app to get a new link.",
+    "testHint": "Testing? Ask a staff member for a new test link.",
+    "already_submittedClose": "Your photos have been received. You can return to the Confiance app."
+  },
+  "errors": {
+    "bad_request": "The request was not accepted. Please try again.",
+    "unauthorized": "Your access has expired. Open the link from the Confiance app again.",
+    "forbidden": "Access refused.",
+    "forbidden_role": "Your role does not allow this action.",
+    "not_found": "Not found.",
+    "invalid_session": "This verification link is not valid.",
+    "session_expired": "This verification link has expired.",
+    "already_submitted": "The photos for this verification have already been sent.",
+    "consent_required": "Please accept the terms first.",
+    "document_type_required": "Please choose your ID document first.",
+    "invalid_kind": "This side is not needed for this document. Please choose your document again.",
+    "missing_sides": "A photo is missing. Please take the photos again.",
+    "too_many_uploads": "Too many photos were sent for this verification. Return to the Confiance app to start again.",
+    "upload_missing": "The photo did not arrive. Please try again.",
+    "invalid_image": "The photo file is damaged. Please take the photo again.",
+    "image_too_small": "The photo file is too small (probably blank). Please take the photo again.",
+    "image_too_large": "The photo file is too large. Please take the photo again.",
+    "image_resolution_too_low": "The photo is not detailed enough. Hold your phone upright and take it again; if this keeps happening, use another phone.",
+    "audit_failed": "The action could not be recorded. Please try again.",
+    "invalid_invite": "The email address or invite code is not valid.",
+    "weak_password": "The password does not meet the rules.",
+    "server_error": "The server had a problem. Please try again.",
+    "network": "No connection to the server. Check your mobile data, then try again.",
+    "timeout": "The server is taking too long to answer. Check your connection, then try again.",
+    "not_configured": "This test version is not connected to a server.",
+    "unexpected": "Something went wrong. Please try again.",
+    "storage_failed": "The photo could not be sent. Please try again."
+  },
+  "debug": {
+    "title": "Debug",
+    "mode": "analysis",
+    "video": "video",
+    "fps": "frames/s",
+    "ms": "ms/frame",
+    "sharpness": "sharpness",
+    "focus": "focus",
+    "noise": "noise",
+    "glare": "glare",
+    "glareTile": "max glare (tile)",
+    "luma": "brightness",
+    "framing": "framing",
+    "offset": "Off-centre / overshoot",
+    "confidence": "confidence",
+    "tilt": "Tilt",
+    "motion": "motion",
+    "hints": "hints",
+    "file": "file",
+    "quality": "JPEG quality",
+    "scale": "scale",
+    "size": "size",
+    "attempts": "attempts"
+  },
+  "fatal": {
+    "title": "Something went wrong",
+    "text": "Reload the page to continue. Your link still works.",
+    "reload": "Reload"
   }
 }

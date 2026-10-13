@@ -16,9 +16,12 @@
     "build": "npm run build --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "vitest run",
+    "e2e": "playwright test",
     "licenses": "node scripts/check-licenses.mjs"
   },
   "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "deno": "2.9.6",
     "typescript": "6.0.3",
     "vitest": "5.0.2"
   }
