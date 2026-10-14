@@ -3,7 +3,7 @@ import { ANALYSIS_WIDTH } from "@verify/capture";
 import { CAPTURE_LIMITS, DOCUMENT_ASPECT } from "@verify/shared";
 import { guideInArea, guideInStillCopy, planFrame, planStill } from "./geometry";
 
-const ASPECT = DOCUMENT_ASPECT.cni;
+const ASPECT = DOCUMENT_ASPECT.cni_legacy;
 const close = (value: number, expected: number, digits = 3) => expect(value).toBeCloseTo(expected, digits);
 
 describe("guideInArea", () => {

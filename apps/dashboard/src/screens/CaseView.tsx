@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import type { Language } from "@verify/shared";
 import { useServices } from "../api/services";
 import { ErrorText, StatusBadge, TestBadge } from "../components/Feedback";
+import type { OpenDocumentData } from "../components/DocumentDataViewer";
 import { Link } from "../components/Link";
 import { type OpenPhoto, PhotoViewer } from "../components/PhotoViewer";
 import { useAsync, useNow } from "../hooks";
@@ -17,15 +18,18 @@ import {
 } from "../lib/format";
 import { type CaptureRecord, sessionOpen, sortCaptures, type StaffProfile, type VerificationSummary } from "../lib/records";
 import { photoAccess } from "../lib/roles";
+import { MrzSection } from "./CaseMrz";
 
 export interface CaseViewProps {
   id: string;
   profile: StaffProfile;
   /** Photos already open (dev screen preview only). */
   initialPhotos?: Record<string, OpenPhoto>;
+  /** Data read already shown (dev screen preview only). */
+  initialDocumentData?: OpenDocumentData;
 }
 
-export function CaseView({ id, profile, initialPhotos }: CaseViewProps) {
+export function CaseView({ id, profile, initialPhotos, initialDocumentData }: CaseViewProps) {
   const { t } = useTranslation();
   const services = useServices();
   const state = useAsync(
@@ -35,6 +39,12 @@ export function CaseView({ id, profile, initialPhotos }: CaseViewProps) {
     },
     `case:${id}`,
   );
+  // Loaded on its own, so a failure there leaves the rest of the case readable.
+  const mrz = useAsync(() => services.mrzChecks(id), `mrz:${id}`);
+  const reloadAll = () => {
+    state.reload();
+    mrz.reload();
+  };
 
   return (
     <>
@@ -65,11 +75,21 @@ export function CaseView({ id, profile, initialPhotos }: CaseViewProps) {
       {state.data?.verification && (
         <>
           <CaseSummary verification={state.data.verification} />
+          <MrzSection
+            verification={state.data.verification}
+            captures={state.data.captures}
+            checks={mrz.data}
+            error={mrz.error}
+            loading={mrz.loading}
+            onReload={reloadAll}
+            profile={profile}
+            initialData={initialDocumentData}
+          />
           <Captures
             captures={state.data.captures}
             profile={profile}
             initialPhotos={initialPhotos}
-            onReload={state.reload}
+            onReload={reloadAll}
             reloading={state.loading}
           />
         </>

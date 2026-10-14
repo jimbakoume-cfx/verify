@@ -1,5 +1,7 @@
 # A missing build file (e.g. an old chunk after a redeploy) is a real 404, not the app's HTML:
 # the import then fails at once and the app offers "Try again". Existing files are served as
-# usual (these rules are not forced).
+# usual (these rules are not forced). The same goes for the OCR files: the app's HTML must never
+# be cached for a year in place of a missing script.
 /assets/*  /404.html  404
+/ocr/*  /404.html  404
 /*  /index.html  200

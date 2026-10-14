@@ -48,6 +48,13 @@ describe("error messages", () => {
     expect(errorMessageKey("not_found", "photo")).toBe("errors.photoNotFound");
     expect(errorMessageKey("bad_request", "enroll")).toBe("errors.enrollBadRequest");
   });
+
+  it("explains a refused or unaudited data read in terms of data, not photos", () => {
+    expect(errorMessageKey("forbidden_role", "documentData")).toBe("errors.adminNoDataAccess");
+    expect(errorMessageKey("not_found", "documentData")).toBe("errors.documentDataNotFound");
+    expect(errorMessageKey("audit_failed", "documentData")).toBe("errors.documentDataAuditFailed");
+    expect(errorMessageKey("network", "documentData")).toBe("errors.network");
+  });
 });
 
 describe("errorCodeFromResponse", () => {

@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { canCreateTestSessions, isStaffRole, photoAccess, seesAllVerifications, STAFF_ROLES } from "./roles";
+import {
+  canCreateTestSessions,
+  documentDataAccess,
+  isStaffRole,
+  photoAccess,
+  seesAllVerifications,
+  STAFF_ROLES,
+} from "./roles";
 
 describe("role permissions", () => {
   it("lets supervisors and admins create test sessions, not reviewers", () => {
@@ -12,6 +19,12 @@ describe("role permissions", () => {
     expect(photoAccess("supervisor")).toBe("view");
     expect(photoAccess("reviewer")).toBe("view");
     expect(photoAccess("admin")).toBe("admin_blocked");
+  });
+
+  it("offers Show data read to supervisors and reviewers, and an explanation to admins", () => {
+    expect(documentDataAccess("supervisor")).toBe("view");
+    expect(documentDataAccess("reviewer")).toBe("view");
+    expect(documentDataAccess("admin")).toBe("admin_blocked");
   });
 
   it("tells reviewers that their list holds assigned cases only", () => {

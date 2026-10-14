@@ -24,6 +24,16 @@ export function photoAccess(role: StaffRole): PhotoAccess {
   return role === "admin" ? "admin_blocked" : "view";
 }
 
+/**
+ * POST /admin/document-data (the MRZ lines read on the phone, decrypted): the same rule as photos,
+ * supervisors and the assigned reviewer. Admins get an explanation instead of "Show data read".
+ */
+export type DocumentDataAccess = "view" | "admin_blocked";
+
+export function documentDataAccess(role: StaffRole): DocumentDataAccess {
+  return role === "admin" ? "admin_blocked" : "view";
+}
+
 /** Reviewers only see the verifications assigned to them, so their list needs saying so. */
 export function seesAllVerifications(role: StaffRole): boolean {
   return role !== "reviewer";

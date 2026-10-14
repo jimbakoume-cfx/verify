@@ -46,7 +46,8 @@ export default defineConfig<TestOptions>({
     screenshot: "only-on-failure",
   },
   webServer: {
-    // The production build, made with a local Supabase URL that only the page routes answer.
+    // The production build, made with a Supabase URL that only the page routes answer (backend.ts),
+    // served with the real headers of public/_headers, CSP included (vite.config.ts preview hook).
     command: `npx vite build apps/rider --outDir ../../${OUT}/rider --emptyOutDir --logLevel warn && npx vite preview apps/rider --outDir ../../${OUT}/rider --port ${PORT} --strictPort`,
     url: BASE_URL,
     env: { VITE_SUPABASE_URL: SUPABASE_URL, VITE_SUPABASE_PUBLISHABLE_KEY: PUBLISHABLE_KEY, COMMIT_REF: "e2e" },
@@ -56,7 +57,11 @@ export default defineConfig<TestOptions>({
     stderr: "pipe",
   },
   projects: [
-    { name: "card", testMatch: "capture-card.spec.ts", use: { camera: "card", launchOptions: launch(cameraArgs("card")) } },
+    {
+      name: "card",
+      testMatch: ["capture-card.spec.ts", "capture-cni-biometric.spec.ts"],
+      use: { camera: "card", launchOptions: launch(cameraArgs("card")) },
+    },
     {
       name: "passport",
       testMatch: "capture-passport.spec.ts",
@@ -66,6 +71,11 @@ export default defineConfig<TestOptions>({
       name: "blurred",
       testMatch: "capture-blurred.spec.ts",
       use: { camera: "blurred", launchOptions: launch(cameraArgs("blurred")) },
+    },
+    {
+      name: "smudged",
+      testMatch: "capture-mrz-smudged.spec.ts",
+      use: { camera: "smudged", launchOptions: launch(cameraArgs("smudged")) },
     },
     { name: "no-card", testMatch: "capture-no-card.spec.ts", use: { camera: "noCard", launchOptions: launch(cameraArgs("noCard")) } },
     {

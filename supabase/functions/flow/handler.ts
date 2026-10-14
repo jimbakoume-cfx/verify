@@ -11,6 +11,12 @@ import {
   type FlowCaptureSummary,
   type FlowSession,
   type FlowStatus,
+  type MrzCheckDetails,
+  MRZ_EXPECTATION,
+  type MrzExpectation,
+  type MrzFormat,
+  type MrzReportRequest,
+  type MrzReportResponse,
   REQUIRED_SIDES,
   SESSION_TOKEN_HEADER,
   type UploadUrlResponse,
@@ -21,7 +27,8 @@ import { sha256Hex } from "../_shared/crypto.ts";
 import { badRequest, createRouter, type Handler, HttpError, isOneOf, jsonResponse, readJsonObject } from "../_shared/http.ts";
 import { isJpeg, readJpegSize } from "../_shared/jpeg.ts";
 import { consoleLogger, type Logger } from "../_shared/log.ts";
-import { buildCapturePath, isOwnCapturePath, sanitizeQuality } from "./validation.ts";
+import { documentCodeFits, MRZ_PARSER_VERSION, parseMrz } from "../_shared/mrz.ts";
+import { buildCapturePath, isOwnCapturePath, sanitizeQuality, validateMrzReport } from "./validation.ts";
 
 export interface FlowVerification {
   id: string;
@@ -55,6 +62,22 @@ export interface NewCapture {
 
 export type SubmitResult = "ok" | "already_submitted" | "missing_sides";
 
+/** What flow_record_mrz stores for one photo: the check result, and the encrypted lines when some were read. */
+export interface MrzRecord {
+  verificationId: string;
+  captureId: string;
+  /** The lines joined with "\n", encrypted by the database; null when nothing was read. */
+  lines: string | null;
+  /** Format of the lines; null when nothing was read. */
+  format: MrzFormat | null;
+  outcome: "pass" | "flag";
+  /** check_result.details: outcomes and counts only, never the lines or anything read from them. */
+  details: MrzCheckDetails;
+}
+
+/** "exists": this photo already has its MRZ check (a retried report); nothing was changed. */
+export type MrzRecordResult = "ok" | "exists" | "not_found";
+
 export interface FlowRepo {
   findVerificationByTokenHash(tokenHash: string): Promise<FlowVerification | null>;
   getVerification(id: string): Promise<FlowVerification | null>;
@@ -80,6 +103,13 @@ export interface FlowRepo {
   insertCapture(capture: NewCapture): Promise<string>;
   /** flow_submit: locks the row, checks status and sides, opens the review task and audits. */
   submit(verificationId: string, requiredSides: readonly CaptureSide[]): Promise<SubmitResult>;
+  /** A capture of this verification that has not been erased; null otherwise. */
+  findActiveCapture(verificationId: string, captureId: string): Promise<{ kind: string } | null>;
+  /**
+   * flow_record_mrz: re-checks that the capture is a live one of this verification, then encrypts the
+   * lines, writes the check result and audits (without the lines), all in one transaction. Idempotent per photo.
+   */
+  recordMrz(record: MrzRecord): Promise<MrzRecordResult>;
   audit(entry: AuditEntry): Promise<void>;
 }
 
@@ -278,6 +308,39 @@ export function createFlowHandler(deps: FlowDeps): Handler {
     }));
   };
 
+  // Never logs or audits the lines: they reach the database only as a parameter of flow_record_mrz,
+  // which stores them encrypted.
+  const postMrz: Handler = async (req) => {
+    const v = await loadSession(req);
+    if (!v.declaredDocument) throw new HttpError(409, "document_type_required");
+    const expectation = MRZ_EXPECTATION[v.declaredDocument];
+    if (!expectation) throw new HttpError(422, "invalid_mrz", "The declared document has no code lines.");
+    const check = validateMrzReport(await readJsonObject(req), expectation.format);
+    if (!check.ok) throw new HttpError(check.code === "bad_request" ? 400 : 422, check.code, check.message);
+    const report = check.report;
+
+    // Another session's capture gets the same answer as a missing one.
+    const capture = await repo.findActiveCapture(v.id, report.captureId);
+    if (!capture) throw new HttpError(404, "not_found");
+    if (capture.kind !== expectation.side) {
+      throw new HttpError(422, "invalid_mrz", "This photo is not of the side that carries the code lines.");
+    }
+
+    const { outcome, details } = assessMrzReport(report, expectation, now());
+    const result = await repo.recordMrz({
+      verificationId: v.id,
+      captureId: report.captureId,
+      lines: report.result === "read" ? report.lines.join("\n") : null,
+      format: report.result === "read" ? expectation.format : null,
+      outcome,
+      details,
+    });
+    // The capture was erased between the lookup and the write.
+    if (result === "not_found") throw new HttpError(404, "not_found");
+    const response: MrzReportResponse = { recorded: true };
+    return jsonResponse(200, response);
+  };
+
   const postSubmit: Handler = async (req) => {
     const v = await loadSession(req);
     if (!v.declaredDocument) throw new HttpError(409, "document_type_required");
@@ -297,6 +360,7 @@ export function createFlowHandler(deps: FlowDeps): Handler {
       "/document-type": { POST: postDocumentType },
       "/upload-url": { POST: postUploadUrl },
       "/captures": { POST: postCaptures },
+      "/mrz": { POST: postMrz },
       "/submit": { POST: postSubmit },
     },
   });
@@ -317,6 +381,75 @@ export function checkImage(bytes: Uint8Array): ImageCheck {
     return { ok: false, code: "image_resolution_too_low" };
   }
   return { ok: true, ...size };
+}
+
+export interface MrzAssessment {
+  outcome: "pass" | "flag";
+  details: MrzCheckDetails;
+}
+
+/**
+ * The server's own verdict on an MRZ report. The phone sends no verdict: the lines are parsed again
+ * and every check digit recomputed here. "pass" only when lines of the expected format were read,
+ * every check digit is right, both dates are real and the document code fits the declared document;
+ * anything else, an unreadable MRZ included, is "flag" for staff to look at.
+ */
+export function assessMrzReport(report: MrzReportRequest, expectation: MrzExpectation, today: Date): MrzAssessment {
+  if (report.result === "unreadable") {
+    return {
+      outcome: "flag",
+      details: {
+        source: "mrz_phone",
+        parserVersion: MRZ_PARSER_VERSION,
+        captureId: report.captureId,
+        result: "unreadable",
+        reason: report.reason,
+        expectedFormat: expectation.format,
+        format: null,
+        checks: null,
+        documentCodeFits: null,
+        datesValid: null,
+        attempts: report.attempts,
+        corrections: null,
+        engine: report.engine,
+        ms: null,
+      },
+    };
+  }
+
+  const parsed = parseMrz(report.lines, today);
+  const codeFits = parsed ? documentCodeFits(expectation.format, parsed.documentCode) : null;
+  const pass = parsed !== null && parsed.format === expectation.format && parsed.valid && parsed.datesValid &&
+    codeFits === true;
+  // Copied field by field so that nothing else from the parser (names, numbers, dates) can reach details.
+  const checks: MrzCheckDetails["checks"] = parsed
+    ? {
+      documentNumber: parsed.checks.documentNumber,
+      birthDate: parsed.checks.birthDate,
+      expiryDate: parsed.checks.expiryDate,
+      ...(parsed.checks.personalNumber === undefined ? {} : { personalNumber: parsed.checks.personalNumber }),
+      composite: parsed.checks.composite,
+    }
+    : null;
+  return {
+    outcome: pass ? "pass" : "flag",
+    details: {
+      source: "mrz_phone",
+      parserVersion: MRZ_PARSER_VERSION,
+      captureId: report.captureId,
+      result: "read",
+      reason: null,
+      expectedFormat: expectation.format,
+      format: parsed?.format ?? null,
+      checks,
+      documentCodeFits: codeFits,
+      datesValid: parsed?.datesValid ?? null,
+      attempts: report.attempts,
+      corrections: report.corrections,
+      engine: report.engine,
+      ms: report.ms,
+    },
+  };
 }
 
 function toCaptureResponse(c: StoredCapture): CaptureCompleteResponse {

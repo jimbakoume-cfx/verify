@@ -1,11 +1,16 @@
 // The rider's steps through the flow, found by role and visible text in the current language.
 import { type Locator, type Page, expect } from "@playwright/test";
-import type { CaptureSide, DeclaredDocument } from "../../supabase/functions/_shared/contract";
+import { type CaptureSide, type DeclaredDocument, MRZ_EXPECTATION } from "../../supabase/functions/_shared/contract";
 import type { FakeBackend } from "./backend";
 import { type Language, translate } from "./i18n";
 
 /** Spec: the front is auto-captured within 10 s with a sharp, well-framed card. */
 export const AUTO_CAPTURE_TIMEOUT = 10_000;
+/**
+ * Reading the code lines after the photo: about 0.5-2 s in headless Chromium, including the
+ * engine's start on a fresh browser profile (the model is not cached yet). Generous for CI.
+ */
+export const READ_TIMEOUT = 20_000;
 
 export class Rider {
   /** The language the rider currently sees (French by default). */
@@ -41,6 +46,21 @@ export class Rider {
     return this.page.getByRole("button", { name: this.t("capture.shutter"), exact: true });
   }
 
+  /** "Code lines read ✓" on the review screen: all a rider learns about the reading. */
+  get mrzRead(): Locator {
+    return this.page.locator("p.mrz-read");
+  }
+
+  /** "The code lines could not be read", with tips, on the review screen. */
+  get mrzWarning(): Locator {
+    return this.page.locator(".notice.warn").filter({ hasText: this.t("mrz.unreadTitle") });
+  }
+
+  /** The ?debug=1 section about the code lines (review screen). */
+  get mrzDebug(): Locator {
+    return this.page.locator(".mrz-debug");
+  }
+
   /** Opens the rider link: `/#s=<token>`, with an optional query such as "?debug=1". */
   async open(query = ""): Promise<void> {
     await this.page.goto(`/${query}#s=${this.backend.token}`);
@@ -72,10 +92,16 @@ export class Rider {
     await this.chooseDocument(document);
   }
 
-  /** Waits for the camera screen of `side`, then for the automatic photo (review screen). */
+  /**
+   * Waits for the camera screen of `side`, then for the automatic photo, then (for the side that
+   * carries the code lines) for their reading: ends on the review screen.
+   */
   async autoCapture(document: DeclaredDocument, side: CaptureSide): Promise<void> {
     await expect(this.captureHeading(document, side)).toBeVisible();
-    await expect(this.heading("review.title")).toBeVisible({ timeout: AUTO_CAPTURE_TIMEOUT });
+    const taken = this.heading("review.title").or(this.heading("reading.title"));
+    await expect(taken).toBeVisible({ timeout: AUTO_CAPTURE_TIMEOUT });
+    const read = MRZ_EXPECTATION[document]?.side === side;
+    await expect(this.heading("review.title")).toBeVisible({ timeout: read ? READ_TIMEOUT : undefined });
   }
 
   async usePhoto(): Promise<void> {
@@ -89,12 +115,17 @@ export class Rider {
   }
 
   /** Both sides of an ID-1 card, automatically, then the upload. */
-  async photographCard(): Promise<void> {
-    await this.autoCapture("cni", "document_front");
+  async photographCard(document: DeclaredDocument): Promise<void> {
+    await this.autoCapture(document, "document_front");
     await this.usePhoto();
     await this.turnOver();
-    await this.autoCapture("cni", "document_back");
+    await this.autoCapture(document, "document_back");
     await this.usePhoto();
+  }
+
+  /** Every screen title shown since the link was opened, in order (logged by fixtures.ts). */
+  screensSeen(): Promise<string[]> {
+    return this.page.evaluate(() => [...(window as unknown as { __screens: string[] }).__screens]);
   }
 
   async switchLanguage(lang: Language): Promise<void> {

@@ -77,9 +77,13 @@
     "create": "Nouvelle session de test",
     "creating": "Création…",
     "qrLabel": "QR code du lien passager",
-    "scan": "Scannez ce QR code avec l'appareil photo du téléphone, ou envoyez-lui le lien.",
+    "scan": "Scannez un QR code avec l'appareil photo du téléphone, ou envoyez-lui un lien.",
     "linkLabel": "Lien passager",
     "copy": "Copier le lien",
+    "debugLabel": "Lien de débogage",
+    "debugQrLabel": "QR code du lien de débogage",
+    "debugHint": "Le lien de débogage ouvre la même session, et le téléphone affiche aussi ses mesures et ce qu'il a lu dans les lignes de code (✅/❌ pour chaque chiffre de contrôle).",
+    "copyDebug": "Copier le lien de débogage",
     "expiresIn": "Le lien expire dans {{time}}",
     "expired": "Ce lien a expiré. Créez une nouvelle session de test.",
     "openCase": "Ouvrir le dossier de cette session"
@@ -108,8 +112,16 @@
     "expired": "Expirée",
     "cancelled": "Annulée"
   },
+  "checkOutcome": {
+    "pass": "Conforme",
+    "flag": "À vérifier",
+    "fail": "Échec",
+    "error": "Erreur",
+    "skipped": "Non effectué"
+  },
   "documents": {
-    "cni": "Carte nationale d'identité",
+    "cni_biometric": "Nouvelle CNI (2025)",
+    "cni_legacy": "Ancienne CNI",
     "passport": "Passeport",
     "residence_permit": "Titre de séjour",
     "driving_licence": "Permis de conduire",
@@ -148,6 +160,80 @@
     "photoLoadFailed": "La photo n'a pas pu être chargée. Le lien a peut-être expiré : rouvrez-la.",
     "photoLoading": "Chargement de la photo…"
   },
+  "mrz": {
+    "title": "Lignes de code (MRZ)",
+    "intro": "Lues sur le téléphone du passager. Le serveur a lui-même revérifié les lignes : le verdict du téléphone n'est pas utilisé.",
+    "expectedOn": {
+      "document_front": "Ce document porte ses lignes de code au recto : {{format}}.",
+      "document_back": "Ce document porte ses lignes de code au verso : {{format}}."
+    },
+    "optional": "Elles sont facultatives pour ce document : le passager n'a jamais dû reprendre la photo pour elles.",
+    "none": "Ce document n'a pas de lignes de code : rien à lire.",
+    "notReceived": "Non reçu",
+    "notReceivedBody": "Le téléphone n'a envoyé aucun résultat de lecture pour cette photo.",
+    "noPhotoYet": "Pas encore de photo de cette face.",
+    "photoOf": "Photo prise le {{time}}",
+    "receivedAt": "Résultat reçu le {{time}}",
+    "earlierPhoto": "Photo précédente",
+    "unknownSide": "Photo",
+    "detailsUnknown": "Le détail de ce résultat n'a pas pu être lu.",
+    "unreadable": {
+      "not_found": "Illisible sur le téléphone : aucune ligne de code n'a été trouvée sur la photo.",
+      "reader_unavailable": "Illisible sur le téléphone : le lecteur n'a pas pu y fonctionner (navigateur trop ancien, ou fichiers non chargés).",
+      "unknown": "Illisible sur le téléphone."
+    },
+    "checks": {
+      "format": "Format conforme",
+      "documentNumber": "Chiffre de contrôle du numéro de document",
+      "birthDate": "Chiffre de contrôle de la date de naissance",
+      "expiryDate": "Chiffre de contrôle de la date d'expiration",
+      "personalNumber": "Chiffre de contrôle du numéro personnel",
+      "composite": "Chiffre de contrôle global",
+      "documentCode": "Code du document conforme au document déclaré",
+      "dates": "Dates valides"
+    },
+    "tick": {
+      "ok": "conforme",
+      "bad": "non conforme",
+      "unknown": "non disponible"
+    },
+    "format": "Format lu",
+    "expectedFormat": "Format attendu",
+    "tries": "Tentatives de lecture",
+    "corrections": "Caractères corrigés",
+    "readingTime": "Durée de lecture",
+    "engine": "Moteur de lecture",
+    "parserVersion": "Version du contrôle serveur",
+    "dataLogged": "Chaque consultation des données lues est enregistrée dans le journal d'audit. Elles restent affichées 60 secondes.",
+    "showData": "Afficher les données lues",
+    "hideData": "Masquer les données",
+    "dataExpiresIn": "Les données disparaissent dans {{time}}",
+    "dataExpired": "Le délai est écoulé.",
+    "dataRemoved": "Le délai était écoulé et les données ont été retirées de la page. Affichez-les à nouveau si besoin.",
+    "noData": "Aucune ligne de code n'a été enregistrée pour ce dossier.",
+    "dataOf": "Données lues : {{side}}",
+    "recordedAt": "Reçues le {{time}}",
+    "unparsable": "Ces lignes n'ont pas pu être interprétées.",
+    "rawLines": "Lignes telles que lues par le téléphone",
+    "invalidDate": "{{raw}} (date impossible)",
+    "fields": {
+      "surname": "Nom",
+      "givenNames": "Prénoms",
+      "documentNumber": "Numéro du document",
+      "nationality": "Nationalité",
+      "birthDate": "Date de naissance",
+      "sex": "Sexe",
+      "expiryDate": "Date d'expiration",
+      "issuingState": "État émetteur",
+      "documentCode": "Code du document",
+      "optionalData": "Données facultatives"
+    },
+    "sex": {
+      "M": "Masculin",
+      "F": "Féminin",
+      "X": "Non précisé"
+    }
+  },
   "capture": {
     "size": "Taille",
     "dimensions": "Dimensions (px)",
@@ -185,6 +271,7 @@
     "image_too_small": "Le fichier image est trop petit.",
     "image_too_large": "Le fichier image est trop volumineux.",
     "image_resolution_too_low": "La résolution de l'image est trop faible.",
+    "invalid_mrz": "Les lignes de code (MRZ) envoyées n'ont pas été acceptées.",
     "audit_failed": "L'accès n'a pas pu être enregistré dans le journal d'audit : la photo n'est donc pas affichée. Réessayez dans un instant.",
     "invalid_invite": "Ce code d'invitation n'est pas valide pour cette adresse e-mail : il est peut-être mal saisi, expiré ou déjà utilisé. Demandez un nouveau code à un administrateur.",
     "weak_password": "Ce mot de passe n'est pas accepté. Utilisez entre {{min}} et {{max}} caractères et au plus {{maxBytes}} octets (une lettre accentuée compte 2), sans la partie de votre e-mail avant le @, et évitez les mots de passe courants.",
@@ -194,6 +281,9 @@
     "enrollBadRequest": "Vérifiez l'adresse e-mail et le code d'invitation.",
     "testSessionRole": "Seuls les superviseurs et les administrateurs peuvent créer des sessions de test.",
     "adminNoImageAccess": "Les administrateurs n'ont pas d'accès courant aux images des pièces d'identité. Un superviseur ou le vérificateur assigné peut les ouvrir.",
-    "photoNotFound": "Cette photo n'est plus disponible, ou ce dossier ne vous est pas assigné."
+    "photoNotFound": "Cette photo n'est plus disponible, ou ce dossier ne vous est pas assigné.",
+    "adminNoDataAccess": "Les administrateurs n'ont pas d'accès courant aux données lues sur les pièces d'identité. Un superviseur ou le vérificateur assigné peut les afficher.",
+    "documentDataNotFound": "Ce dossier n'est plus disponible, ou il ne vous est pas assigné.",
+    "documentDataAuditFailed": "L'accès n'a pas pu être enregistré dans le journal d'audit : les données ne sont donc pas affichées. Réessayez dans un instant."
   }
 }

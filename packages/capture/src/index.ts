@@ -60,3 +60,15 @@ export {
   outputSize,
 } from "./compress";
 export type { CompressionOptions } from "./compress";
+export {
+  MRZ_PRINT,
+  PREPARE_DEFAULTS,
+  decodePgm,
+  encodePgm,
+  expectedMrzCharHeight,
+  fallbackMrzBand,
+  locateMrzBand,
+  prepareForOcr,
+  rotateGray180,
+} from "./mrz";
+export type { MrzBand, MrzBinarization, MrzLayoutName, PrepareOptions } from "./mrz";

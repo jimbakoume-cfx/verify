@@ -1,7 +1,14 @@
+# Security headers for every page and file. The OCR engine (WebAssembly, in a Web Worker) needs
+# 'wasm-unsafe-eval' (compiling WebAssembly; JavaScript from strings stays blocked) and
+# worker-src 'self'. Keep vercel.json in step: src/hosting.test.ts compares them path by path.
 /*
   Strict-Transport-Security: max-age=63072000; includeSubDomains
   X-Content-Type-Options: nosniff
   Referrer-Policy: no-referrer
   X-Robots-Tag: noindex, nofollow
   Permissions-Policy: camera=(self), microphone=(), geolocation=(), payment=()
-  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' https://*.supabase.co; frame-ancestors 'none'; base-uri 'none'; form-action 'none'
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' https://*.supabase.co; frame-ancestors 'none'; base-uri 'none'; form-action 'none'
+
+# OCR engine and model: the folders are versioned (/ocr/7.0.0, /ocr/mrz-1), so cache them for good.
+/ocr/*
+  Cache-Control: public, max-age=31536000, immutable

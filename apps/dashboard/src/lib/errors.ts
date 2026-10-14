@@ -38,13 +38,19 @@ export function toClientError(error: unknown): ClientError {
 }
 
 /** Where an error happened: the same code can deserve a more specific message. */
-export type ErrorContext = "default" | "enroll" | "testSession" | "photo";
+export type ErrorContext = "default" | "enroll" | "testSession" | "photo" | "documentData";
 
 const CONTEXT_KEYS: Record<ErrorContext, Partial<Record<ClientErrorCode, string>>> = {
   default: {},
   enroll: { bad_request: "errors.enrollBadRequest" },
   testSession: { forbidden_role: "errors.testSessionRole" },
   photo: { forbidden_role: "errors.adminNoImageAccess", not_found: "errors.photoNotFound" },
+  // The default audit_failed text speaks of a photo.
+  documentData: {
+    forbidden_role: "errors.adminNoDataAccess",
+    not_found: "errors.documentDataNotFound",
+    audit_failed: "errors.documentDataAuditFailed",
+  },
 };
 
 /** i18n key of the message to show for an error code. */

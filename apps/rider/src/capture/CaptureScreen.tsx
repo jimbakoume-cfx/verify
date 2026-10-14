@@ -7,7 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DEFAULT_THRESHOLDS } from "@verify/capture";
 import type { CaptureSide, ClientQuality, DeclaredDocument } from "@verify/shared";
 import type { FlowErrorCode } from "../flow/errors";
-import type { Shot } from "../flow/machine";
+import { type Shot, mrzExpectationFor } from "../flow/machine";
 import { type Analyzer, createAnalyzer } from "./analyzerClient";
 import { type CameraErrorKind, classifyCameraError, openCamera, stopStream } from "./camera";
 import { CaptureDebug, type LiveDebug } from "./CaptureDebug";
@@ -173,6 +173,8 @@ export default function CaptureScreen({ side, document, error, debug, onCaptured
         source,
         elapsedMs,
         thresholds: { ...DEFAULT_THRESHOLDS, ...overrides },
+        // Only the side with the MRZ: the copy costs memory until the lines are read.
+        keepGray: mrzExpectationFor(document, side) !== null,
       }).then(
         (still) =>
           onCapturedRef.current({
@@ -189,6 +191,7 @@ export default function CaptureScreen({ side, document, error, debug, onCaptured
               scale: still.scale,
               attempts: still.attempts,
             },
+            gray: still.gray,
           }),
         () => {
           capturingRef.current = false;
@@ -197,7 +200,7 @@ export default function CaptureScreen({ side, document, error, debug, onCaptured
       );
       return true;
     },
-    [side, overrides],
+    [side, document, overrides],
   );
   const takePhotoRef = useRef(takePhoto);
   useEffect(() => {

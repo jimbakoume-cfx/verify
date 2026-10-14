@@ -28,15 +28,33 @@ describe("createFlowApi", () => {
   it("posts JSON bodies to the contract routes", async () => {
     const fetchMock = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => json(200, {}));
     const api = apiWith(fetchMock as typeof fetch);
-    await api.consent({ consentVersion: "placeholder-v0", language: "fr" });
-    await api.setDocumentType({ declaredDocument: "cni" });
+    await api.consent({ consentVersion: "placeholder-v1", language: "fr" });
+    await api.setDocumentType({ declaredDocument: "cni_legacy" });
     await api.uploadUrl({ kind: "document_front" });
+    await api.reportMrz({
+      captureId: "c0ffee00-0000-4000-8000-000000000001",
+      result: "unreadable",
+      reason: "not_found",
+      attempts: 2,
+      engine: "tesseract.js-7.0.0/mrz-1",
+    });
     await api.submit();
     const calls = fetchMock.mock.calls.map(([url, init]) => [String(url).slice(BASE.length), init?.method, init?.body]);
     expect(calls).toEqual([
-      ["/consent", "POST", '{"consentVersion":"placeholder-v0","language":"fr"}'],
-      ["/document-type", "POST", '{"declaredDocument":"cni"}'],
+      ["/consent", "POST", '{"consentVersion":"placeholder-v1","language":"fr"}'],
+      ["/document-type", "POST", '{"declaredDocument":"cni_legacy"}'],
       ["/upload-url", "POST", '{"kind":"document_front"}'],
+      [
+        "/mrz",
+        "POST",
+        JSON.stringify({
+          captureId: "c0ffee00-0000-4000-8000-000000000001",
+          result: "unreadable",
+          reason: "not_found",
+          attempts: 2,
+          engine: "tesseract.js-7.0.0/mrz-1",
+        }),
+      ],
       ["/submit", "POST", "{}"],
     ]);
     expect((fetchMock.mock.calls[0][1]?.headers as Record<string, string>)["content-type"]).toBe("application/json");

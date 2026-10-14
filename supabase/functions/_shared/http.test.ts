@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { MAX_BODY_BYTES } from "./config.ts";
+import { ERROR_CODES } from "./contract.ts";
 import { createRouter, errorResponse, HttpError, isUuid, jsonResponse, readJsonObject, routePath } from "./http.ts";
 import { ALLOWED_ORIGIN, makeRequest, readJson } from "./test-helpers.ts";
 
@@ -125,6 +126,13 @@ describe("routing and methods", () => {
     expect(text).not.toContain("user@example.com");
     expect(text).not.toMatch(/\bat\s/);
     expect(log.error).toHaveBeenCalledTimes(1);
+  });
+
+  it("has a fixed default message for every error code of the contract", async () => {
+    for (const code of ERROR_CODES) {
+      const body = await readJson(errorResponse(400, code));
+      expect(body, code).toEqual({ error: { code, message: expect.stringMatching(/^[A-Z].+\.$/) } });
+    }
   });
 
   it("sends JSON with no-store caching", () => {

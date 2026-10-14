@@ -1,13 +1,32 @@
 // The fake cameras: synthetic videos made by scripts/make-fake-camera-video.py and played by
 // Chromium as the camera. Shared by playwright.config.ts (launch flags), global-setup.ts (makes the
-// files) and the tests (expected geometry).
+// files) and the tests (expected geometry, and the code lines printed on the fake documents).
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import type { MrzFormat } from "../../supabase/functions/_shared/contract";
 
 export const REPO_ROOT = resolve(__dirname, "../..");
 export const VIDEO_SCRIPT = join(REPO_ROOT, "scripts/make-fake-camera-video.py");
+/** The MRZ strips the script prints on the fake documents (made by scripts/make-mrz-fixtures.py). */
+export const MRZ_FIXTURES = join(REPO_ROOT, "e2e/fixtures/mrz");
+
+interface MrzManifest {
+  documents: Record<"td1" | "td3", { format: MrzFormat; lines: string[] }>;
+  strips: { file: string }[];
+}
+
+function mrzManifest(): MrzManifest {
+  return JSON.parse(readFileSync(join(MRZ_FIXTURES, "manifest.json"), "utf8")) as MrzManifest;
+}
+
+/**
+ * The code lines on the fake documents: fictitious specimens (state UTO) with valid check digits.
+ * TD1 on the ID-1 card (both sides of the video show the same card), TD3 on the passport page.
+ */
+const mrzDocuments = mrzManifest().documents;
+export const MRZ_LINES: Record<"td1" | "td3", string[]> = { td1: mrzDocuments.td1.lines, td3: mrzDocuments.td3.lines };
 
 /** The phone screen of every test, in CSS pixels. */
 export const VIEWPORT = { width: 390, height: 844 };
@@ -30,7 +49,8 @@ export const GUIDES = {
 } satisfies Record<string, Rect>;
 
 export interface FakeCamera {
-  variant: "sharp" | "blurred" | "none";
+  /** sharp, heavily out of focus, in focus but with the code lines smudged, or no document at all. */
+  variant: "sharp" | "blurred" | "smudged" | "none";
   document: keyof typeof GUIDES;
   width: number;
   height: number;
@@ -50,6 +70,8 @@ export const CAMERAS = {
   passport: { variant: "sharp", document: "passport", width: 1080, height: 1920, portrait: true },
   blurred: { variant: "blurred", document: "id1", width: 1080, height: 1920, portrait: true },
   noCard: { variant: "none", document: "id1", width: 1080, height: 1920, portrait: true },
+  // The sharp card, but a greasy smear across its code lines: they cannot be read.
+  smudged: { variant: "smudged", document: "id1", width: 1080, height: 1920, portrait: true },
   // A camera limited to 720p, held upright: the photo would be ~566 px long, under the server's
   // minimum whatever the rider does. The app says so and never takes it by itself.
   lowRes: { variant: "sharp", document: "id1", width: 720, height: 1280, portrait: true },
@@ -71,11 +93,16 @@ export function scriptArgs(camera: FakeCamera): string[] {
   ];
 }
 
-/** The video's file name changes with the script and its arguments, so a stale file is never reused. */
+/**
+ * The video's file name changes with the script, its arguments and the MRZ fixtures it prints, so a
+ * stale file is never reused.
+ */
 export function videoPath(name: CameraName): string {
   const camera: FakeCamera = CAMERAS[name];
-  const hash = createHash("sha256").update(readFileSync(VIDEO_SCRIPT)).update(scriptArgs(camera).join(" ")).digest("hex");
-  return join(VIDEO_DIR, `${name}-${hash.slice(0, 12)}.y4m`);
+  const hash = createHash("sha256").update(readFileSync(VIDEO_SCRIPT)).update(scriptArgs(camera).join(" "));
+  hash.update(readFileSync(join(MRZ_FIXTURES, "manifest.json")));
+  for (const strip of mrzManifest().strips) hash.update(readFileSync(join(MRZ_FIXTURES, strip.file)));
+  return join(VIDEO_DIR, `${name}-${hash.digest("hex").slice(0, 12)}.y4m`);
 }
 
 /** Chromium flags: a fake camera playing `name`, and camera permission granted without a prompt. */

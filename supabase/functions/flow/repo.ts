@@ -4,7 +4,14 @@ import type { CaptureSide, DeclaredDocument, FlowStatus } from "../_shared/contr
 import { ID_CAPTURES_BUCKET } from "../_shared/config.ts";
 import { dbError, insertAudit } from "../_shared/db.ts";
 import { InternalError } from "../_shared/log.ts";
-import type { CaptureStorage, FlowRepo, FlowVerification, StoredCapture, SubmitResult } from "./handler.ts";
+import type {
+  CaptureStorage,
+  FlowRepo,
+  FlowVerification,
+  MrzRecordResult,
+  StoredCapture,
+  SubmitResult,
+} from "./handler.ts";
 
 const VERIFICATION_COLUMNS = "id, status, locale, declared_document, session_expires_at, is_test";
 
@@ -142,6 +149,31 @@ export function createFlowRepo(db: SupabaseClient): FlowRepo {
         throw new InternalError("rpc.flow_submit returned an unexpected value");
       }
       return data satisfies SubmitResult;
+    },
+
+    async findActiveCapture(verificationId, captureId) {
+      const { data, error } = await db.from("capture").select("kind").eq("id", captureId)
+        .eq("verification_id", verificationId).is("deleted_at", null).maybeSingle<{ kind: string }>();
+      if (error) throw dbError("capture.select_active", error);
+      return data ? { kind: data.kind } : null;
+    },
+
+    async recordMrz(r) {
+      // The lines travel only as an RPC parameter: the project does not log parameters, and the
+      // database encrypts them before storing (see the M2 migration).
+      const { data, error } = await db.rpc("flow_record_mrz", {
+        p_verification: r.verificationId,
+        p_capture: r.captureId,
+        p_lines: r.lines,
+        p_format: r.format,
+        p_outcome: r.outcome,
+        p_details: r.details,
+      });
+      if (error) throw dbError("rpc.flow_record_mrz", error);
+      if (data !== "ok" && data !== "exists" && data !== "not_found") {
+        throw new InternalError("rpc.flow_record_mrz returned an unexpected value");
+      }
+      return data satisfies MrzRecordResult;
     },
 
     audit: (entry) => insertAudit(db, entry),

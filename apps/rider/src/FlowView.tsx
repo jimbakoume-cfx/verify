@@ -4,11 +4,12 @@ import { Suspense, lazy, useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { CaptureScreenProps } from "./capture/CaptureScreen";
 import { ErrorBoundary } from "./ErrorBoundary";
-import { type FlowState, canUseShot } from "./flow/machine";
+import { type FlowState, canUseShot, mrzReview } from "./flow/machine";
 import type { FlowActions } from "./flow/useFlow";
 import { ConsentScreen, DeclinedScreen } from "./screens/Consent";
 import { DocumentChoiceScreen } from "./screens/DocumentChoice";
 import { DoneScreen, SessionErrorScreen } from "./screens/End";
+import { ReadingScreen } from "./screens/Reading";
 import { ReviewScreen } from "./screens/Review";
 import { TurnOverScreen } from "./screens/TurnOver";
 import { UploadScreen } from "./screens/Upload";
@@ -128,6 +129,11 @@ export function FlowView({ state, actions, debug }: { state: FlowState; actions:
       );
     case "turnOver":
       return <TurnOverScreen onContinue={actions.turnOverReady} />;
+    case "reading": {
+      const shot = state.shots[screen.side];
+      if (!shot) return null;
+      return <ReadingScreen shot={shot} document={state.document} progress={state.readProgress} onBack={actions.back} />;
+    }
     case "review": {
       const shot = state.shots[screen.side];
       if (!shot) return null;
@@ -136,6 +142,7 @@ export function FlowView({ state, actions, debug }: { state: FlowState; actions:
           shot={shot}
           document={state.document}
           canUse={canUseShot(state, shot)}
+          mrz={mrzReview(state, shot)}
           debug={debug}
           onUse={actions.useShot}
           onRetake={actions.retake}

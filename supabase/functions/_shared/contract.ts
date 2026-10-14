@@ -107,8 +107,12 @@ export const CAPTURE_LIMITS = {
   maxUploadUrlsPerSession: 20,
 } as const;
 
-/** Version label of the consent wording shown to the rider. Replace when the lawyer's text arrives. */
-export const CONSENT_VERSION = "placeholder-v0";
+/**
+ * Version label of the consent wording shown to the rider: change it whenever the wording changes,
+ * so each recorded consent names the text that was shown. Replace when the lawyer's text arrives.
+ * v1 (M2): the wording adds the details read from the document's code lines.
+ */
+export const CONSENT_VERSION = "placeholder-v1";
 
 // ---------------------------------------------------------------------------
 // Client-side quality metrics sent with each capture (informational; the server re-checks in M3)

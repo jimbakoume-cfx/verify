@@ -10,6 +10,7 @@ import { QrCode } from "../components/QrCode";
 import { useAsync, useNow } from "../hooks";
 import { formatDateTime, shortId, toLanguage } from "../lib/format";
 import { type StaffProfile, sessionOpen, type VerificationListItem } from "../lib/records";
+import { debugRiderUrl } from "../lib/riderLink";
 import { canCreateTestSessions, seesAllVerifications } from "../lib/roles";
 import { casePath } from "../lib/routes";
 import { parseTime } from "../lib/time";
@@ -62,6 +63,8 @@ function TestSessionPanel({
   // Ticks only while the link is live, to grey the QR code out once it expires.
   const now = useNow(1000, session !== null && deadline > Date.now());
   const expired = session !== null && !(deadline > now);
+  // Same session with ?debug=1: the phone also shows what it measured and read (test sessions only).
+  const debugUrl = session ? debugRiderUrl(session.riderUrl) : null;
 
   async function create() {
     setBusy(true);
@@ -88,8 +91,21 @@ function TestSessionPanel({
 
       {session && (
         <div className={`dash-test-session${expired ? " expired" : ""}`}>
-          <div className="dash-qr-box">
-            <QrCode value={session.riderUrl} label={t("testSession.qrLabel")} />
+          <div className="dash-qr-codes">
+            <figure className="dash-qr-figure">
+              <div className="dash-qr-box">
+                <QrCode value={session.riderUrl} label={t("testSession.qrLabel")} />
+              </div>
+              <figcaption>{t("testSession.linkLabel")}</figcaption>
+            </figure>
+            {debugUrl && (
+              <figure className="dash-qr-figure">
+                <div className="dash-qr-box">
+                  <QrCode value={debugUrl} label={t("testSession.debugQrLabel")} />
+                </div>
+                <figcaption>{t("testSession.debugLabel")}</figcaption>
+              </figure>
+            )}
           </div>
           <div className="dash-test-session-body">
             <p>{t("testSession.scan")}</p>
@@ -104,6 +120,12 @@ function TestSessionPanel({
               />
             </label>
             <CopyButton text={session.riderUrl} label={t("testSession.copy")} />
+            {debugUrl && (
+              <>
+                <p className="muted dash-small">{t("testSession.debugHint")}</p>
+                <CopyButton text={debugUrl} label={t("testSession.copyDebug")} />
+              </>
+            )}
             <Countdown deadlineMs={deadline} runningKey="testSession.expiresIn" expiredKey="testSession.expired" />
             <Link href={casePath(session.verificationId)}>{t("testSession.openCase")}</Link>
           </div>

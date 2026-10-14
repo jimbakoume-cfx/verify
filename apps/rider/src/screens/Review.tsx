@@ -1,34 +1,55 @@
 import { useTranslation } from "react-i18next";
-import type { DeclaredDocument } from "@verify/shared";
-import { type Shot, refusalHints } from "../flow/machine";
+import { MRZ_LAYOUT, type DeclaredDocument, type MrzFormat } from "@verify/shared";
+import { type MrzReview, type Shot, refusalHints } from "../flow/machine";
 import { sideLabelKey } from "../labels";
 import { CheckIcon, Page, ScreenTitle, useObjectUrl } from "../ui";
+import { MrzDebug } from "./MrzDebug";
 
 interface Props {
   shot: Shot;
   document: DeclaredDocument | null;
   /**
-   * "Use this photo" is offered: false for a photo under the server's minimum resolution, and for
-   * a refused photo until repeated refusals.
+   * "Use this photo" is offered: false for a photo under the server's minimum resolution, for a
+   * refused photo until repeated refusals, and for unread code lines until repeated tries.
    */
   canUse: boolean;
+  /** The code lines of this photo (machine.ts mrzReview); null when there is nothing to say. */
+  mrz: MrzReview | null;
   debug: boolean;
   onUse: () => void;
   onRetake: () => void;
 }
 
-export function ReviewScreen({ shot, document, canUse, debug, onUse, onRetake }: Props) {
+/** The code lines could not be read: how to take a better photo, and whether the rider may go on. */
+function MrzUnreadNotice({ format, canContinue }: { format: MrzFormat; canContinue: boolean }) {
+  const { t } = useTranslation();
+  return (
+    <div className="notice warn" role="alert">
+      <strong>{t("mrz.unreadTitle")}</strong>
+      <p>{canContinue ? t("mrz.retakeIfYouCan") : t("mrz.retake")}</p>
+      <ul className="tips">
+        <li>{t("mrz.tipLines", { lines: MRZ_LAYOUT[format].lines })}</li>
+        <li>{t("mrz.tipGlare")}</li>
+        <li>{t("mrz.tipSteady")}</li>
+      </ul>
+      {canContinue && <p>{t("mrz.continueNote")}</p>}
+    </div>
+  );
+}
+
+export function ReviewScreen({ shot, document, canUse, mrz, debug, onUse, onRetake }: Props) {
   const { t } = useTranslation();
   const url = useObjectUrl(shot.blob);
   const refusal = refusalHints(shot);
   const refused = refusal.length > 0;
+  const unread = mrz?.status === "unread";
   // Something is wrong with this photo: Retake comes first.
-  const blocked = refused || shot.lowResolution || !canUse;
+  const blocked = refused || unread || shot.lowResolution || !canUse;
   const side = t(sideLabelKey(document, shot.side));
 
   const use = canUse && (
     <button type="button" className={blocked ? "secondary" : "primary"} onClick={onUse}>
-      {refused ? t("review.useAnyway") : t("review.use")}
+      {unread ? t("mrz.continue") : refused ? t("review.useAnyway") : t("review.use")}
     </button>
   );
   const retake = (
@@ -56,12 +77,25 @@ export function ReviewScreen({ shot, document, canUse, debug, onUse, onRetake }:
           {t("review.lowResolution")}
         </p>
       ) : (
-        refused && (
-          <div className="notice warn" role="alert">
-            <strong>{t(`hints.${refusal[0]}`)}</strong>
-            <p>{canUse ? t("review.refusedOverride") : t("review.refused")}</p>
-          </div>
-        )
+        <>
+          {refused && (
+            <div className="notice warn" role="alert">
+              <strong>{t(`hints.${refusal[0]}`)}</strong>
+              <p>{canUse ? t("review.refusedOverride") : t("review.refused")}</p>
+            </div>
+          )}
+          {mrz?.status === "unread" && (
+            // "You can continue" only when the blur/glare check allows it too.
+            <MrzUnreadNotice format={mrz.format} canContinue={mrz.canContinue && canUse} />
+          )}
+          {mrz?.status === "read" && (
+            // All the rider learns about the reading: the fields stay in ?debug=1 and on the dashboard.
+            <p className="mrz-read" role="status">
+              <CheckIcon />
+              <span>{t("mrz.read")}</span>
+            </p>
+          )}
+        </>
       )}
 
       {!blocked && (
@@ -97,6 +131,7 @@ export function ReviewScreen({ shot, document, canUse, debug, onUse, onRetake }:
   );
 }
 
+/** ?debug=1: how the photo was encoded and judged, and what was read from its code lines. */
 function StillDebug({ shot }: { shot: Shot }) {
   const { t } = useTranslation();
   const { info, quality } = shot;
@@ -124,6 +159,7 @@ function StillDebug({ shot }: { shot: Shot }) {
           </div>
         ))}
       </dl>
+      {shot.mrz && <MrzDebug read={shot.mrz} attempt={shot.mrzAttempt} />}
     </details>
   );
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ClientQuality } from "../_shared/contract.ts";
-import { buildCapturePath, isOwnCapturePath, sanitizeQuality } from "./validation.ts";
+import { buildCapturePath, isOwnCapturePath, sanitizeQuality, validateMrzReport } from "./validation.ts";
 
 const OWN = "aaaaaaaa-1111-4111-8111-bbbbbbbbbbbb";
 const OTHER = "22222222-2222-4222-8222-222222222222";
@@ -95,5 +95,53 @@ describe("sanitizeQuality", () => {
     ["a nested object", { ...QUALITY, videoWidth: { value: 1 } }],
   ])("rejects %s", (_label, value) => {
     expect(sanitizeQuality(value)).toBeNull();
+  });
+});
+
+describe("validateMrzReport", () => {
+  const CAPTURE = "ABCDEF01-2345-4678-89AB-CDEF01234567";
+  const TD1 = ["I<UTOD231458907<<<<<<<<<<<<<<<", "7408122F1204159UTO<<<<<<<<<<<6", "ERIKSSON<<ANNA<MARIA<<<<<<<<<<"];
+  const read = { captureId: CAPTURE, result: "read", lines: TD1, attempts: 2, corrections: 1, engine: "tesseract.js-7.0.0/mrz-1", ms: 900 };
+
+  it("returns a fresh report with only the known fields and the capture id in lower case", () => {
+    const body = { ...read, valid: true, extra: "x".repeat(100) };
+    const result = validateMrzReport(body, "TD1");
+    expect(result).toStrictEqual({
+      ok: true,
+      report: { ...read, captureId: CAPTURE.toLowerCase() },
+    });
+    if (result.ok && result.report.result === "read") expect(result.report.lines).not.toBe(TD1);
+  });
+
+  it("keeps only the reason of an unreadable report", () => {
+    const body = { captureId: CAPTURE, result: "unreadable", reason: "reader_unavailable", attempts: 1, engine: "none", lines: TD1, ms: 5 };
+    expect(validateMrzReport(body, "TD3")).toStrictEqual({
+      ok: true,
+      report: { captureId: CAPTURE.toLowerCase(), result: "unreadable", reason: "reader_unavailable", attempts: 1, engine: "none" },
+    });
+  });
+
+  it("tells a malformed body (bad_request) from lines of the wrong shape (invalid_mrz)", () => {
+    expect(validateMrzReport({ ...read, attempts: 0 }, "TD1")).toMatchObject({ ok: false, code: "bad_request" });
+    expect(validateMrzReport({ ...read, lines: "I<UTO" }, "TD1")).toMatchObject({ ok: false, code: "bad_request" });
+    expect(validateMrzReport(read, "TD3")).toMatchObject({ ok: false, code: "invalid_mrz" });
+    expect(validateMrzReport({ ...read, lines: TD1.map((l) => l.toLowerCase()) }, "TD1"))
+      .toMatchObject({ ok: false, code: "invalid_mrz" });
+  });
+
+  it("never repeats a value in its messages", () => {
+    const bodies = [
+      { ...read, captureId: "ERIKSSON" },
+      { ...read, engine: "ERIKSSON ANNA" },
+      { ...read, lines: [TD1[0], TD1[1]] },
+      { ...read, lines: ["ERIKSSON", "ANNA", "MARIA"] },
+    ];
+    for (const body of bodies) {
+      const result = validateMrzReport(body, "TD1");
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.message).not.toMatch(/ERIKSSON|ANNA|D23145890/);
+      }
+    }
   });
 });

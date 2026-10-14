@@ -10,8 +10,8 @@ test("blurred card: a blur hint, no automatic photo, the shutter after 8 s, and 
   rider,
   backend,
 }) => {
-  await rider.begin("cni", "?debug=1");
-  await expect(rider.captureHeading("cni", "document_front")).toBeVisible();
+  await rider.begin("cni_legacy", "?debug=1");
+  await expect(rider.captureHeading("cni_legacy", "document_front")).toBeVisible();
   await expect(rider.hint).toHaveText(rider.t("hints.blurry"));
   const hintShownAt = Date.now();
 
@@ -50,7 +50,7 @@ test("blurred card: a blur hint, no automatic photo, the shutter after 8 s, and 
 
   // Retake: back to the live camera, still blurred.
   await rider.button("review.retake").click();
-  await expect(rider.captureHeading("cni", "document_front")).toBeVisible();
+  await expect(rider.captureHeading("cni_legacy", "document_front")).toBeVisible();
   await expect(rider.hint).toHaveText(rider.t("hints.blurry"));
   expect(backend.routes).toEqual(["GET /session", "POST /consent", "POST /document-type"]);
 });

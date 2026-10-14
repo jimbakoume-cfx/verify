@@ -1,9 +1,11 @@
-// Runs the flow: the reducer (machine.ts) plus the side effects it asks for (API calls, uploads).
+// Runs the flow: the reducer (machine.ts) plus the side effects it asks for (API calls, reading the
+// MRZ, uploads).
 import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import {
   CONSENT_VERSION,
   DEFAULT_LANGUAGE,
+  MRZ_EXPECTATION,
   SUPABASE_PUBLISHABLE_KEY,
   explicitLanguage,
   functionUrl,
@@ -12,6 +14,8 @@ import {
   type DeclaredDocument,
   type FlowSession,
 } from "@verify/shared";
+import { createLazyMrzReader, unavailableRead } from "../mrz/lazyReader";
+import type { MrzReader } from "../mrz/types";
 import { type FlowApi, createFlowApi } from "./api";
 import { isTransient, toFlowError } from "./errors";
 import { listenForBack, pushBackGuard } from "./history";
@@ -23,12 +27,13 @@ import {
   flowReducer,
   handlesBack,
   initialFlowState,
+  mrzExpectationFor,
   pendingShots,
 } from "./machine";
 import { UPLOAD_RETRY, withRetry } from "./retry";
 import { putObjectWithSupabase } from "./storage";
 import { forgetSessionToken } from "./token";
-import { Uploader } from "./upload";
+import { Uploader, uploadSteps } from "./upload";
 
 /** Everything a screen can ask for. */
 export interface FlowActions {
@@ -115,6 +120,57 @@ export function useFlow(boot: Boot): { state: FlowState; actions: FlowActions } 
     [],
   );
 
+  // One MRZ reader for the visit: its engine and model are downloaded once (about 2.8 MB the first
+  // time, then cached by the browser), and stopped when the app goes away.
+  const readerRef = useRef<MrzReader | null>(null);
+  const reader = useCallback(() => (readerRef.current ??= createLazyMrzReader()), []);
+  useEffect(
+    () => () => {
+      readerRef.current?.dispose();
+      readerRef.current = null;
+    },
+    [],
+  );
+
+  // Start that download as soon as a document with code lines is chosen, so it is usually done by
+  // the time its photo is taken; again when that side's camera opens, in case it failed.
+  const { document } = state;
+  const mrzSide = document ? (MRZ_EXPECTATION[document]?.side ?? null) : null;
+  const atMrzCamera = screen.name === "capture" && screen.side === mrzSide;
+  useEffect(() => {
+    if (mrzSide) reader().warmUp();
+  }, [mrzSide, reader]);
+  useEffect(() => {
+    if (atMrzCamera) reader().warmUp();
+  }, [atMrzCamera, reader]);
+
+  // The reading screen reads the photo just taken. Leaving it (Back) aborts the read; a result for a
+  // photo that is no longer the one being read is ignored by the reducer.
+  const readingShot = screen.name === "reading" ? state.shots[screen.side] : undefined;
+  useEffect(() => {
+    const expectation = readingShot ? mrzExpectationFor(document, readingShot.side) : null;
+    if (!readingShot || !expectation) return;
+    const shot = readingShot;
+    const controller = new AbortController();
+    let settled = false;
+    const read = shot.gray
+      ? reader().read(shot.gray, expectation, {
+          signal: controller.signal,
+          onProgress: (progress) => dispatch({ type: "mrz/progress", shot, progress }),
+        })
+      : Promise.resolve(unavailableRead(expectation.format));
+    void read
+      .catch(() => unavailableRead(expectation.format))
+      .then((result) => {
+        settled = true;
+        if (!controller.signal.aborted) dispatch({ type: "mrz/read", shot, result });
+      });
+    // Only a read still running is aborted: aborting restarts the reader's engine.
+    return () => {
+      if (!settled) controller.abort();
+    };
+  }, [readingShot, document, reader]);
+
   // Closing or leaving the page during an upload loses the photos: ask first (where browsers allow).
   const uploading = state.upload.status === "running" || state.upload.status === "queued";
   useEffect(() => {
@@ -154,7 +210,14 @@ export function useFlow(boot: Boot): { state: FlowState; actions: FlowActions } 
     const photos = shots.length;
     dispatch({
       type: "upload/started",
-      progress: { done: 0, total: photos * 3 + 1, phase: photos ? "link" : "submit", photo: photos ? 1 : 0, photos, attempt: 1 },
+      progress: {
+        done: 0,
+        total: uploadSteps(shots),
+        phase: photos ? "link" : "submit",
+        photo: photos ? 1 : 0,
+        photos,
+        attempt: 1,
+      },
     });
     void uploader
       .run(shots, {

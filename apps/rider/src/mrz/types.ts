@@ -51,7 +51,10 @@ export interface MrzReadResult {
 
 export interface MrzReadOptions {
   signal?: AbortSignal;
-  /** First use only: download and start-up progress, 0..1. */
+  /**
+   * Start-up progress, 0..1, while the engine's first start-up on the page runs (it downloads the
+   * files the first time; partly estimated, see ocrEngine.ts). Never called once it has started.
+   */
   onProgress?: (progress: number) => void;
 }
 

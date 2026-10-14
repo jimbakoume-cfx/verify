@@ -1,9 +1,20 @@
 // Supabase implementation of AdminRepo, StaffAuth and SignedUrlStorage (service role).
 import { isAuthApiError, isAuthWeakPasswordError, type SupabaseClient } from "@supabase/supabase-js";
 import { ID_CAPTURES_BUCKET } from "../_shared/config.ts";
+import { MRZ_FORMATS } from "../_shared/contract.ts";
 import { dbError, insertAudit } from "../_shared/db.ts";
+import { isOneOf } from "../_shared/http.ts";
 import { InternalError } from "../_shared/log.ts";
-import type { AdminRepo, CaptureRecord, InviteResult, PasswordResult, SignedUrlStorage, StaffAuth, StaffRole } from "./handler.ts";
+import type {
+  AdminRepo,
+  CaptureRecord,
+  DocumentDataRow,
+  InviteResult,
+  PasswordResult,
+  SignedUrlStorage,
+  StaffAuth,
+  StaffRole,
+} from "./handler.ts";
 
 function toInviteResult(data: unknown): InviteResult {
   return data === "ok" ? "ok" : "invalid";
@@ -104,6 +115,36 @@ export function createAdminRepo(db: SupabaseClient): AdminRepo {
         .eq("assigned_to", userId).eq("status", "assigned").limit(1);
       if (error) throw dbError("review_task.select", error);
       return data.length > 0;
+    },
+
+    async verificationExists(verificationId) {
+      const { data, error } = await db.from("verification").select("id").eq("id", verificationId).limit(1);
+      if (error) throw dbError("verification.select", error);
+      return data.length > 0;
+    },
+
+    async readDocumentData(verificationId, actorId, role) {
+      // A POST call (supabase-js default), so PostgREST runs it read-write: the audit insert needs that.
+      const { data, error } = await db.rpc("staff_read_document_data", {
+        p_verification: verificationId,
+        p_actor: actorId,
+        p_role: role,
+      });
+      if (error) throw dbError("rpc.staff_read_document_data", error);
+      const rows = (data ?? []) as { capture_id: string; source: unknown; format: unknown; lines: string; recorded_at: string }[];
+      return rows.map((row) => {
+        if (row.source !== "mrz_phone" || !isOneOf(MRZ_FORMATS, row.format) || typeof row.lines !== "string") {
+          throw new InternalError("rpc.staff_read_document_data returned an unexpected row");
+        }
+        const item: DocumentDataRow = {
+          captureId: row.capture_id,
+          source: row.source,
+          format: row.format,
+          lines: row.lines,
+          recordedAt: row.recorded_at,
+        };
+        return item;
+      });
     },
 
     audit: (entry) => insertAudit(db, entry),
