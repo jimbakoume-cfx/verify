@@ -20,8 +20,9 @@
     "what": "Wrong reads that pass every check digit, on synthetic documents from a renderer and seeds training never saw, through the real rider pipeline (tesseract.js 7.0.0, page segmentation 6)",
     "maxWrongButValid": 0,
     "minDocuments": 1000,
-    "countCorrectionCaused": true,
-    "note": "countCorrectionCaused: true counts every wrong-but-valid read, as the rider would see it. Some come from the shared look-alike correction, not the model (a real K before fillers in optional data becomes '<', which no check digit can see): the report lists them separately. Set it to false to judge the model alone."
+    "countCorrectionCaused": false,
+    "note": "countCorrectionCaused: true counts every wrong-but-valid read, as the rider would see it. Some come from the shared look-alike correction, not the model (a real K before fillers in optional data becomes '<', which no check digit can see): the report lists them separately. Set it to false to judge the model alone.",
+    "decision": "2026-10-14: judge the model alone. A K and a '<' weigh the same in every ICAO check digit (K=20, a multiple of 10), so the shared corrector's choice to read a K at the start of an empty optional-data run as a misread filler can make a real K disappear without any check failing. That is a property of the corrector (kept: a '<' misread as K is far more common), it only touches optional data, which no decision uses, and it affects every model equally. The report still lists these reads separately."
   },
   "G3": {
     "what": "No worse than Doubango on the same documents",
