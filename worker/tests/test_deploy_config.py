@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import tomllib
 
 from conftest import WORKER
 
@@ -25,3 +26,11 @@ def test_tests_stay_out_of_the_function_bundle():
     function = CONFIG["functions"]["api/process.py"]
     assert "tests/**" in function["excludeFiles"]
     assert function["maxDuration"] <= 300
+
+
+def test_vercel_finds_the_entrypoint():
+    """With a pyproject.toml present, Vercel builds a Python app and refuses to deploy unless the
+    entrypoint is named; the functions entry above must be keyed on the same file."""
+    pyproject = tomllib.loads((WORKER / "pyproject.toml").read_text(encoding="utf-8"))
+    assert pyproject["tool"]["vercel"]["entrypoint"] == "api.process:handler"
+    assert "api/process.py" in CONFIG["functions"]

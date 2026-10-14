@@ -31,6 +31,11 @@ dev = [
   "pip-licenses==5.5.5",
 ]
 
+# Vercel treats a folder with a pyproject.toml as a Python app and needs its entrypoint named: the
+# standard-library handler class in api/process.py (vercel.json's "functions" entry is keyed on that file).
+[tool.vercel]
+entrypoint = "api.process:handler"
+
 [tool.uv]
 # Not an installable package: Vercel bundles the files as they are, and tests import from this folder.
 package = false
