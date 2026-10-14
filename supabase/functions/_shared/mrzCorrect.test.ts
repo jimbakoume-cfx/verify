@@ -1,4 +1,4 @@
-import { checkDigit, parseMrz } from "@verify/shared";
+import { checkDigit, parseMrz } from "./mrz.ts";
 import { describe, expect, it } from "vitest";
 import {
   FIELD_TYPES,
@@ -11,7 +11,7 @@ import {
   restoreOptionalFillers,
   snapLength,
   swapByFieldType,
-} from "./correct";
+} from "./mrzCorrect.ts";
 
 // ICAO 9303 specimens (Utopia, fictitious).
 const TD3 = ["P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<", "L898902C36UTO7408122F1204159ZE184226B<<<<<10"];

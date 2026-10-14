@@ -143,6 +143,7 @@ export interface ClientQuality {
 //   POST /flow/upload-url     UploadUrlRequest   -> UploadUrlResponse
 //   POST /flow/captures       CaptureCompleteRequest -> CaptureCompleteResponse
 //   POST /flow/mrz            MrzReportRequest -> MrzReportResponse (M2)
+//   GET  /flow/checks         -> FlowChecks (M3, see below)
 //   POST /flow/submit
 // All except upload-url, captures and mrz return FlowSession.
 // ---------------------------------------------------------------------------
@@ -299,6 +300,238 @@ export const MRZ_REPORT_LIMITS = {
 } as const;
 
 // ---------------------------------------------------------------------------
+// Server photo checks seen by the rider (M3). Edge Function "flow". Auth: session token.
+//   GET /flow/checks -> FlowChecks
+// The rider polls it after uploading, for at most CHECKS_WAIT_MS. Nothing personal is returned.
+// ---------------------------------------------------------------------------
+/**
+ * pending: the worker has not finished. ok: usable. retake: ask the rider for a new photo of that
+ * side (reason given). unchecked: the server could not check it (worker down, out of budget,
+ * session not eligible): the rider continues and staff review.
+ */
+export const FLOW_CHECK_STATES = ["pending", "ok", "retake", "unchecked"] as const;
+export type FlowCheckState = (typeof FLOW_CHECK_STATES)[number];
+
+/**
+ * Only these ask for a retake until the server thresholds are tuned on real photos; every other
+ * problem is flagged for staff. no_document: no card or page found. unreadable: no usable text.
+ */
+export const RETAKE_REASONS = ["no_document", "unreadable"] as const;
+export type RetakeReason = (typeof RETAKE_REASONS)[number];
+
+export interface FlowCheckSide {
+  kind: CaptureSide;
+  /** The newest live capture of this side. */
+  captureId: string;
+  state: FlowCheckState;
+  /** Set when state is "retake". */
+  reason: RetakeReason | null;
+}
+
+export interface FlowChecks {
+  /** True when no side is pending any more. */
+  done: boolean;
+  sides: FlowCheckSide[];
+}
+
+/** How long the rider waits for the server checks, and how often the app asks. */
+export const CHECKS_WAIT_MS = 20_000;
+export const CHECKS_POLL_MS = 2_000;
+/** Server-requested retakes allowed per side; after that the photo is flagged, never refused. */
+export const SERVER_RETAKES_PER_SIDE = 1;
+
+// ---------------------------------------------------------------------------
+// Worker API (M3). Edge Function "worker", called only by the AI worker (Vercel, Python).
+//   POST /worker/claim   {}                          -> WorkerClaimResponse, or 204 when there is no job
+//   POST /worker/image   WorkerImageRequest          -> the JPEG bytes (410 when the photo is gone)
+//   POST /worker/result  WorkerResultRequest         -> WorkerResultResponse
+// Every request is signed by the worker with Ed25519 (headers below) over
+//   `${WORKER_SIGNATURE_VERSION}|${WORKER_AUDIENCE}|${kid}|${method}|${path}|${timestamp}|${nonce}|${sha256hex(body)}`
+// where path is the route as the function sees it ("/claim", "/image", "/result"), timestamp is in
+// Unix seconds (accepted within WORKER_SIGNATURE_WINDOW_S) and nonce is 32 hex characters, used once.
+// The server verifies the raw body bytes before parsing them.
+// ---------------------------------------------------------------------------
+export const WORKER_SIGNATURE_VERSION = "v1";
+/** Audience: binds a signature to this project's worker function. */
+export const WORKER_AUDIENCE = "confiance-verify/worker";
+export const WORKER_SIGNATURE_WINDOW_S = 60;
+export const WORKER_HEADERS = {
+  keyId: "x-worker-key-id",
+  timestamp: "x-worker-timestamp",
+  nonce: "x-worker-nonce",
+  signature: "x-worker-signature",
+} as const;
+
+export interface WorkerClaimResponse {
+  jobId: string;
+  attempt: number;
+  captureId: string;
+  side: CaptureSide;
+  declaredDocument: DeclaredDocument;
+  /** Where the MRZ should be for the declared document (null when it has none). */
+  mrzExpectation: MrzExpectation | null;
+  /** The worker checks the downloaded bytes against this. */
+  image: { sha256: string; byteSize: number; width: number; height: number };
+}
+
+export interface WorkerImageRequest {
+  jobId: string;
+  attempt: number;
+}
+
+/** Quality measured on the server (port of packages/capture). Provisional until tuned. */
+export interface WorkerQuality {
+  sharpness: number;
+  glareRatio: number;
+  meanLuma: number;
+  documentFound: boolean;
+  /** 0..1 */
+  documentConfidence: number;
+  longSide: number;
+  /** Lines of text the OCR found (any content). */
+  textLines: number;
+}
+
+export interface WorkerClassificationEvidence {
+  /** Rotation of the image that gave the most text, in degrees clockwise. */
+  rotation: 0 | 90 | 180 | 270;
+  /** Hits per keyword group (accents and case removed, up to 2 wrong characters). Counts only. */
+  keywordHits: Record<string, number>;
+  /** A QR code was detected (its content is never read out or stored). */
+  qrPresent: boolean;
+  /** Orientation of the document's printed text block. */
+  orientation: "landscape" | "portrait" | null;
+}
+
+/** Fields read from the printed text. Values are encrypted by the server; only names reach check_result. */
+export interface WorkerFields {
+  surname?: string;
+  givenNames?: string;
+  documentNumber?: string;
+  /** ISO dates (YYYY-MM-DD), or the raw text when the date is partial. */
+  birthDate?: string;
+  expiryDate?: string;
+  issueDate?: string;
+  /** Card family read from the printed title (e.g. "carte_de_sejour", "refugee"). Sensitive: encrypted only. */
+  subtype?: string;
+}
+
+export interface WorkerResultRequest {
+  jobId: string;
+  attempt: number;
+  /** Worker build, e.g. "worker-1/rapidocr-3.10.0/ppocrv6". */
+  engine: string;
+  quality: WorkerQuality;
+  /**
+   * Candidate MRZ lines, already mapped to A-Z, 0-9 and '<' (the server runs the shared corrector
+   * and parser on them). Empty when none were found.
+   */
+  mrzCandidates: string[];
+  classification: WorkerClassificationEvidence;
+  fields: WorkerFields;
+  /** Processing time of this image, and whether the models had to be loaded first. */
+  timing: { ms: number; cold: boolean };
+}
+
+export interface WorkerResultResponse {
+  /** "already_done" when an earlier attempt's result was recorded first (it wins). */
+  status: "recorded" | "already_done";
+}
+
+export const WORKER_LIMITS = {
+  maxBodyBytes: 32 * 1024,
+  maxMrzCandidates: 8,
+  maxCandidateLength: 60,
+  maxFieldLength: 80,
+  maxKeywordGroups: 16,
+  maxEngineLength: 60,
+} as const;
+
+// ---------------------------------------------------------------------------
+// Server check results (M3), stored in check_result.details. Supervisors and admins can read
+// check_result directly: outcomes, generic codes, counts and metrics only. Never values read from
+// the document, never the card sub-type (refugee...), never nationality.
+// ---------------------------------------------------------------------------
+export const SERVER_CHECK_NAMES = {
+  quality: "quality_server",
+  mrz: "mrz_server",
+  fields: "ocr_fields",
+  classification: "classification",
+  policy: "document_policy",
+} as const;
+
+export interface QualityServerDetails {
+  verdict: "ok" | "poor" | RetakeReason;
+  quality: WorkerQuality;
+  /** True until the thresholds are tuned on real photos: never decides on its own. */
+  provisional: true;
+  engine: string;
+  timing: { ms: number; cold: boolean };
+}
+
+export interface MrzServerDetails {
+  parserVersion: string;
+  /** A complete MRZ of the expected format was read from the image. */
+  found: boolean;
+  format: MrzFormat | null;
+  checks: MrzCheckDetails["checks"];
+  documentCodeFits: boolean | null;
+  datesValid: boolean | null;
+  corrections: number;
+  /** Comparison with the phone's report for the same capture. */
+  phone: "agrees" | "differs" | "missing" | "unreadable";
+}
+
+export interface OcrFieldsDetails {
+  /** Names of the fields found (never their values). */
+  found: (keyof WorkerFields)[];
+  provisional: boolean;
+}
+
+/** Generic document families: the same values as the database enum document_type. */
+export const DETECTED_DOCUMENT_TYPES = [
+  "cni_legacy",
+  "cni_biometric",
+  "passport",
+  "residence_permit",
+  "driving_licence",
+  "voter_card",
+  "unknown",
+] as const;
+export type DetectedDocumentType = (typeof DETECTED_DOCUMENT_TYPES)[number];
+
+export interface ClassificationDetails {
+  detected: DetectedDocumentType;
+  /** Decided from the MRZ (firm), or from keywords and layout (provisional). */
+  basis: "mrz" | "keywords" | "none";
+  provisional: boolean;
+  /** Whether the detected family matches what the rider declared. */
+  matchesDeclared: boolean | null;
+  /** 0..1 */
+  confidence: number;
+  qrPresent: boolean | null;
+  /** Keyword-group hit counts summed over the sides (no text). */
+  keywordHits: Record<string, number>;
+}
+
+/** Generic reasons a person must decide. No reason reveals the card sub-type or nationality. */
+export const POLICY_REASONS = [
+  "manual_review_document",
+  "unsupported_document",
+  "type_mismatch",
+  "mrz_disagreement",
+  "mrz_unreadable_server",
+  "phone_report_missing",
+  "provisional_classification",
+  "server_unchecked",
+] as const;
+export type PolicyReason = (typeof POLICY_REASONS)[number];
+
+export interface DocumentPolicyDetails {
+  reasons: PolicyReason[];
+}
+
+// ---------------------------------------------------------------------------
 // Admin API (staff dashboard). Edge Function "admin".
 //   POST /admin/enroll         EnrollRequest -> EnrollResponse             (public: proves possession of a one-time invite code)
 //   POST /admin/test-sessions  TestSessionRequest -> TestSessionResponse   (staff token; supervisor or admin)
@@ -349,16 +582,26 @@ export interface DocumentDataRequest {
   verificationId: string;
 }
 
-/** Decrypted data read from the document. Every request is audited before anything is decrypted. */
-export interface DocumentDataItem {
+/** Code lines, as read on the phone (M2) or by the server's worker (M3). */
+export interface DocumentDataLinesItem {
   captureId: string;
-  /** Where the data came from: "mrz_phone" = MRZ read on the rider's phone (M2). */
-  source: "mrz_phone";
+  source: "mrz_phone" | "mrz_server";
   format: MrzFormat;
   /** Raw MRZ lines; parse them with parseMrz from mrz.ts. */
   lines: string[];
   recordedAt: string;
 }
+
+/** Printed fields read by the server's worker (M3). Provisional until tuned on real documents. */
+export interface DocumentDataFieldsItem {
+  captureId: string;
+  source: "ocr_server";
+  fields: WorkerFields;
+  recordedAt: string;
+}
+
+/** Decrypted data read from the document. Every request is audited before anything is decrypted. */
+export type DocumentDataItem = DocumentDataLinesItem | DocumentDataFieldsItem;
 
 export interface DocumentDataResponse {
   items: DocumentDataItem[];
@@ -389,6 +632,9 @@ export const ERROR_CODES = [
   "image_too_large",
   "image_resolution_too_low",
   "invalid_mrz",
+  "invalid_signature",
+  "replayed_request",
+  "image_gone",
   "audit_failed",
   "invalid_invite",
   "weak_password",

@@ -3,3 +3,4 @@
 export * from "../../../supabase/functions/_shared/contract";
 export * from "../../../supabase/functions/_shared/staffPassword";
 export * from "../../../supabase/functions/_shared/mrz";
+export * from "../../../supabase/functions/_shared/mrzCorrect";

@@ -15,8 +15,7 @@ import {
   prepareForOcr,
   rotateGray180,
 } from "@verify/capture";
-import { type MrzExpectation, parseMrz } from "@verify/shared";
-import { correctMrz } from "./correct";
+import { type MrzExpectation, correctMrz, parseMrz } from "@verify/shared";
 import { type OcrEngine, createOcrEngine } from "./ocrEngine";
 import type { MrzReadOptions, MrzReadResult, MrzReadStatus, MrzReader } from "./types";
 
