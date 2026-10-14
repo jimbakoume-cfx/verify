@@ -123,7 +123,7 @@
     "cni_biometric": "Nouvelle CNI (2025)",
     "cni_legacy": "Ancienne CNI",
     "passport": "Passeport",
-    "residence_permit": "Titre de séjour",
+    "residence_permit": "Titre de séjour ou carte de réfugié",
     "driving_licence": "Permis de conduire",
     "voter_card": "Carte d'électeur"
   },
@@ -160,9 +160,118 @@
     "photoLoadFailed": "La photo n'a pas pu être chargée. Le lien a peut-être expiré : rouvrez-la.",
     "photoLoading": "Chargement de la photo…"
   },
+  "serverChecks": {
+    "title": "Contrôles du serveur",
+    "intro": "Faits sur le serveur à partir des photos elles-mêmes, pour la photo la plus récente de chaque face. Ce qui est marqué provisoire n'est pas encore réglé sur de vrais documents : c'est indicatif et cela ne décide jamais seul.",
+    "provisional": "Provisoire",
+    "yes": "Oui",
+    "no": "Non",
+    "document": {
+      "title": "Document reconnu",
+      "pending": "Pas encore reconnu : aucune photo de ce dossier n'a de résultat du serveur.",
+      "detected": "Reconnu comme",
+      "declared": "Déclaré par le passager",
+      "unknown": "Non reconnu",
+      "basisLabel": "Reconnu d'après",
+      "basis": {
+        "mrz": "Les lignes de code (fiable)",
+        "keywords": "Les mots imprimés (provisoire)",
+        "none": "Rien d'exploitable"
+      },
+      "confidence": "Confiance",
+      "qr": "Code QR vu",
+      "keywords": "Mots trouvés sur les photos (nombre)",
+      "noKeywords": "Aucun",
+      "match": {
+        "yes": "Correspond au document déclaré",
+        "no": "Ne correspond pas au document déclaré",
+        "unknown": "Impossible de dire s'il correspond au document déclaré"
+      }
+    },
+    "keywordGroups": {
+      "republic": "République",
+      "national_id": "Carte nationale d'identité",
+      "passport": "Passeport",
+      "residence": "Séjour ou réfugié",
+      "driving_licence": "Permis de conduire",
+      "voter_card": "Carte d'électeur",
+      "field_labels": "Libellés des champs",
+      "specimen": "Spécimen"
+    },
+    "reasons": {
+      "title": "À décider par une personne",
+      "pending": "Pas encore de résultat du serveur.",
+      "none": "Les contrôles du serveur n'ont rien signalé.",
+      "unknownOnly": "Signalé pour une raison que cette version du tableau de bord ne sait pas afficher. Rechargez la page.",
+      "label": {
+        "manual_review_document": "Toujours vérifié par une personne",
+        "unsupported_document": "Document non accepté",
+        "type_mismatch": "Pas le document déclaré",
+        "mrz_disagreement": "Lignes de code différentes",
+        "mrz_unreadable_server": "Lignes de code non lues par le serveur",
+        "phone_report_missing": "Rapport du téléphone manquant",
+        "provisional_classification": "Type reconnu à titre provisoire",
+        "server_unchecked": "Photo non contrôlée par le serveur"
+      },
+      "body": {
+        "manual_review_document": "Ce type de document est toujours examiné par une personne : il n'a pas de lignes de code que le serveur peut contrôler (ancienne CNI, permis de conduire, carte d'électeur), ou c'est un titre de séjour ou une carte de réfugié.",
+        "unsupported_document": "Les lignes de code indiquent une carte d'identité délivrée par un autre État, qui n'est pas acceptée.",
+        "type_mismatch": "Les lignes de code indiquent un autre type de document que celui déclaré par le passager.",
+        "mrz_disagreement": "Les lignes de code lues par le serveur sur la photo ne sont pas celles lues sur le téléphone.",
+        "mrz_unreadable_server": "Le serveur n'a pas pu lire sur la photo des lignes de code au format attendu.",
+        "phone_report_missing": "La lecture des lignes de code par le téléphone n'a pas été reçue : la lecture du serveur n'a donc pas pu lui être comparée.",
+        "provisional_classification": "Le type de document a été reconnu d'après les mots imprimés seulement, pas d'après des lignes de code. C'est provisoire tant que les réglages n'ont pas été faits sur de vrais documents.",
+        "server_unchecked": "Le serveur n'a pas pu contrôler au moins une photo (service indisponible, budget du jour atteint, ou seules les sessions de test sont traitées pour l'instant)."
+      }
+    },
+    "verdict": {
+      "ok": "Exploitable",
+      "poor": "Qualité médiocre",
+      "no_document": "Aucun document trouvé",
+      "unreadable": "Aucun texte lisible"
+    },
+    "verdictBody": {
+      "poor": "Une mesure sort des valeurs habituelles. La photo a été gardée et elle est signalée pour une personne.",
+      "no_document": "Le serveur n'a trouvé aucun document sur cette photo. Le passager est invité à la reprendre une fois au plus ; c'est la photo gardée.",
+      "unreadable": "Le serveur n'a trouvé presque aucun texte sur cette photo. Le passager est invité à la reprendre une fois au plus ; c'est la photo gardée."
+    },
+    "side": {
+      "pendingBadge": "En attente du serveur",
+      "pending": "Pas encore de résultat du serveur pour cette photo. Le contrôle est peut-être en cours : actualisez dans un instant.",
+      "uncheckedBadge": "Non contrôlée",
+      "unchecked": "Le serveur n'a pas pu contrôler cette photo (service indisponible, budget du jour atteint, ou seules les sessions de test sont traitées pour l'instant). Une personne l'examine.",
+      "notSent": "Cette photo a été prise avant la mise en place des contrôles du serveur : elle ne lui a jamais été envoyée. Une personne l'examine."
+    },
+    "quality": {
+      "textLines": "Lignes de texte",
+      "document": "Document trouvé",
+      "documentYes": "Oui ({{confidence}})",
+      "focus": "Score de mise au point (seuil : 5)",
+      "longSide": "Grand côté",
+      "time": "Durée du traitement",
+      "coldStart": "{{time}}, modèles chargés d'abord"
+    },
+    "mrz": {
+      "title": "Lignes de code lues par le serveur",
+      "none": "Le serveur n'a pas de lecture des lignes de code pour cette photo.",
+      "found": "Lignes de code trouvées sur la photo",
+      "phone": {
+        "agrees": "Mêmes lignes que celles lues sur le téléphone",
+        "differs": "Pas les lignes lues sur le téléphone",
+        "phoneOnly": "Lues sur le téléphone seulement : rien à comparer",
+        "missing": "Rapport du téléphone manquant",
+        "unreadable": "Illisibles sur le téléphone : rien à comparer"
+      }
+    },
+    "fields": {
+      "title": "Texte imprimé lu",
+      "found": "Champs trouvés : {{fields}}. Leurs valeurs sont derrière « Afficher les données lues ».",
+      "none": "Aucun champ lu."
+    }
+  },
   "mrz": {
     "title": "Lignes de code (MRZ)",
-    "intro": "Lues sur le téléphone du passager. Le serveur a lui-même revérifié les lignes : le verdict du téléphone n'est pas utilisé.",
+    "intro": "Lues sur le téléphone du passager. Le serveur a lui-même revérifié les lignes : le verdict du téléphone n'est pas utilisé. Ce que le serveur a lu sur la photo elle-même figure dans « Contrôles du serveur ».",
     "expectedOn": {
       "document_front": "Ce document porte ses lignes de code au recto : {{format}}.",
       "document_back": "Ce document porte ses lignes de code au verso : {{format}}."
@@ -204,17 +313,7 @@
     "readingTime": "Durée de lecture",
     "engine": "Moteur de lecture",
     "parserVersion": "Version du contrôle serveur",
-    "dataLogged": "Chaque consultation des données lues est enregistrée dans le journal d'audit. Elles restent affichées 60 secondes.",
-    "showData": "Afficher les données lues",
-    "hideData": "Masquer les données",
-    "dataExpiresIn": "Les données disparaissent dans {{time}}",
-    "dataExpired": "Le délai est écoulé.",
-    "dataRemoved": "Le délai était écoulé et les données ont été retirées de la page. Affichez-les à nouveau si besoin.",
-    "noData": "Aucune ligne de code n'a été enregistrée pour ce dossier.",
-    "dataOf": "Données lues : {{side}}",
-    "recordedAt": "Reçues le {{time}}",
     "unparsable": "Ces lignes n'ont pas pu être interprétées.",
-    "rawLines": "Lignes telles que lues par le téléphone",
     "invalidDate": "{{raw}} (date impossible)",
     "fields": {
       "surname": "Nom",
@@ -234,6 +333,53 @@
       "X": "Non précisé"
     }
   },
+  "data": {
+    "title": "Données lues sur le document",
+    "intro": "Les lignes de code lues sur le téléphone et par le serveur, et le texte imprimé lu par le serveur.",
+    "logged": "Chaque consultation des données lues est enregistrée dans le journal d'audit. Elles restent affichées 60 secondes.",
+    "show": "Afficher les données lues",
+    "hide": "Masquer les données",
+    "expiresIn": "Les données disparaissent dans {{time}}",
+    "expired": "Le délai est écoulé.",
+    "removed": "Le délai était écoulé et les données ont été retirées de la page. Affichez-les à nouveau si besoin.",
+    "none": "Aucune donnée lue sur le document n'a été enregistrée pour ce dossier.",
+    "linesOf": {
+      "mrz_phone": "Lignes de code lues sur le téléphone : {{side}}",
+      "mrz_server": "Lignes de code lues par le serveur : {{side}}"
+    },
+    "printedOf": "Texte imprimé lu par le serveur : {{side}}",
+    "recordedAt": "Enregistrement : {{time}}",
+    "rawLines": {
+      "mrz_phone": "Lignes telles que lues par le téléphone",
+      "mrz_server": "Lignes telles que lues par le serveur"
+    },
+    "same": {
+      "mrz_phone": "Identiques à la lecture du serveur",
+      "mrz_server": "Identiques à la lecture du téléphone"
+    },
+    "differs": {
+      "mrz_phone": "Différentes de la lecture du serveur",
+      "mrz_server": "Différentes de la lecture du téléphone"
+    },
+    "differencesMarked": "(les caractères qui diffèrent de l'autre lecture sont surlignés)",
+    "printedNote": "Lu sur le texte imprimé, à titre provisoire : comparez avec la photo.",
+    "printedNone": "Aucun champ n'a été lu.",
+    "partialDate": "{{raw}} (date incomplète, telle qu'imprimée)",
+    "fields": {
+      "surname": "Nom",
+      "givenNames": "Prénoms",
+      "documentNumber": "Numéro du document",
+      "birthDate": "Date de naissance",
+      "expiryDate": "Date d'expiration",
+      "issueDate": "Date de délivrance",
+      "subtype": "Type de carte"
+    },
+    "subtypes": {
+      "refugee": "Carte de réfugié",
+      "carte_de_resident": "Carte de résident",
+      "carte_de_sejour": "Carte de séjour"
+    }
+  },
   "capture": {
     "size": "Taille",
     "dimensions": "Dimensions (px)",
@@ -246,6 +392,7 @@
     "seconds": "{{value}} s",
     "sha256": "Empreinte SHA-256",
     "reused": "Image déjà utilisée dans une autre vérification",
+    "replaced": "Remplacée par une photo plus récente",
     "deleted": "Image effacée",
     "source": {
       "auto": "Capture automatique",
@@ -272,6 +419,9 @@
     "image_too_large": "Le fichier image est trop volumineux.",
     "image_resolution_too_low": "La résolution de l'image est trop faible.",
     "invalid_mrz": "Les lignes de code (MRZ) envoyées n'ont pas été acceptées.",
+    "invalid_signature": "La signature de la requête n'a pas été acceptée.",
+    "replayed_request": "Cette requête a déjà été reçue une fois.",
+    "image_gone": "Cette photo n'est plus disponible.",
     "audit_failed": "L'accès n'a pas pu être enregistré dans le journal d'audit : la photo n'est donc pas affichée. Réessayez dans un instant.",
     "invalid_invite": "Ce code d'invitation n'est pas valide pour cette adresse e-mail : il est peut-être mal saisi, expiré ou déjà utilisé. Demandez un nouveau code à un administrateur.",
     "weak_password": "Ce mot de passe n'est pas accepté. Utilisez entre {{min}} et {{max}} caractères et au plus {{maxBytes}} octets (une lettre accentuée compte 2), sans la partie de votre e-mail avant le @, et évitez les mots de passe courants.",

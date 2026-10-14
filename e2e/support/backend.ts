@@ -1,9 +1,10 @@
 // An in-memory stand-in for the rider's side of the backend, installed with page.route: the "flow"
-// Edge Function (rules from docs/M1_SPEC.md and docs/M2_SPEC.md, types from contract.ts), the signed
-// storage upload and the health RPC. It answers like the real server, records every request for
-// assertions, and can inject faults (an expired session, failing uploads). POST /mrz runs the real
-// handler's own validation and verdict (flow/validation.ts, assessMrzReport), so the reports the
-// tests see are judged exactly as the server judges them.
+// Edge Function (rules from docs/M1_SPEC.md, docs/M2_SPEC.md and docs/M3_SPEC.md, types from
+// contract.ts), the signed storage upload and the health RPC. It answers like the real server, records
+// every request for assertions, and can inject faults (an expired session, failing uploads, a worker
+// that is slow, down or out of budget). POST /mrz runs the real handler's own validation and verdict
+// (flow/validation.ts, assessMrzReport), and GET /checks the real rules (flow/checks.ts) on the jobs
+// of a scripted AI worker, so what the tests see is judged exactly as the server judges it.
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { Page, Request, Route } from "@playwright/test";
 import {
@@ -17,12 +18,15 @@ import {
   type ClientQuality,
   type DeclaredDocument,
   type ErrorCode,
+  type FlowChecks,
   type FlowSession,
   type FlowStatus,
   MRZ_EXPECTATION,
   type MrzCheckDetails,
   type MrzReportRequest,
+  type QualityServerDetails,
 } from "../../supabase/functions/_shared/contract";
+import { type CheckStateRow, flowChecks } from "../../supabase/functions/flow/checks";
 import { assessMrzReport } from "../../supabase/functions/flow/handler";
 import { validateMrzReport } from "../../supabase/functions/flow/validation";
 import { type JpegInfo, inspectJpeg } from "./jpeg";
@@ -45,6 +49,8 @@ export interface FlowCall {
   /** e.g. "POST /upload-url" */
   route: string;
   body: unknown;
+  /** When the request arrived (Date.now()), to check the app's timing. */
+  at: number;
 }
 
 export interface StoredObject {
@@ -66,6 +72,35 @@ export interface AcceptedCapture {
   kind: CaptureSide;
   quality: ClientQuality;
   object: StoredObject;
+  /**
+   * False once a newer photo of the same side replaced it: the server then erases it (its object and
+   * the data read from it), as after a server retake.
+   */
+  live: boolean;
+}
+
+/**
+ * What the AI worker makes of one photo (worker_job and its quality_server check, M3).
+ * - done: the worker checked the photo. `verdict` is quality_server's; the server asks for a retake
+ *   only for no_document or unreadable, and only as its rules allow (flow/checks.ts). The job stays
+ *   pending for `pendingFor` answers of GET /checks first (default 0: done at once).
+ * - failed: given up (over the daily budget, session not eligible, attempts or time used up).
+ * - stuck: never finishes (the worker is down). `ringFailed`: the flow function could not ring it.
+ */
+export type WorkerPlan =
+  | { result: "done"; verdict: QualityServerDetails["verdict"]; pendingFor?: number }
+  | { result: "failed"; error: "budget" | "ineligible" | "attempts" | "expired" }
+  | { result: "stuck"; ringFailed?: boolean };
+
+/** The job the fake worker runs for one photo. */
+interface FakeJob {
+  plan: WorkerPlan;
+  /** When the photo was recorded (created_at): one millisecond apart, in order. */
+  createdAt: string;
+  /** GET /checks answers since the photo was recorded. */
+  polls: number;
+  /** Replaced by a newer photo of the side before it finished. */
+  superseded: boolean;
 }
 
 /** An MRZ report the server recorded, with the verdict the real server gives it. */
@@ -101,6 +136,18 @@ export class FakeBackend {
   readonly captures: AcceptedCapture[] = [];
   /** MRZ reports recorded by POST /mrz, in order: one per photo (a repeated report changes nothing). */
   readonly mrzReports: RecordedMrzReport[] = [];
+  /** Every answer of GET /checks, in order. */
+  readonly checksAnswers: FlowChecks[] = [];
+  /**
+   * The AI worker: what it makes of the `n`th photo (1-based) of a side. Default: every photo is
+   * usable, checked before the app first asks.
+   */
+  worker: (capture: AcceptedCapture, n: number) => WorkerPlan = () => ({ result: "done", verdict: "ok" });
+  /**
+   * Rewrites what GET /checks answers, after the server's rules: to play a server that breaks them
+   * (and check that the app's own limits hold). Default: none.
+   */
+  checksOverride: ((checks: FlowChecks) => FlowChecks) | null = null;
   /** Requests the real backend would refuse or never receive: each one is a bug in the app. */
   readonly problems: string[] = [];
 
@@ -111,6 +158,8 @@ export class FakeBackend {
 
   #expired = false;
   #failUploads: { count: number; status: number } = { count: 0, status: 503 };
+  #failChecks: { count: number; status: number } = { count: 0, status: 503 };
+  readonly #jobs = new Map<string, FakeJob>();
   readonly #uploadTokens = new Map<string, { token: string; kind: CaptureSide }>();
   readonly #latest = new Map<CaptureSide, string>();
 
@@ -122,6 +171,20 @@ export class FakeBackend {
   /** The next `count` uploads to storage fail with `status` (default 503, a storage outage). */
   failUploads(count: number, status = 503): void {
     this.#failUploads = { count, status };
+  }
+
+  /** The next `count` GET /checks answer `status` (default 503: the function is down). Infinity: all. */
+  failChecks(count: number, status = 503): void {
+    this.#failChecks = { count, status };
+  }
+
+  /**
+   * Sets the worker from verdicts per side, in photo order: e.g. { document_front: ["no_document"] }
+   * makes the first photo of the front unusable. Photos beyond the list, and other sides, are "ok".
+   * `pendingFor`: GET /checks answers each photo stays pending first.
+   */
+  verdicts(bySide: Partial<Record<CaptureSide, QualityServerDetails["verdict"][]>>, pendingFor = 0): void {
+    this.worker = (capture, n) => ({ result: "done", verdict: bySide[capture.kind]?.[n - 1] ?? "ok", pendingFor });
   }
 
   /** The flow routes called, e.g. ["GET /session", "POST /consent", ...]. */
@@ -193,7 +256,7 @@ export class FakeBackend {
     } catch {
       this.problems.push(`${name}: body is not JSON`);
     }
-    this.calls.push({ route: name, body });
+    this.calls.push({ route: name, body, at: Date.now() });
     this.#checkHeaders(name, req);
     try {
       return this.#reply(route, 200, this.#handle(name, body, req));
@@ -252,6 +315,8 @@ export class FakeBackend {
         return this.#completeCapture(name, input);
       case "POST /mrz":
         return this.#recordMrz(name, input);
+      case "GET /checks":
+        return this.#checks(name);
       case "POST /submit": {
         if (!this.declaredDocument) throw new ApiError(409, "missing_sides");
         if (REQUIRED_SIDES[this.declaredDocument].some((side) => !this.#latest.has(side))) throw new ApiError(409, "missing_sides");
@@ -281,10 +346,27 @@ export class FakeBackend {
     if (object.bytes.length > CAPTURE_LIMITS.maxBytes) refuse("image_too_large");
     if (!object.jpeg) refuse("invalid_image");
     if (Math.max(object.jpeg!.width, object.jpeg!.height) < CAPTURE_LIMITS.minLongSide) refuse("image_resolution_too_low");
+    if (Math.max(object.jpeg!.width, object.jpeg!.height) > CAPTURE_LIMITS.maxLongSide) refuse("image_too_large");
 
     const captureId = randomUUID();
-    this.captures.push({ captureId, path, kind, quality, object });
+    // The newest live photo of a side replaces the older ones (the M3 trigger on capture insert): the
+    // server erases them (storage object, data read) and supersedes their unfinished jobs.
+    for (const older of this.captures.filter((c) => c.kind === kind && c.live)) {
+      older.live = false;
+      this.objects.delete(older.path);
+      const job = this.#jobs.get(older.captureId)!;
+      if (this.#jobStatus(job) !== "done") job.superseded = true;
+    }
+    const capture: AcceptedCapture = { captureId, path, kind, quality, object, live: true };
+    this.captures.push(capture);
     this.#latest.set(kind, path);
+    const n = this.captures.filter((c) => c.kind === kind).length;
+    this.#jobs.set(captureId, {
+      plan: this.worker(capture, n),
+      createdAt: new Date(Date.parse("2026-10-14T10:00:00Z") + this.captures.length).toISOString(),
+      polls: 0,
+      superseded: false,
+    });
     return {
       captureId,
       byteSize: object.bytes.length,
@@ -310,8 +392,9 @@ export class FakeBackend {
     if (!expectation) return refuse(422, "invalid_mrz", `${this.declaredDocument} carries no MRZ`);
     const check = validateMrzReport(input, expectation.format);
     if (!check.ok) return refuse(check.code === "bad_request" ? 400 : 422, check.code, check.message);
-    const capture = this.captures.find((c) => c.captureId === check.report.captureId);
-    if (!capture) return refuse(404, "not_found", `unknown capture ${check.report.captureId}`);
+    // Only a live photo of this session: a replaced one is erased, as unknown as another session's.
+    const capture = this.captures.find((c) => c.captureId === check.report.captureId && c.live);
+    if (!capture) return refuse(404, "not_found", `unknown or replaced capture ${check.report.captureId}`);
     if (capture.kind !== expectation.side) refuse(422, "invalid_mrz", `capture of the ${capture.kind}, not the ${expectation.side}`);
 
     // Idempotent per photo, like flow_record_mrz: a repeated report (an answer lost on the way back)
@@ -321,6 +404,57 @@ export class FakeBackend {
       this.mrzReports.push({ body: input as unknown as MrzReportRequest, outcome, details });
     }
     return { recorded: true };
+  }
+
+  /**
+   * GET /checks: the real server's rules (flow/checks.ts) on the rows flow_check_state would return,
+   * built from the scripted worker. Each answer counts as time passing for the jobs still pending.
+   */
+  #checks(name: string): FlowChecks {
+    if (!this.declaredDocument) throw new ApiError(409, "document_type_required");
+    if (this.#failChecks.count > 0) {
+      this.#failChecks.count--;
+      throw new ApiError(this.#failChecks.status, this.#failChecks.status >= 500 ? "server_error" : "bad_request");
+    }
+    const rows: CheckStateRow[] = this.captures.map((capture) => {
+      const job = this.#jobs.get(capture.captureId)!;
+      const status = this.#jobStatus(job);
+      const report = this.mrzReports.find((r) => r.body.captureId === capture.captureId);
+      return {
+        captureId: capture.captureId,
+        kind: capture.kind,
+        live: capture.live,
+        createdAt: job.createdAt,
+        jobStatus: status,
+        jobError: job.plan.result === "failed" ? job.plan.error : null,
+        ringFailed: job.plan.result === "stuck" && job.plan.ringFailed === true,
+        qualityVerdict: status === "done" && job.plan.result === "done" ? job.plan.verdict : null,
+        phoneMrzPass: report ? report.outcome === "pass" : null,
+      };
+    });
+    for (const job of this.#jobs.values()) job.polls++;
+    const computed = flowChecks(REQUIRED_SIDES[this.declaredDocument], rows);
+    if (!computed) {
+      // The app asks only once every required side is on the server.
+      this.problems.push(`${name}: asked before every side was sent`);
+      throw new ApiError(409, "missing_sides");
+    }
+    const answer = this.checksOverride ? this.checksOverride(computed) : computed;
+    this.checksAnswers.push(answer);
+    return answer;
+  }
+
+  /** worker_job.status as the server would see it now. */
+  #jobStatus(job: FakeJob): "pending" | "claimed" | "done" | "failed" | "superseded" {
+    if (job.superseded) return "superseded";
+    switch (job.plan.result) {
+      case "done":
+        return job.polls >= (job.plan.pendingFor ?? 0) ? "done" : "claimed";
+      case "failed":
+        return "failed";
+      case "stuck":
+        return "pending";
+    }
   }
 
   #checkQuality(name: string, quality: unknown): void {

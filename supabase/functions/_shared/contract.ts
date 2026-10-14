@@ -94,7 +94,7 @@ export const CAPTURE_LIMITS = {
   minBytes: 10_000,
   /** Server and storage bucket reject larger files. */
   maxBytes: 5 * 1024 * 1024,
-  /** Longest side of the uploaded crop, in pixels. */
+  /** Longest side of the uploaded crop, in pixels. Server rejects larger crops (M3: image_too_large). */
   maxLongSide: 1600,
   /**
    * Server rejects crops whose longest side is smaller (too little detail for OCR/MRZ).
@@ -381,6 +381,11 @@ export interface WorkerImageRequest {
 
 /** Quality measured on the server (port of packages/capture). Provisional until tuned. */
 export interface WorkerQuality {
+  /**
+   * The phone's noise-free focus score at a standard contrast (analyzeFrame's `focus` in
+   * packages/capture), compared with DEFAULT_THRESHOLDS.minSharpness (5). Not the raw Laplacian
+   * variance that ClientQuality.sharpness carries.
+   */
   sharpness: number;
   glareRatio: number;
   meanLuma: number;
@@ -392,11 +397,30 @@ export interface WorkerQuality {
   textLines: number;
 }
 
+/**
+ * Keyword groups the worker counts (the keys of WorkerClassificationEvidence.keywordHits; the phrases
+ * are in worker/verify_worker/classify.py). Generic names only: "residence" counts the titles of every
+ * foreigner card together (carte de séjour, carte de résident, refugee card), so a count never reveals
+ * which card it is. republic, field_labels and specimen are supporting evidence; the others each point
+ * to one document family. The server refuses any other key.
+ */
+export const KEYWORD_GROUPS = [
+  "republic",
+  "national_id",
+  "passport",
+  "residence",
+  "driving_licence",
+  "voter_card",
+  "field_labels",
+  "specimen",
+] as const;
+export type KeywordGroup = (typeof KEYWORD_GROUPS)[number];
+
 export interface WorkerClassificationEvidence {
   /** Rotation of the image that gave the most text, in degrees clockwise. */
   rotation: 0 | 90 | 180 | 270;
   /** Hits per keyword group (accents and case removed, up to 2 wrong characters). Counts only. */
-  keywordHits: Record<string, number>;
+  keywordHits: Partial<Record<KeywordGroup, number>>;
   /** A QR code was detected (its content is never read out or stored). */
   qrPresent: boolean;
   /** Orientation of the document's printed text block. */
@@ -415,6 +439,14 @@ export interface WorkerFields {
   /** Card family read from the printed title (e.g. "carte_de_sejour", "refugee"). Sensitive: encrypted only. */
   subtype?: string;
 }
+
+/**
+ * The card families the worker reads into WorkerFields.subtype (SUBTYPES in
+ * worker/verify_worker/classify.py, kept in sync by its tests). The server accepts any lower-case code,
+ * so a family added to the worker first is stored, never refused; the dashboard names these ones.
+ */
+export const CARD_SUBTYPES = ["refugee", "carte_de_resident", "carte_de_sejour"] as const;
+export type CardSubtype = (typeof CARD_SUBTYPES)[number];
 
 export interface WorkerResultRequest {
   jobId: string;

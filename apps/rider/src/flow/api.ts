@@ -5,6 +5,7 @@ import {
   type CaptureCompleteResponse,
   type ConsentRequest,
   type DocumentTypeRequest,
+  type FlowChecks,
   type FlowSession,
   type MrzReportRequest,
   type MrzReportResponse,
@@ -21,6 +22,8 @@ export interface FlowApi {
   completeCapture(body: CaptureCompleteRequest): Promise<CaptureCompleteResponse>;
   /** What the phone read from the MRZ of a capture (M2). */
   reportMrz(body: MrzReportRequest): Promise<MrzReportResponse>;
+  /** The server's check of each photo sent (M3). `signal` abandons the request (time is up). */
+  getChecks(signal?: AbortSignal): Promise<FlowChecks>;
   submit(): Promise<FlowSession>;
 }
 
@@ -53,7 +56,7 @@ export function createFlowApi(options: FlowApiOptions): FlowApi {
   const doFetch = options.fetch ?? globalThis.fetch.bind(globalThis);
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
-  async function call<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<T> {
+  async function call<T>(method: "GET" | "POST", path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
     if (!options.baseUrl || !options.apiKey) throw new FlowError("not_configured");
     const headers: Record<string, string> = {
       [SESSION_TOKEN_HEADER]: options.token,
@@ -61,8 +64,13 @@ export function createFlowApi(options: FlowApiOptions): FlowApi {
     };
     if (body !== undefined) headers["content-type"] = "application/json";
 
+    // Our own time limit, or the caller giving up: either way the request ends as a "timeout".
+    // (AbortSignal.any is too recent for some of the riders' phones.)
+    if (signal?.aborted) throw new FlowError("timeout");
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const abort = () => controller.abort();
+    signal?.addEventListener("abort", abort);
     let res: Response;
     try {
       res = await doFetch(`${options.baseUrl}${path}`, {
@@ -78,6 +86,7 @@ export function createFlowApi(options: FlowApiOptions): FlowApi {
       throw new FlowError(controller.signal.aborted ? "timeout" : "network");
     } finally {
       clearTimeout(timer);
+      signal?.removeEventListener("abort", abort);
     }
     if (!res.ok) throw await errorFromResponse(res);
     try {
@@ -94,6 +103,7 @@ export function createFlowApi(options: FlowApiOptions): FlowApi {
     uploadUrl: (body) => call<UploadUrlResponse>("POST", "/upload-url", body),
     completeCapture: (body) => call<CaptureCompleteResponse>("POST", "/captures", body),
     reportMrz: (body) => call<MrzReportResponse>("POST", "/mrz", body),
+    getChecks: (signal) => call<FlowChecks>("GET", "/checks", undefined, signal),
     submit: () => call<FlowSession>("POST", "/submit", {}),
   };
 }

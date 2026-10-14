@@ -1,0 +1,6 @@
+# Never uploaded to Vercel: the local environment, tests and their fixtures.
+.venv
+tests
+.pytest_cache
+__pycache__
+*.pyc

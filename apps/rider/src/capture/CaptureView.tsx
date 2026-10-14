@@ -3,10 +3,16 @@
 // this component measures it and draws the guide there.
 import { type ReactNode, type RefObject, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { DOCUMENT_ASPECT, LanguageToggle, type CaptureSide, type DeclaredDocument } from "@verify/shared";
+import {
+  DOCUMENT_ASPECT,
+  LanguageToggle,
+  type CaptureSide,
+  type DeclaredDocument,
+  type RetakeReason,
+} from "@verify/shared";
 import type { Rect } from "@verify/capture";
 import { type FlowErrorCode, errorMessageKey } from "../flow/errors";
-import { sideLabelKey } from "../labels";
+import { retakeReasonKey, sideLabelKey } from "../labels";
 import type { CameraErrorKind } from "./camera";
 import { type Size, guideInArea } from "./geometry";
 import { GuideOverlay } from "./GuideOverlay";
@@ -38,6 +44,8 @@ export interface CaptureViewProps {
   showShutter: boolean;
   /** Error from the previous attempt (e.g. the server refused the photo). */
   error: FlowErrorCode | null;
+  /** The server checked the photo sent for this side and asks for a new one (M3), and why. */
+  retake?: RetakeReason | null;
   cameraError: CameraErrorKind | null;
   debug?: ReactNode;
   onLayout?: (layout: CaptureLayout) => void;
@@ -153,10 +161,18 @@ export function CaptureView(props: CaptureViewProps) {
         </header>
 
         <div className="capture-hint">
-          {props.error && (
+          {props.error ? (
             <p className="capture-alert" role="alert">
               {t(errorMessageKey(props.error))}
             </p>
+          ) : (
+            props.retake && (
+              <p className="capture-alert" role="alert">
+                <strong>{t("checks.retake", { side: t(sideLabelKey(props.document, props.side)) })}</strong>
+                <br />
+                {t(retakeReasonKey(props.retake))}
+              </p>
+            )
           )}
           <div aria-live="polite" aria-atomic="true">
             <p className={`hint-pill ${props.readiness}`}>{t(messageKey(props.message))}</p>

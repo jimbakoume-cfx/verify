@@ -25,8 +25,9 @@ export function photoAccess(role: StaffRole): PhotoAccess {
 }
 
 /**
- * POST /admin/document-data (the MRZ lines read on the phone, decrypted): the same rule as photos,
- * supervisors and the assigned reviewer. Admins get an explanation instead of "Show data read".
+ * POST /admin/document-data (the data read from the document: code lines from the phone and the
+ * server, printed fields from the server, decrypted): the same rule as photos, supervisors and the
+ * assigned reviewer. Admins get an explanation instead of "Show data read".
  */
 export type DocumentDataAccess = "view" | "admin_blocked";
 

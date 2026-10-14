@@ -4,7 +4,16 @@ import { OCR_ASSETS, type MrzReadResult, type MrzReadStatus } from "../mrz/types
 import { FlowError } from "./errors";
 import type { Shot, UploadProgress } from "./machine";
 import { classifyStorageError } from "./storage";
-import { STEPS_PER_PHOTO, type UploadDeps, Uploader, mrzReport, uploadSteps } from "./upload";
+import {
+  STEPS_PER_PHOTO,
+  type SidesOutcome,
+  type SubmitOutcome,
+  type UploadDeps,
+  type UploadListener,
+  Uploader,
+  mrzReport,
+  uploadSteps,
+} from "./upload";
 
 const VID = "11111111-2222-4333-8444-555555555555";
 
@@ -125,7 +134,22 @@ function readShot(side: CaptureSide, status: MrzReadStatus = "valid", attempt = 
 function listener() {
   const progress: UploadProgress[] = [];
   const done: CaptureSide[] = [];
-  return { progress, done, l: { progress: (p: UploadProgress) => progress.push(p), sideDone: (s: CaptureSide) => done.push(s) } };
+  const l: UploadListener = { progress: (p) => progress.push(p), sideDone: (s) => done.push(s) };
+  return { progress, done, l };
+}
+
+/**
+ * The photos sent after the rider's "Use this photo", then, once the server's checks are over, the
+ * submit (as useFlow runs them, without the checks in between).
+ */
+async function sendAndSubmit(
+  uploader: Uploader,
+  shots: readonly Shot[],
+  l: UploadListener,
+): Promise<SidesOutcome | SubmitOutcome> {
+  const sides = await uploader.uploadSides(shots, l);
+  if (!sides.ok) return sides;
+  return uploader.submit(l, { total: uploadSteps(shots), photos: shots.length });
 }
 
 describe("Uploader", () => {
@@ -133,7 +157,7 @@ describe("Uploader", () => {
     const backend = fakeBackend();
     const { uploader } = uploaderFor(backend);
     const { l, done, progress } = listener();
-    const outcome = await uploader.run([shot("document_front"), shot("document_back")], l);
+    const outcome = await sendAndSubmit(uploader, [shot("document_front"), shot("document_back")], l);
     expect(outcome).toEqual({ ok: true, session: submitted });
     expect(backend.calls).toEqual([
       "upload-url:document_front",
@@ -165,7 +189,7 @@ describe("Uploader", () => {
     backend.failNext("put", new FlowError("network"));
     const { uploader, waits } = uploaderFor(backend);
     const { l, progress } = listener();
-    const outcome = await uploader.run([shot("document_front")], l);
+    const outcome = await sendAndSubmit(uploader, [shot("document_front")], l);
     expect(outcome.ok).toBe(true);
     expect(backend.calls.filter((c) => c.startsWith("upload-url"))).toHaveLength(1);
     expect(backend.calls.filter((c) => c.startsWith("put"))).toEqual([
@@ -180,7 +204,7 @@ describe("Uploader", () => {
     const backend = fakeBackend();
     backend.failNext("completeCapture", new FlowError("upload_missing", 404));
     const { uploader } = uploaderFor(backend);
-    expect((await uploader.run([shot("document_front")], listener().l)).ok).toBe(true);
+    expect((await sendAndSubmit(uploader, [shot("document_front")], listener().l)).ok).toBe(true);
     expect(backend.calls.filter((c) => c.startsWith("put"))).toHaveLength(2);
     expect(backend.calls.filter((c) => c.startsWith("upload-url"))).toHaveLength(1);
   });
@@ -189,7 +213,7 @@ describe("Uploader", () => {
     const backend = fakeBackend();
     backend.failNext("put", new FlowError("storage_failed", 400));
     const { uploader } = uploaderFor(backend);
-    expect((await uploader.run([shot("document_front")], listener().l)).ok).toBe(true);
+    expect((await sendAndSubmit(uploader, [shot("document_front")], listener().l)).ok).toBe(true);
     expect(backend.calls.filter((c) => c.startsWith("upload-url"))).toHaveLength(2);
   });
 
@@ -198,11 +222,11 @@ describe("Uploader", () => {
     backend.failNext("completeCapture", new FlowError("network"), new FlowError("network"), new FlowError("timeout"));
     const { uploader, waits } = uploaderFor(backend);
     const front = shot("document_front");
-    const first = await uploader.run([front], listener().l);
+    const first = await sendAndSubmit(uploader, [front], listener().l);
     expect(first).toEqual({ ok: false, error: "timeout", side: "document_front" });
     expect(waits).toEqual([1500, 3000]);
 
-    const second = await uploader.run([front], listener().l);
+    const second = await sendAndSubmit(uploader, [front], listener().l);
     expect(second.ok).toBe(true);
     // The photo was stored once; only the confirmation was repeated.
     expect(backend.calls.filter((c) => c.startsWith("put"))).toHaveLength(1);
@@ -213,7 +237,7 @@ describe("Uploader", () => {
     const backend = fakeBackend();
     backend.failNext("uploadUrl", new FlowError("too_many_uploads", 429));
     const { uploader, waits } = uploaderFor(backend);
-    expect(await uploader.run([shot("document_front")], listener().l)).toEqual({
+    expect(await sendAndSubmit(uploader, [shot("document_front")], listener().l)).toEqual({
       ok: false,
       error: "too_many_uploads",
       side: "document_front",
@@ -226,8 +250,12 @@ describe("Uploader", () => {
     backend.failNext("completeCapture", new FlowError("image_too_small", 422));
     const { uploader } = uploaderFor(backend);
     const back = shot("document_back");
-    expect(await uploader.run([back], listener().l)).toEqual({ ok: false, error: "image_too_small", side: "document_back" });
-    await uploader.run([back], listener().l);
+    expect(await sendAndSubmit(uploader, [back], listener().l)).toEqual({
+      ok: false,
+      error: "image_too_small",
+      side: "document_back",
+    });
+    await sendAndSubmit(uploader, [back], listener().l);
     expect(backend.calls.filter((c) => c.startsWith("upload-url"))).toHaveLength(2);
   });
 
@@ -235,18 +263,18 @@ describe("Uploader", () => {
     const backend = fakeBackend();
     backend.failNext("submit", new FlowError("network"), new FlowError("already_submitted", 409));
     const { uploader } = uploaderFor(backend);
-    expect(await uploader.run([], listener().l)).toEqual({ ok: true, session: submitted });
+    expect(await uploader.submit(listener().l)).toEqual({ ok: true, session: submitted });
     expect(backend.calls).toEqual(["submit", "submit", "session"]);
   });
 
-  it("treats already_submitted after the rider's retry as success when an earlier run had submitted", async () => {
+  it("treats already_submitted after the rider's retry as success when an earlier call had submitted", async () => {
     const backend = fakeBackend();
     // Every automatic try loses its answer; the server did record the first one.
     backend.failNext("submit", new FlowError("network"), new FlowError("network"), new FlowError("network"));
     const { uploader } = uploaderFor(backend);
-    expect(await uploader.run([], listener().l)).toEqual({ ok: false, error: "network", side: null });
+    expect(await uploader.submit(listener().l)).toEqual({ ok: false, error: "network", side: null });
     backend.failNext("submit", new FlowError("already_submitted", 409));
-    expect(await uploader.run([], listener().l)).toEqual({ ok: true, session: submitted });
+    expect(await uploader.submit(listener().l)).toEqual({ ok: true, session: submitted });
     expect(backend.calls.slice(-2)).toEqual(["submit", "session"]);
   });
 
@@ -254,7 +282,7 @@ describe("Uploader", () => {
     const backend = fakeBackend();
     backend.failNext("submit", new FlowError("already_submitted", 409));
     const { uploader } = uploaderFor(backend);
-    expect(await uploader.run([], listener().l)).toEqual({ ok: false, error: "already_submitted", side: null });
+    expect(await uploader.submit(listener().l)).toEqual({ ok: false, error: "already_submitted", side: null });
   });
 });
 
@@ -263,7 +291,7 @@ describe("the MRZ report", () => {
     const backend = fakeBackend();
     const { uploader } = uploaderFor(backend);
     const { l, progress, done } = listener();
-    const outcome = await uploader.run([shot("document_front"), readShot("document_back", "valid", 2)], l);
+    const outcome = await sendAndSubmit(uploader, [shot("document_front"), readShot("document_back", "valid", 2)], l);
     expect(outcome).toEqual({ ok: true, session: submitted });
     expect(backend.calls).toEqual([
       "upload-url:document_front",
@@ -309,25 +337,25 @@ describe("the MRZ report", () => {
     const backend = fakeBackend();
     backend.failNext("reportMrz", new FlowError("network"));
     const { uploader, waits } = uploaderFor(backend);
-    expect((await uploader.run([readShot("document_front")], listener().l)).ok).toBe(true);
+    expect((await sendAndSubmit(uploader, [readShot("document_front")], listener().l)).ok).toBe(true);
     expect(backend.calls.filter((c) => c.startsWith("mrz"))).toHaveLength(2);
     expect(waits).toEqual([1500]);
   });
 
-  it("never holds back the submit, and is sent again on the next run with the same capture", async () => {
+  it("never holds back the submit, and is sent again on the rider's next try with the same capture", async () => {
     const backend = fakeBackend();
     backend.failNext("reportMrz", new FlowError("server_error", 503), new FlowError("network"), new FlowError("timeout"));
     backend.failNext("submit", new FlowError("network"), new FlowError("network"), new FlowError("network"));
     const { uploader } = uploaderFor(backend);
     const front = readShot("document_front", "invalid", 3);
-    const first = await uploader.run([front], listener().l);
+    const first = await sendAndSubmit(uploader, [front], listener().l);
     expect(first).toEqual({ ok: false, error: "network", side: null });
     expect(backend.calls.filter((c) => c.startsWith("mrz"))).toHaveLength(3);
     expect(backend.calls.filter((c) => c === "submit")).toHaveLength(3);
 
-    // The rider's "Try again": the photo is on the server, so only the report and the submit remain.
+    // The rider's "Try again" (the checks are over): only the report and the submit remain.
     const before = backend.calls.length;
-    const second = await uploader.run([], listener().l);
+    const second = await uploader.submit(listener().l);
     expect(second).toEqual({ ok: true, session: submitted });
     expect(backend.calls.slice(before)).toEqual(["mrz:capture-document_front:read", "submit"]);
     expect(backend.api.reportMrz).toHaveBeenLastCalledWith(
@@ -339,7 +367,8 @@ describe("the MRZ report", () => {
     const backend = fakeBackend();
     backend.failNext("reportMrz", new FlowError("network"), new FlowError("network"), new FlowError("network"));
     const { uploader } = uploaderFor(backend);
-    expect(await uploader.run([readShot("document_front")], listener().l)).toEqual({ ok: true, session: submitted });
+    const outcome = await sendAndSubmit(uploader, [readShot("document_front")], listener().l);
+    expect(outcome).toEqual({ ok: true, session: submitted });
     expect(backend.calls.slice(-1)).toEqual(["submit"]);
   });
 
@@ -348,14 +377,14 @@ describe("the MRZ report", () => {
     backend.failNext("reportMrz", new FlowError("invalid_mrz", 422));
     backend.failNext("submit", new FlowError("network"), new FlowError("network"), new FlowError("network"));
     const { uploader, waits, warnings } = uploaderFor(backend);
-    expect((await uploader.run([readShot("document_front")], listener().l)).ok).toBe(false);
+    expect((await sendAndSubmit(uploader, [readShot("document_front")], listener().l)).ok).toBe(false);
     expect(backend.calls.filter((c) => c.startsWith("mrz"))).toHaveLength(1);
     // Only the submit's tries waited.
     expect(waits).toEqual([1500, 3000]);
     expect(warnings).toEqual(["MRZ report not recorded: invalid_mrz"]);
     expect(warnings.join()).not.toContain("UTO");
 
-    expect((await uploader.run([], listener().l)).ok).toBe(true);
+    expect((await uploader.submit(listener().l)).ok).toBe(true);
     expect(backend.calls.filter((c) => c.startsWith("mrz"))).toHaveLength(1);
   });
 
@@ -363,8 +392,8 @@ describe("the MRZ report", () => {
     const backend = fakeBackend();
     backend.failNext("submit", new FlowError("network"), new FlowError("network"), new FlowError("network"));
     const { uploader } = uploaderFor(backend);
-    expect((await uploader.run([readShot("document_front")], listener().l)).ok).toBe(false);
-    expect((await uploader.run([], listener().l)).ok).toBe(true);
+    expect((await sendAndSubmit(uploader, [readShot("document_front")], listener().l)).ok).toBe(false);
+    expect((await uploader.submit(listener().l)).ok).toBe(true);
     expect(backend.calls.filter((c) => c.startsWith("mrz"))).toEqual(["mrz:capture-document_front:read"]);
   });
 
@@ -372,12 +401,109 @@ describe("the MRZ report", () => {
     const backend = fakeBackend();
     backend.failNext("completeCapture", new FlowError("image_too_small", 422));
     const { uploader } = uploaderFor(backend);
-    expect(await uploader.run([readShot("document_front")], listener().l)).toEqual({
+    expect(await sendAndSubmit(uploader, [readShot("document_front")], listener().l)).toEqual({
       ok: false,
       error: "image_too_small",
       side: "document_front",
     });
     expect(backend.api.reportMrz).not.toHaveBeenCalled();
+  });
+});
+
+describe("uploadSides and submit", () => {
+  it("sends the photos without submitting: the server checks them first", async () => {
+    const backend = fakeBackend();
+    const { uploader } = uploaderFor(backend);
+    const { l, done, progress } = listener();
+    expect(await uploader.uploadSides([shot("document_front"), readShot("document_back")], l)).toEqual({ ok: true });
+    expect(backend.calls).toEqual([
+      "upload-url:document_front",
+      `put:${VID}/document_front-1.jpg:tok1`,
+      `captures:${VID}/document_front-1.jpg`,
+      "upload-url:document_back",
+      `put:${VID}/document_back-2.jpg:tok2`,
+      `captures:${VID}/document_back-2.jpg`,
+      "mrz:capture-document_back:read",
+    ]);
+    expect(done).toEqual(["document_front", "document_back"]);
+    // The bar keeps its last step for the submit.
+    expect(progress.at(-1)).toMatchObject({ done: 6, total: 8 });
+    expect(progress.some((p) => p.phase === "submit")).toBe(false);
+    expect(backend.api.submit).not.toHaveBeenCalled();
+  });
+
+  it("places the submit at the end of the photos' progress bar", async () => {
+    const backend = fakeBackend();
+    const { uploader } = uploaderFor(backend);
+    const { l, progress } = listener();
+    expect(await uploader.submit(l, { total: 7, photos: 2 })).toEqual({ ok: true, session: submitted });
+    expect(progress).toEqual([{ done: 6, total: 7, phase: "submit", photo: 0, photos: 2, attempt: 1 }]);
+
+    const alone = listener();
+    await uploader.submit(alone.l);
+    expect(alone.progress).toEqual([{ done: 0, total: 1, phase: "submit", photo: 0, photos: 0, attempt: 1 }]);
+  });
+
+  it("sends only the photo retaken for the server, then the submit", async () => {
+    const backend = fakeBackend();
+    const { uploader } = uploaderFor(backend);
+    const front = shot("document_front");
+    expect((await uploader.uploadSides([front, shot("document_back")], listener().l)).ok).toBe(true);
+    // The server asked for the back again: the front stays on the server.
+    const before = backend.calls.length;
+    expect((await sendAndSubmit(uploader, [shot("document_back")], listener().l)).ok).toBe(true);
+    expect(backend.calls.slice(before)).toEqual([
+      "upload-url:document_back",
+      `put:${VID}/document_back-3.jpg:tok3`,
+      `captures:${VID}/document_back-3.jpg`,
+      "submit",
+    ]);
+  });
+
+  it("tries a missing report again before the submit when its photo stays, not when it was retaken", async () => {
+    const backend = fakeBackend();
+    const { uploader } = uploaderFor(backend);
+    const back = readShot("document_back", "valid", 1);
+    // The back's report fails on every try; the server then asks for the front again.
+    backend.failNext("reportMrz", new FlowError("network"), new FlowError("network"), new FlowError("network"));
+    expect((await uploader.uploadSides([shot("document_front"), back], listener().l)).ok).toBe(true);
+    const before = backend.calls.length;
+    expect((await sendAndSubmit(uploader, [shot("document_front")], listener().l)).ok).toBe(true);
+    expect(backend.calls.slice(before)).toEqual([
+      "upload-url:document_front",
+      `put:${VID}/document_front-3.jpg:tok3`,
+      `captures:${VID}/document_front-3.jpg`,
+      "mrz:capture-document_back:read",
+      "submit",
+    ]);
+    expect(backend.api.reportMrz).toHaveBeenLastCalledWith(expect.objectContaining({ attempts: 1 }));
+  });
+
+  it("drops the missing report of a photo the server asked for again: the new photo has its own", async () => {
+    const backend = fakeBackend();
+    const { uploader } = uploaderFor(backend);
+    backend.failNext("reportMrz", new FlowError("network"), new FlowError("network"), new FlowError("network"));
+    expect((await uploader.uploadSides([readShot("document_front", "valid", 1)], listener().l)).ok).toBe(true);
+    // Read again on the phone (second read of the side), sent, then submitted.
+    const before = backend.calls.length;
+    expect((await sendAndSubmit(uploader, [readShot("document_front", "invalid", 2)], listener().l)).ok).toBe(true);
+    expect(backend.calls.slice(before).filter((c) => c.startsWith("mrz"))).toHaveLength(1);
+    expect(backend.api.reportMrz).toHaveBeenLastCalledWith(expect.objectContaining({ attempts: 2 }));
+    expect(backend.calls.at(-1)).toBe("submit");
+  });
+
+  it("gives a failed report one round per action of the rider", async () => {
+    const backend = fakeBackend();
+    const { uploader } = uploaderFor(backend);
+    backend.failNext("reportMrz", ...Array.from({ length: 6 }, () => new FlowError("network")));
+    backend.failNext("submit", new FlowError("network"), new FlowError("network"), new FlowError("network"));
+    // "Use this photo": three tries right after the photo, none more before the submit that follows.
+    expect((await sendAndSubmit(uploader, [readShot("document_front")], listener().l)).ok).toBe(false);
+    expect(backend.calls.filter((c) => c.startsWith("mrz"))).toHaveLength(3);
+    // "Try again": three more, then the submit.
+    expect((await uploader.submit(listener().l)).ok).toBe(true);
+    expect(backend.calls.filter((c) => c.startsWith("mrz"))).toHaveLength(6);
+    expect(backend.calls.at(-1)).toBe("submit");
   });
 });
 

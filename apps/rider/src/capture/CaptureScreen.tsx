@@ -5,7 +5,7 @@
 // is hidden, and right after the photo is grabbed. "Retake" mounts this screen again (new stream).
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DEFAULT_THRESHOLDS } from "@verify/capture";
-import type { CaptureSide, ClientQuality, DeclaredDocument } from "@verify/shared";
+import type { CaptureSide, ClientQuality, DeclaredDocument, RetakeReason } from "@verify/shared";
 import type { FlowErrorCode } from "../flow/errors";
 import { type Shot, mrzExpectationFor } from "../flow/machine";
 import { type Analyzer, createAnalyzer } from "./analyzerClient";
@@ -47,12 +47,15 @@ export interface CaptureScreenProps {
   side: CaptureSide;
   document: DeclaredDocument;
   error: FlowErrorCode | null;
+  /** Why the server asked for a new photo of this side (M3); null otherwise. */
+  retake: RetakeReason | null;
   debug: boolean;
   onCaptured: (shot: Shot) => void;
   onBack: () => void;
 }
 
-export default function CaptureScreen({ side, document, error, debug, onCaptured, onBack }: CaptureScreenProps) {
+export default function CaptureScreen(props: CaptureScreenProps) {
+  const { side, document, error, retake, debug, onCaptured, onBack } = props;
   const videoRef = useRef<HTMLVideoElement>(null);
   const layoutRef = useRef<CaptureLayout | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -307,6 +310,7 @@ export default function CaptureScreen({ side, document, error, debug, onCaptured
       tip={isLive && view.tip}
       showShutter={shutter && camera.state !== "error"}
       error={error}
+      retake={retake}
       cameraError={camera.state === "error" ? camera.kind : null}
       debug={debug && live ? <CaptureDebug live={live} /> : null}
       onLayout={onLayout}

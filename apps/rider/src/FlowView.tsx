@@ -4,8 +4,9 @@ import { Suspense, lazy, useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { CaptureScreenProps } from "./capture/CaptureScreen";
 import { ErrorBoundary } from "./ErrorBoundary";
-import { type FlowState, canUseShot, mrzReview } from "./flow/machine";
+import { type FlowState, canUseShot, mrzReview, sideShots } from "./flow/machine";
 import type { FlowActions } from "./flow/useFlow";
+import { CheckingScreen } from "./screens/Checking";
 import { ConsentScreen, DeclinedScreen } from "./screens/Consent";
 import { DocumentChoiceScreen } from "./screens/DocumentChoice";
 import { DoneScreen, SessionErrorScreen } from "./screens/End";
@@ -122,13 +123,20 @@ export function FlowView({ state, actions, debug }: { state: FlowState; actions:
           side={screen.side}
           document={state.document}
           error={state.error}
+          retake={state.retakeReasons[screen.side] ?? null}
           debug={debug}
           onCaptured={actions.captured}
           onBack={actions.back}
         />
       );
     case "turnOver":
-      return <TurnOverScreen onContinue={actions.turnOverReady} />;
+      return (
+        <TurnOverScreen
+          document={state.document}
+          retake={state.retakeReasons[screen.side] ?? null}
+          onContinue={actions.turnOverReady}
+        />
+      );
     case "reading": {
       const shot = state.shots[screen.side];
       if (!shot) return null;
@@ -151,6 +159,8 @@ export function FlowView({ state, actions, debug }: { state: FlowState; actions:
     }
     case "upload":
       return <UploadScreen upload={state.upload} error={state.error} onRetry={actions.retryUpload} />;
+    case "checking":
+      return <CheckingScreen shots={sideShots(state)} document={state.document} />;
     case "done":
       return <DoneScreen />;
     case "sessionError":

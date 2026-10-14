@@ -21,6 +21,8 @@ export interface FunctionConfig {
   /** Base URL of the rider web app, without trailing slash; null when unset or invalid. */
   riderAppUrl: string | null;
   testSessionTtlMinutes: number;
+  /** The AI worker's doorbell (M3); null when unset or invalid (the sweep still rings each minute). */
+  workerRingUrl: string | null;
 }
 
 /** Reads `get`, falling back to `defaults` for variables that are unset or blank. */
@@ -36,17 +38,24 @@ export function readConfig(get: EnvReader): FunctionConfig {
     allowedOrigins: parseAllowedOrigins(get("ALLOWED_ORIGINS")),
     riderAppUrl: parseRiderAppUrl(get("RIDER_APP_URL")),
     testSessionTtlMinutes: parseTtlMinutes(get("TEST_SESSION_TTL_MINUTES")),
+    workerRingUrl: parseWorkerRingUrl(get("WORKER_RING_URL")),
   };
 }
 
 /** Settings that make the function refuse work. They fail closed, so they are reported at startup. */
-export function configProblems(config: FunctionConfig, { needsRiderAppUrl = false } = {}): string[] {
+export function configProblems(
+  config: FunctionConfig,
+  { needsRiderAppUrl = false, needsWorkerRingUrl = false } = {},
+): string[] {
   const problems: string[] = [];
   if (config.allowedOrigins.size === 0) {
     problems.push("ALLOWED_ORIGINS has no valid origin: every browser request will be refused");
   }
   if (needsRiderAppUrl && !config.riderAppUrl) {
     problems.push("RIDER_APP_URL is missing or invalid: test sessions cannot be created");
+  }
+  if (needsWorkerRingUrl && !config.workerRingUrl) {
+    problems.push("WORKER_RING_URL is missing or invalid: photos wait for the sweep (up to a minute) before the worker sees them");
   }
   return problems;
 }
@@ -83,6 +92,19 @@ export function parseRiderAppUrl(raw: string | undefined): string | null {
     if (url.protocol !== "https:" && !local) return null;
     if (url.search || url.hash || url.username || url.password) return null;
     return value;
+  } catch {
+    return null;
+  }
+}
+
+/** HTTPS only, no credentials, query or fragment: the URL is called with no authority attached. */
+export function parseWorkerRingUrl(raw: string | undefined): string | null {
+  const value = raw?.trim();
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:" || url.search || url.hash || url.username || url.password) return null;
+    return url.href;
   } catch {
     return null;
   }

@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   MRZ_TRIES_BEFORE_OVERRIDE,
   REQUIRED_SIDES,
+  SERVER_RETAKES_PER_SIDE,
   type CaptureSide,
   type ClientQuality,
   type DeclaredDocument,
+  type FlowCheckSide,
+  type FlowChecks,
   type FlowSession,
   type FlowStatus,
   type MrzFormat,
@@ -16,7 +19,9 @@ import {
   type FlowState,
   type Shot,
   REFUSALS_BEFORE_OVERRIDE,
+  acceptsServerRetake,
   canUseShot,
+  checksDecision,
   closedReason,
   flowReducer,
   handlesBack,
@@ -25,6 +30,8 @@ import {
   mrzReview,
   pendingShots,
   refusalHints,
+  sideShots,
+  usedOverride,
 } from "./machine";
 
 function session(overrides: Partial<FlowSession> = {}): FlowSession {
@@ -291,7 +298,7 @@ describe("upload", () => {
   const running = run(queued, { type: "upload/started", progress });
 
   it("runs once from the queue", () => {
-    expect(running.upload).toEqual({ status: "running", progress });
+    expect(running.upload).toEqual({ status: "running", stage: "sides", progress });
     expect(run(running, { type: "upload/started", progress })).toBe(running);
   });
 
@@ -401,12 +408,13 @@ describe("the phone's Back button", () => {
     }
   });
 
-  it("is handled by the flow only on the camera, turn-over, reading, review and upload screens", () => {
+  it("is handled by the flow only on the camera, turn-over, reading, review, upload and checking screens", () => {
     expect(handlesBack({ name: "capture", side: "document_front" })).toBe(true);
     expect(handlesBack({ name: "turnOver", side: "document_back" })).toBe(true);
     expect(handlesBack({ name: "reading", side: "document_back" })).toBe(true);
     expect(handlesBack({ name: "review", side: "document_back" })).toBe(true);
     expect(handlesBack({ name: "upload" })).toBe(true);
+    expect(handlesBack({ name: "checking" })).toBe(true);
     for (const name of ["welcome", "consent", "declined", "document", "done"] as const) {
       expect(handlesBack({ name })).toBe(false);
     }
@@ -658,5 +666,343 @@ describe("reading the code lines (MRZ)", () => {
     state = takeAndRead(state, "document_front", read("valid", "TD3"));
     expect(state.shots.document_front?.mrzAttempt).toBe(2);
     expect(pendingShots(state).map((s) => s.side)).toEqual(["document_front"]);
+  });
+});
+
+describe("the server's checks (M3)", () => {
+  const progress = { done: 0, total: 7, phase: "link" as const, photo: 1, photos: 2, attempt: 1 };
+  /** The ICAO 9303 TD1 specimen ("Utopia"): public example data. */
+  const LINES_TD1 = [
+    "I<UTOD231458907<<<<<<<<<<<<<<<",
+    "7408122F1204159UTO<<<<<<<<<<<6",
+    "ERIKSSON<<ANNA<MARIA<<<<<<<<<<",
+  ];
+  function read(status: MrzReadStatus): MrzReadResult {
+    const lines = status === "valid" || status === "invalid" ? LINES_TD1 : null;
+    const timing = { corrections: 0, ms: 300, rawText: "", charHeight: 18, rotated: false };
+    return { status, format: "TD1", lines, parsed: null, ...timing };
+  }
+
+  /** Runs the queued upload of the photos still to send to its end: the checking screen. */
+  function send(state: FlowState): FlowState {
+    expect(state.upload).toMatchObject({ status: "queued", stage: "sides" });
+    const sides = pendingShots(state).map((s) => s.side);
+    return run(
+      state,
+      { type: "upload/started", progress },
+      ...sides.map((side): FlowAction => ({ type: "upload/sideDone", side })),
+      { type: "upload/sent" },
+    );
+  }
+
+  /** Both sides of the old CNI taken (`front`, `back`), accepted and sent: the checking screen. */
+  function checkingCni(front = shot("document_front"), back = shot("document_back")): FlowState {
+    return send(
+      run(
+        cniChosen,
+        { type: "capture/taken", shot: front },
+        { type: "review/accept" },
+        { type: "turnOver/ready" },
+        { type: "capture/taken", shot: back },
+        { type: "review/accept" },
+      ),
+    );
+  }
+
+  function checks(sides: Partial<Record<CaptureSide, FlowCheckSide["state"] | "no_document">>): FlowChecks {
+    const list = Object.entries(sides).map(([kind, state]): FlowCheckSide => {
+      const retake = state === "retake" || state === "no_document";
+      return {
+        kind: kind as CaptureSide,
+        captureId: `capture-${kind}`,
+        state: retake ? "retake" : (state as FlowCheckSide["state"]),
+        reason: state === "no_document" ? "no_document" : retake ? "unreadable" : null,
+      };
+    });
+    return { done: list.every((side) => side.state !== "pending"), sides: list };
+  }
+
+  const retakeFront = { type: "checks/retake", sides: [{ side: "document_front", reason: "no_document" }] } as const;
+  const retakeBack = { type: "checks/retake", sides: [{ side: "document_back", reason: "unreadable" }] } as const;
+
+  it("waits on the checking screen once every photo is sent, without submitting yet", () => {
+    const state = checkingCni();
+    expect(state.screen).toEqual({ name: "checking" });
+    expect(state.upload).toEqual({ status: "idle", stage: "sides", progress: null });
+    expect(state.uploaded).toEqual({ document_front: true, document_back: true });
+    expect(sideShots(state).map((s) => s.side)).toEqual(["document_front", "document_back"]);
+    // Only a running upload of the photos ends there.
+    expect(run(state, { type: "upload/sent" })).toBe(state);
+  });
+
+  it("does nothing on Back while checking (the leave-page warning stays)", () => {
+    const state = checkingCni();
+    expect(handlesBack(state.screen)).toBe(true);
+    expect(run(state, { type: "nav/back" })).toBe(state);
+  });
+
+  it("submits once the checks are over, then finishes", () => {
+    const state = run(checkingCni(), { type: "checks/ok" });
+    expect(state.screen).toEqual({ name: "upload" });
+    expect(state.upload).toEqual({ status: "queued", stage: "submit", progress: null });
+    // Nothing left to send: only the submit.
+    expect(pendingShots(state)).toEqual([]);
+    const submitting = run(state, {
+      type: "upload/started",
+      progress: { done: 6, total: 7, phase: "submit", photo: 0, photos: 2, attempt: 1 },
+    });
+    expect(submitting.upload).toMatchObject({ status: "running", stage: "submit" });
+    const done = run(submitting, {
+      type: "upload/submitted",
+      session: withDocument("cni_legacy", ["document_front", "document_back"]),
+    });
+    expect(done.screen).toEqual({ name: "done" });
+  });
+
+  it("submits with no error shown when the checks time out or cannot be read", () => {
+    const state = run(checkingCni(), { type: "checks/timeout" });
+    expect(state).toMatchObject({ error: null, screen: { name: "upload" } });
+    expect(state.upload).toMatchObject({ status: "queued", stage: "submit" });
+  });
+
+  it("ignores the checks' answers anywhere but on the checking screen", () => {
+    const queued = run(cniChosen, { type: "capture/taken", shot: shot("document_front") });
+    for (const action of [{ type: "checks/ok" }, { type: "checks/timeout" }, retakeFront] as const) {
+      expect(run(queued, action)).toBe(queued);
+    }
+  });
+
+  it("retries only the submit after it failed, without checking again", () => {
+    let state = run(checkingCni(), { type: "checks/ok" }, { type: "upload/started", progress });
+    state = run(state, { type: "upload/failed", error: "network", side: null });
+    expect(state).toMatchObject({ error: "network", screen: { name: "upload" } });
+    expect(state.upload).toMatchObject({ status: "failed", stage: "submit" });
+    state = run(state, { type: "upload/retry" });
+    expect(state.upload).toEqual({ status: "queued", stage: "submit", progress: null });
+  });
+
+  it("starts the photos over when the submit finds a side missing", () => {
+    let state = run(checkingCni(), retakeFront);
+    state = send(run(state, { type: "capture/taken", shot: shot("document_front") }, { type: "review/accept" }));
+    state = run(state, { type: "checks/ok" }, { type: "upload/started", progress });
+    state = run(state, { type: "upload/failed", error: "missing_sides", side: null });
+    expect(state).toMatchObject({ shots: {}, uploaded: {}, retakeReasons: {} });
+    expect(state.screen).toEqual({ name: "capture", side: "document_front" });
+    expect(state.upload).toEqual({ status: "idle", stage: "sides", progress: null });
+    // The server keeps its count of the retakes asked for: so does the phone.
+    expect(state.serverRetakes).toEqual({ document_front: 1 });
+  });
+
+  it("sends the rider back to the front's camera, with the reason, when the server finds it unusable", () => {
+    const checking = checkingCni();
+    const state = run(checking, retakeFront);
+    expect(state.screen).toEqual({ name: "capture", side: "document_front" });
+    expect(state.error).toBeNull();
+    expect(state.shots.document_front).toBeUndefined();
+    expect(state.uploaded).toEqual({ document_back: true });
+    expect(state.shots.document_back).toBe(checking.shots.document_back);
+    expect(state.serverRetakes).toEqual({ document_front: 1 });
+    expect(state.retakeReasons).toEqual({ document_front: "no_document" });
+
+    // The new photo: the reason has been seen; the back is already on the server, so only the front goes.
+    const taken = run(state, { type: "capture/taken", shot: shot("document_front") });
+    expect(taken.retakeReasons).toEqual({});
+    const queued = run(taken, { type: "review/accept" });
+    expect(queued.upload).toEqual({ status: "queued", stage: "sides", progress: null });
+    expect(pendingShots(queued).map((s) => s.side)).toEqual(["document_front"]);
+    expect(send(queued).screen).toEqual({ name: "checking" });
+  });
+
+  it("goes through the turn-over step to retake the back", () => {
+    let state = run(checkingCni(), retakeBack);
+    expect(state.screen).toEqual({ name: "turnOver", side: "document_back" });
+    expect(state.retakeReasons).toEqual({ document_back: "unreadable" });
+    state = run(state, { type: "turnOver/ready" });
+    expect(state.screen).toEqual({ name: "capture", side: "document_back" });
+    // Back from there: the turn-over step, then the front's review (the front stays on the server).
+    const back = run(state, { type: "nav/back" }, { type: "nav/back" });
+    expect(back.screen).toEqual({ name: "review", side: "document_front" });
+    expect(back.uploaded.document_front).toBe(true);
+    state = run(state, { type: "capture/taken", shot: shot("document_back") }, { type: "review/accept" });
+    expect(pendingShots(state).map((s) => s.side)).toEqual(["document_back"]);
+  });
+
+  it("retakes both sides, the front first, then the back through the turn-over step", () => {
+    let state = run(checkingCni(), {
+      type: "checks/retake",
+      sides: [
+        { side: "document_back", reason: "unreadable" },
+        { side: "document_front", reason: "no_document" },
+      ],
+    });
+    expect(state.screen).toEqual({ name: "capture", side: "document_front" });
+    expect(state.shots).toEqual({});
+    expect(state.uploaded).toEqual({});
+    expect(state.retakeReasons).toEqual({ document_front: "no_document", document_back: "unreadable" });
+    state = run(state, { type: "capture/taken", shot: shot("document_front") }, { type: "review/accept" });
+    expect(state.screen).toEqual({ name: "turnOver", side: "document_back" });
+    expect(state.retakeReasons).toEqual({ document_back: "unreadable" });
+    state = run(
+      state,
+      { type: "turnOver/ready" },
+      { type: "capture/taken", shot: shot("document_back") },
+      { type: "review/accept" },
+    );
+    expect(pendingShots(state).map((s) => s.side)).toEqual(["document_front", "document_back"]);
+  });
+
+  it(`asks at most ${SERVER_RETAKES_PER_SIDE} time(s) per side, then submits the photo as it is`, () => {
+    let state = checkingCni();
+    for (let i = 0; i < SERVER_RETAKES_PER_SIDE; i++) {
+      state = run(state, retakeFront);
+      expect(state.screen).toEqual({ name: "capture", side: "document_front" });
+      state = send(run(state, { type: "capture/taken", shot: shot("document_front") }, { type: "review/accept" }));
+    }
+    expect(acceptsServerRetake(state, "document_front")).toBe(false);
+    const answer = checks({ document_front: "retake", document_back: "ok" });
+    expect(checksDecision(state, answer)).toEqual({ type: "checks/ok" });
+    const again = run(state, retakeFront);
+    expect(again).toMatchObject({ screen: { name: "upload" }, upload: { status: "queued", stage: "submit" } });
+    expect(again.serverRetakes).toEqual({ document_front: SERVER_RETAKES_PER_SIDE });
+    // The other side still may be asked for.
+    expect(acceptsServerRetake(state, "document_back")).toBe(true);
+  });
+
+  it("never asks again after the rider used a blurry or glary photo anyway", () => {
+    const blurry = () => shot("document_front", "manual", ["blurry"]);
+    let state = run(cniChosen, { type: "capture/taken", shot: blurry() });
+    for (let i = 1; i < REFUSALS_BEFORE_OVERRIDE; i++) {
+      state = run(state, { type: "review/retake" }, { type: "capture/taken", shot: blurry() });
+    }
+    state = run(state, { type: "review/accept" }, { type: "turnOver/ready" });
+    state = send(run(state, { type: "capture/taken", shot: shot("document_back") }, { type: "review/accept" }));
+    expect(usedOverride(state, state.shots.document_front!)).toBe(true);
+    expect(acceptsServerRetake(state, "document_front")).toBe(false);
+    expect(run(state, retakeFront)).toMatchObject({ screen: { name: "upload" }, serverRetakes: {} });
+  });
+
+  describe("on the side with the code lines", () => {
+    const gray = () => ({ width: 8, height: 4, data: new Uint8Array(32) });
+    /** The new CNI, its back read once per status in turn (retaken in between), accepted and sent. */
+    function checkingBiometric(...statuses: MrzReadStatus[]): FlowState {
+      const session = withDocument("cni_biometric", ["document_front", "document_back"]);
+      let state = run(
+        run(ready, { type: "document/chosen", session }),
+        { type: "capture/taken", shot: shot("document_front") },
+        { type: "review/accept" },
+        { type: "turnOver/ready" },
+      );
+      for (const [index, status] of statuses.entries()) {
+        if (index > 0) state = run(state, { type: "review/retake" });
+        const photo = { ...shot("document_back"), gray: gray() };
+        state = run(state, { type: "capture/taken", shot: photo });
+        state = run(state, { type: "mrz/read", shot: photo, result: read(status) });
+      }
+      return send(run(state, { type: "review/accept" }));
+    }
+
+    it("never asks for a photo whose code lines the phone read with every check digit right", () => {
+      const state = checkingBiometric("valid");
+      expect(acceptsServerRetake(state, "document_back")).toBe(false);
+      expect(checksDecision(state, checks({ document_front: "ok", document_back: "retake" }))).toEqual({
+        type: "checks/ok",
+      });
+      expect(run(state, retakeBack).screen).toEqual({ name: "upload" });
+    });
+
+    it(`never asks again after "Continue anyway"`, () => {
+      const state = checkingBiometric(...Array.from({ length: MRZ_TRIES_BEFORE_OVERRIDE }, () => "not_found" as const));
+      expect(mrzReview(state, state.shots.document_back!)).toMatchObject({ status: "unread", canContinue: true });
+      expect(usedOverride(state, state.shots.document_back!)).toBe(true);
+      expect(run(state, retakeBack).screen).toEqual({ name: "upload" });
+    });
+
+    it("reads the code lines of the retaken photo again, for a new report", () => {
+      // The reader could not run on the phone: the server may ask for the back again.
+      let state = checkingBiometric("unavailable");
+      expect(acceptsServerRetake(state, "document_back")).toBe(true);
+      state = run(state, retakeBack, { type: "turnOver/ready" });
+      const photo = { ...shot("document_back"), gray: gray() };
+      state = run(state, { type: "capture/taken", shot: photo });
+      expect(state.screen).toEqual({ name: "reading", side: "document_back" });
+      state = run(state, { type: "mrz/read", shot: photo, result: read("valid") }, { type: "review/accept" });
+      const [sent] = pendingShots(state);
+      expect(sent.side).toBe("document_back");
+      expect(sent.mrz?.status).toBe("valid");
+      expect(sent.mrzAttempt).toBe(2);
+    });
+  });
+
+  describe("checksDecision", () => {
+    it("waits while a side is pending and none is to be retaken", () => {
+      const state = checkingCni();
+      expect(checksDecision(state, checks({ document_front: "ok", document_back: "pending" }))).toBeNull();
+      expect(checksDecision(state, checks({ document_front: "pending", document_back: "pending" }))).toBeNull();
+    });
+
+    it("submits when every side is ok or could not be checked", () => {
+      const state = checkingCni();
+      expect(checksDecision(state, checks({ document_front: "ok", document_back: "ok" }))).toEqual({
+        type: "checks/ok",
+      });
+      expect(checksDecision(state, checks({ document_front: "unchecked", document_back: "ok" }))).toEqual({
+        type: "checks/ok",
+      });
+    });
+
+    it("asks for a retake at once, even while the other side is pending", () => {
+      const state = checkingCni();
+      expect(checksDecision(state, checks({ document_front: "no_document", document_back: "pending" }))).toEqual({
+        type: "checks/retake",
+        sides: [{ side: "document_front", reason: "no_document" }],
+      });
+      expect(checksDecision(state, checks({ document_front: "retake", document_back: "retake" }))).toEqual({
+        type: "checks/retake",
+        sides: [
+          { side: "document_front", reason: "unreadable" },
+          { side: "document_back", reason: "unreadable" },
+        ],
+      });
+    });
+
+    it("keeps waiting for the other sides when a retake may not be asked", () => {
+      const state = { ...checkingCni(), serverRetakes: { document_front: SERVER_RETAKES_PER_SIDE } };
+      expect(checksDecision(state, checks({ document_front: "retake", document_back: "pending" }))).toBeNull();
+    });
+
+    it("treats an unknown reason, or a side it did not send, as nothing to retake", () => {
+      const state = checkingCni();
+      const odd: FlowChecks = {
+        done: true,
+        sides: [
+          { kind: "document_front", captureId: "c", state: "retake", reason: "too_shiny" as never },
+          { kind: "document_back", captureId: "d", state: "ok", reason: null },
+        ],
+      };
+      expect(checksDecision(state, odd)).toEqual({ type: "checks/ok" });
+      const unknown = { side: "document_front", reason: "too_shiny" as never } as const;
+      expect(run(state, { type: "checks/retake", sides: [unknown] }).screen).toEqual({ name: "upload" });
+      const passport = send(
+        run(
+          run(ready, { type: "document/chosen", session: withDocument("passport", ["document_front"]) }),
+          { type: "capture/taken", shot: shot("document_front") },
+          { type: "review/accept" },
+        ),
+      );
+      const answer = checks({ document_front: "ok", document_back: "retake" });
+      expect(checksDecision(passport, answer)).toEqual({ type: "checks/ok" });
+    });
+  });
+
+  it("keeps the reasons when the rider picks the same document again, and drops them for another", () => {
+    let state = run(checkingCni(), retakeFront, { type: "nav/back" });
+    expect(state.screen).toEqual({ name: "document" });
+    const cni = withDocument("cni_legacy", ["document_front", "document_back"]);
+    const same = run(state, { type: "document/chosen", session: cni });
+    expect(same.screen).toEqual({ name: "capture", side: "document_front" });
+    expect(same.retakeReasons).toEqual({ document_front: "no_document" });
+    state = run(state, { type: "document/chosen", session: withDocument("passport", ["document_front"]) });
+    expect(state.retakeReasons).toEqual({});
+    expect(state.serverRetakes).toEqual({ document_front: 1 });
   });
 });

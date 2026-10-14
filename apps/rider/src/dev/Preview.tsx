@@ -1,7 +1,14 @@
 // Dev-only (never in production builds): every rider screen with fake data, for screenshots and
 // layout checks without a camera or backend. Open /?screen=<name>; add &lang=en for English.
 import { type CSSProperties, useEffect, useState } from "react";
-import { type CaptureSide, type DeclaredDocument, type FlowSession, REQUIRED_SIDES, parseMrz } from "@verify/shared";
+import {
+  type CaptureSide,
+  type DeclaredDocument,
+  type FlowSession,
+  REQUIRED_SIDES,
+  type RetakeReason,
+  parseMrz,
+} from "@verify/shared";
 import type { Hint } from "@verify/capture";
 import { FlowView } from "../FlowView";
 import type { FlowErrorCode } from "../flow/errors";
@@ -66,18 +73,45 @@ const STATES: Record<string, FlowState> = {
   document: state({ screen: { name: "document" }, document: null }),
   "document-busy": state({ screen: { name: "document" }, busy: true }),
   turnover: state({ screen: { name: "turnOver", side: "document_back" } }),
+  // The server asked for the back again (M3): its reason instead of "turn it over".
+  "turnover-retake": state({
+    screen: { name: "turnOver", side: "document_back" },
+    serverRetakes: { document_back: 1 },
+    retakeReasons: { document_back: "unreadable" },
+  }),
   upload: state({
     screen: { name: "upload" },
-    upload: { status: "running", progress: { done: 4, total: 7, phase: "send", photo: 2, photos: 2, attempt: 1 } },
+    upload: {
+      status: "running",
+      stage: "sides",
+      progress: { done: 4, total: 7, phase: "send", photo: 2, photos: 2, attempt: 1 },
+    },
   }),
   "upload-retrying": state({
     screen: { name: "upload" },
-    upload: { status: "running", progress: { done: 1, total: 7, phase: "send", photo: 1, photos: 2, attempt: 2 } },
+    upload: {
+      status: "running",
+      stage: "sides",
+      progress: { done: 1, total: 7, phase: "send", photo: 1, photos: 2, attempt: 2 },
+    },
   }),
   "upload-failed": state({
     screen: { name: "upload" },
     error: "network",
-    upload: { status: "failed", progress: { done: 3, total: 7, phase: "link", photo: 2, photos: 2, attempt: 3 } },
+    upload: {
+      status: "failed",
+      stage: "sides",
+      progress: { done: 3, total: 7, phase: "link", photo: 2, photos: 2, attempt: 3 },
+    },
+  }),
+  // After the checking screen: only the submit is left.
+  "upload-submit": state({
+    screen: { name: "upload" },
+    upload: {
+      status: "running",
+      stage: "submit",
+      progress: { done: 6, total: 7, phase: "submit", photo: 0, photos: 2, attempt: 1 },
+    },
   }),
   done: state({ screen: { name: "done" } }),
   expired: state({ screen: { name: "sessionError", reason: "expired" } }),
@@ -94,6 +128,8 @@ interface CapturePreview {
   shutter?: boolean;
   error?: FlowErrorCode;
   cameraError?: CameraErrorKind;
+  /** The server asked for a new photo of this side (M3). */
+  retake?: RetakeReason;
   debug?: boolean;
   card?: "small" | "fit" | "none";
 }
@@ -105,6 +141,7 @@ const CAPTURES: Record<string, CapturePreview> = {
   "capture-shutter": { side: "document_back", message: "glare", readiness: "adjust", shutter: true, card: "fit" },
   "capture-rejected": { message: "no_document", readiness: "searching", error: "image_resolution_too_low", card: "none" },
   "capture-denied": { message: "starting", readiness: "searching", cameraError: "denied", card: "none" },
+  "capture-retake": { message: "no_document", readiness: "searching", retake: "no_document", card: "none" },
   "capture-debug": { message: "blurry", readiness: "adjust", debug: true, shutter: true, card: "fit" },
 };
 
@@ -265,6 +302,7 @@ function CapturePreviewScreen({ preview }: { preview: CapturePreview }) {
       tip={preview.tip ?? false}
       showShutter={preview.shutter ?? false}
       error={preview.error ?? null}
+      retake={preview.retake ?? null}
       cameraError={preview.cameraError ?? null}
       debug={
         preview.debug ? (
@@ -357,13 +395,43 @@ function ReadingPreviewScreen({ name }: { name: string }) {
   return <FlowView state={readingState} actions={ACTIONS} debug={false} />;
 }
 
+/** "Checking your photos…" (M3): both sides of the old CNI, or the passport's photo page alone. */
+const CHECKINGS: Record<string, DeclaredDocument> = {
+  checking: "cni_legacy",
+  "checking-passport": "passport",
+};
+
+function CheckingPreviewScreen({ name }: { name: string }) {
+  const blob = useSpecimenBlob();
+  if (!blob) return null;
+  const document = CHECKINGS[name];
+  const sides = [...REQUIRED_SIDES[document]];
+  const photo: ReviewPreview = { hints: [], source: "auto", refusals: 0 };
+  const checkingState = state({
+    document,
+    sides,
+    session: { ...SESSION, declaredDocument: document, requiredSides: sides },
+    screen: { name: "checking" },
+    shots: Object.fromEntries(sides.map((side) => [side, previewShot(blob, photo, side)])),
+    uploaded: Object.fromEntries(sides.map((side) => [side, true])),
+  });
+  return <FlowView state={checkingState} actions={ACTIONS} debug={false} />;
+}
+
 export function Preview({ screen }: { screen: string }) {
   if (screen in CAPTURES) return <CapturePreviewScreen preview={CAPTURES[screen]} />;
   if (screen in REVIEWS) return <ReviewPreviewScreen name={screen} />;
   if (screen in READINGS) return <ReadingPreviewScreen name={screen} />;
+  if (screen in CHECKINGS) return <CheckingPreviewScreen name={screen} />;
   const preview = STATES[screen];
   if (!preview) {
-    const names = [...Object.keys(STATES), ...Object.keys(CAPTURES), ...Object.keys(READINGS), ...Object.keys(REVIEWS)];
+    const names = [
+      ...Object.keys(STATES),
+      ...Object.keys(CAPTURES),
+      ...Object.keys(READINGS),
+      ...Object.keys(REVIEWS),
+      ...Object.keys(CHECKINGS),
+    ];
     return (
       <main className="page">
         <h1>Unknown screen</h1>

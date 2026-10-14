@@ -1,4 +1,6 @@
 import { useTranslation } from "react-i18next";
+import type { DeclaredDocument, RetakeReason } from "@verify/shared";
+import { retakeReasonKey, sideLabelKey } from "../labels";
 import { Page, ScreenTitle } from "../ui";
 
 /** Front of a card, a turning arrow, then its back (MRZ-like lines). */
@@ -18,14 +20,28 @@ function FlipIllustration() {
   );
 }
 
-export function TurnOverScreen({ onContinue }: { onContinue: () => void }) {
+interface Props {
+  document: DeclaredDocument | null;
+  /** Set when the server asked for a new photo of the back: says so, and why, instead of "turn it over". */
+  retake: RetakeReason | null;
+  onContinue: () => void;
+}
+
+export function TurnOverScreen({ document, retake, onContinue }: Props) {
   const { t } = useTranslation();
+  const side = t(sideLabelKey(document, "document_back"));
   return (
     <Page>
-      <ScreenTitle>{t("turnOver.title")}</ScreenTitle>
+      <ScreenTitle>{retake ? t("checks.retake", { side }) : t("turnOver.title")}</ScreenTitle>
       <section className="card center">
         <FlipIllustration />
-        <p>{t("turnOver.body")}</p>
+        {retake ? (
+          <p className="notice warn" role="alert">
+            {t(retakeReasonKey(retake))}
+          </p>
+        ) : (
+          <p>{t("turnOver.body")}</p>
+        )}
       </section>
       <button type="button" className="primary" onClick={onContinue}>
         {t("turnOver.continue")}

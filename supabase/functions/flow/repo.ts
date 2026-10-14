@@ -4,6 +4,7 @@ import type { CaptureSide, DeclaredDocument, FlowStatus } from "../_shared/contr
 import { ID_CAPTURES_BUCKET } from "../_shared/config.ts";
 import { dbError, insertAudit } from "../_shared/db.ts";
 import { InternalError } from "../_shared/log.ts";
+import type { CheckStateRow } from "./checks.ts";
 import type {
   CaptureStorage,
   FlowRepo,
@@ -177,6 +178,60 @@ export function createFlowRepo(db: SupabaseClient): FlowRepo {
     },
 
     audit: (entry) => insertAudit(db, entry),
+
+    async captureFollowUp(captureId) {
+      const [replaced, job] = await Promise.all([
+        db.from("capture").select("storage_path").eq("superseded_by", captureId),
+        db.from("worker_job").select("status").eq("capture_id", captureId).maybeSingle<{ status: string }>(),
+      ]);
+      if (replaced.error) throw dbError("capture.select_superseded", replaced.error);
+      if (job.error) throw dbError("worker_job.select", job.error);
+      return {
+        supersededPaths: (replaced.data as { storage_path: string }[]).map((row) => row.storage_path),
+        jobPending: job.data?.status === "pending",
+      };
+    },
+
+    async markRingFailed(captureId) {
+      // Only while it waits: a worker that claimed it meanwhile was reached after all.
+      const { error } = await db.from("worker_job").update({ ring_failed_at: new Date().toISOString() })
+        .eq("capture_id", captureId).eq("status", "pending");
+      if (error) throw dbError("worker_job.mark_ring_failed", error);
+    },
+
+    async checkState(verificationId) {
+      const { data, error } = await db.rpc("flow_check_state", { p_verification: verificationId });
+      if (error) throw dbError("rpc.flow_check_state", error);
+      return ((data ?? []) as {
+        capture_id: string;
+        kind: string;
+        live: boolean;
+        created_at: string;
+        job_status: string | null;
+        job_error: string | null;
+        ring_failed: boolean;
+        quality_verdict: string | null;
+        phone_mrz_pass: boolean | null;
+      }[]).map((row): CheckStateRow => ({
+        captureId: row.capture_id,
+        kind: row.kind,
+        live: row.live,
+        createdAt: row.created_at,
+        jobStatus: row.job_status,
+        jobError: row.job_error,
+        ringFailed: row.ring_failed,
+        qualityVerdict: row.quality_verdict,
+        phoneMrzPass: row.phone_mrz_pass,
+      }));
+    },
+
+    async workerEnabledForRealSessions() {
+      const { data, error } = await db.from("worker_settings").select("enabled_for_real_sessions").limit(1)
+        .maybeSingle<{ enabled_for_real_sessions: boolean }>();
+      if (error) throw dbError("worker_settings.select", error);
+      // No settings row: the worker claims nothing either (fail closed).
+      return data?.enabled_for_real_sessions === true;
+    },
   };
 }
 

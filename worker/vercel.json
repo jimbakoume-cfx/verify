@@ -1,0 +1,14 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "regions": ["cdg1"],
+  "git": { "deploymentEnabled": false },
+  "build": {
+    "env": { "VERCEL_PYTHON_DISABLE_RUNTIME_INSTALL": "1" }
+  },
+  "functions": {
+    "api/process.py": {
+      "maxDuration": 120,
+      "excludeFiles": "{tests/**,.pytest_cache/**,README.md}"
+    }
+  }
+}

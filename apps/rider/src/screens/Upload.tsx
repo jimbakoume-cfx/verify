@@ -10,9 +10,10 @@ interface Props {
   onRetry: () => void;
 }
 
-function useStatusText(progress: UploadProgress | null): string {
+function useStatusText(progress: UploadProgress | null, stage: UploadState["stage"]): string {
   const { t } = useTranslation();
-  if (!progress) return t("upload.link", { n: 1, total: 1 });
+  // Before the first report: the first photo's link, or the submit after the checks.
+  if (!progress) return stage === "submit" ? t("upload.submit") : t("upload.link", { n: 1, total: 1 });
   const step =
     progress.phase === "submit"
       ? t("upload.submit")
@@ -25,7 +26,7 @@ export function UploadScreen({ upload, error, onRetry }: Props) {
   const failed = upload.status === "failed";
   const { progress } = upload;
   const percent = progress ? Math.round((progress.done / progress.total) * 100) : 0;
-  const status = useStatusText(progress);
+  const status = useStatusText(progress, upload.stage);
   return (
     <Page>
       <ScreenTitle>{failed ? t("upload.failedTitle") : t("upload.title")}</ScreenTitle>

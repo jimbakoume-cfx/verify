@@ -1,9 +1,9 @@
 // Supabase implementation of AdminRepo, StaffAuth and SignedUrlStorage (service role).
 import { isAuthApiError, isAuthWeakPasswordError, type SupabaseClient } from "@supabase/supabase-js";
 import { ID_CAPTURES_BUCKET } from "../_shared/config.ts";
-import { MRZ_FORMATS } from "../_shared/contract.ts";
+import { MRZ_FORMATS, type WorkerFields } from "../_shared/contract.ts";
 import { dbError, insertAudit } from "../_shared/db.ts";
-import { isOneOf } from "../_shared/http.ts";
+import { isOneOf, isPlainObject } from "../_shared/http.ts";
 import { InternalError } from "../_shared/log.ts";
 import type {
   AdminRepo,
@@ -18,6 +18,28 @@ import type {
 
 function toInviteResult(data: unknown): InviteResult {
   return data === "ok" ? "ok" : "invalid";
+}
+
+/** Every field of WorkerFields; the record satisfies the type, so a new field must be added here. */
+const WORKER_FIELDS: Record<keyof WorkerFields, true> = {
+  surname: true,
+  givenNames: true,
+  documentNumber: true,
+  birthDate: true,
+  expiryDate: true,
+  issueDate: true,
+  subtype: true,
+};
+
+/** The printed fields as stored (ocr_server), keeping only known fields with string values; null otherwise. */
+export function toWorkerFields(value: unknown): WorkerFields | null {
+  if (!isPlainObject(value)) return null;
+  const fields: WorkerFields = {};
+  for (const [name, field] of Object.entries(value)) {
+    if (!Object.hasOwn(WORKER_FIELDS, name) || typeof field !== "string") return null;
+    fields[name as keyof WorkerFields] = field;
+  }
+  return fields;
 }
 
 export function createAdminRepo(db: SupabaseClient): AdminRepo {
@@ -131,19 +153,33 @@ export function createAdminRepo(db: SupabaseClient): AdminRepo {
         p_role: role,
       });
       if (error) throw dbError("rpc.staff_read_document_data", error);
-      const rows = (data ?? []) as { capture_id: string; source: unknown; format: unknown; lines: string; recorded_at: string }[];
-      return rows.map((row) => {
-        if (row.source !== "mrz_phone" || !isOneOf(MRZ_FORMATS, row.format) || typeof row.lines !== "string") {
+      const rows = (data ?? []) as {
+        capture_id: string;
+        source: unknown;
+        format: unknown;
+        lines: unknown;
+        fields: unknown;
+        recorded_at: string;
+      }[];
+      return rows.map((row): DocumentDataRow => {
+        if (row.source === "ocr_server") {
+          const fields = toWorkerFields(row.fields);
+          if (!fields) throw new InternalError("rpc.staff_read_document_data returned an unexpected row");
+          return { captureId: row.capture_id, source: row.source, fields, recordedAt: row.recorded_at };
+        }
+        if (
+          (row.source !== "mrz_phone" && row.source !== "mrz_server") || !isOneOf(MRZ_FORMATS, row.format) ||
+          typeof row.lines !== "string"
+        ) {
           throw new InternalError("rpc.staff_read_document_data returned an unexpected row");
         }
-        const item: DocumentDataRow = {
+        return {
           captureId: row.capture_id,
           source: row.source,
           format: row.format,
           lines: row.lines,
           recordedAt: row.recorded_at,
         };
-        return item;
       });
     },
 

@@ -58,7 +58,10 @@ export function viewCapture(accessToken: string, request: CaptureViewRequest): P
   return postAdmin<CaptureViewResponse>("/captures/view", request, accessToken);
 }
 
-/** The decrypted MRZ lines of a case. The server records the read in the audit log before decrypting. */
+/**
+ * The decrypted data read from a case's documents (code lines, printed fields). The server records the
+ * read in the audit log before decrypting.
+ */
 export function documentData(accessToken: string, request: DocumentDataRequest): Promise<DocumentDataResponse> {
   return postAdmin<DocumentDataResponse>("/document-data", request, accessToken);
 }

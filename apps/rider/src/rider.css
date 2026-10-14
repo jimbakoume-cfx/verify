@@ -141,6 +141,12 @@ button.primary, button.secondary { min-height: 52px; font-size: 1rem; }
 .reading-status + .progress { margin-top: 12px; }
 .reading-percent { margin: 6px 0 0; color: var(--text-2); font-size: 0.9rem; text-align: right; font-variant-numeric: tabular-nums; }
 
+/* Checking the photos on the server: the photos sent, each with the reading sweep. */
+.checking-photos { display: grid; gap: 10px; }
+.checking-photos.two { grid-template-columns: 1fr 1fr; }
+.checking-photos .review-photo { min-height: 0; }
+.checking-photos .review-photo img { max-height: 40vh; }
+
 /* Upload */
 .progress { height: 12px; border-radius: 999px; background: var(--border); overflow: hidden; }
 .progress-bar { height: 100%; background: var(--brand); border-radius: inherit; transition: width 0.3s ease; }

@@ -167,6 +167,10 @@ insert into public.staff_profile (user_id, role, full_name, active) values
   ('d1000000-0000-0000-0000-000000000005', 'supervisor', 'M2 Former Supervisor', false);
 
 -- 1: new CNI whose back was retaken once; 2: a passport; 3: an old CNI (no MRZ, nothing to read).
+-- Since M3 a newer photo of a side replaces the older one (trigger capture_worker_job, tested in
+-- 40_m3_test.sql). These M2 scenarios keep both photos of a side live, so the trigger is held off while
+-- their photos are inserted.
+alter table public.capture disable trigger capture_worker_job;
 insert into public.verification (id, applicant_id, attempt_no, status, declared_document) values
   ('d3000000-0000-0000-0000-000000000001', 'd2000000-0000-0000-0000-000000000001', 1, 'in_progress', 'cni_biometric'),
   ('d3000000-0000-0000-0000-000000000002', 'd2000000-0000-0000-0000-000000000001', 2, 'in_progress', 'passport'),
@@ -178,6 +182,7 @@ insert into public.capture (id, verification_id, kind, storage_path, sha256, mim
   ('d4000000-0000-0000-0000-000000000014', 'd3000000-0000-0000-0000-000000000001', 'document_back', 'm2/1/back-erased.jpg', 'm2-1-back-erased', 'image/jpeg', 20000, now()),
   ('d4000000-0000-0000-0000-000000000021', 'd3000000-0000-0000-0000-000000000002', 'document_front', 'm2/2/front-1.jpg', 'm2-2-front-1', 'image/jpeg', 20000, null),
   ('d4000000-0000-0000-0000-000000000022', 'd3000000-0000-0000-0000-000000000002', 'document_front', 'm2/2/front-2.jpg', 'm2-2-front-2', 'image/jpeg', 20000, null);
+alter table public.capture enable trigger capture_worker_job;
 insert into public.review_task (verification_id, status, assigned_to, assigned_at) values
   ('d3000000-0000-0000-0000-000000000001', 'assigned', 'd1000000-0000-0000-0000-000000000003', now()),
   ('d3000000-0000-0000-0000-000000000003', 'assigned', 'd1000000-0000-0000-0000-000000000004', now());
@@ -376,7 +381,8 @@ select pg_temp.assert_text(public.flow_record_mrz('d3000000-0000-0000-0000-00000
   'ok', 'record: an unreadable report needs no key');
 rollback;
 
--- One MRZ check per photo, enforced by the table too. Checks not tied to a photo are not limited.
+-- One MRZ check per photo, enforced by the table too. Since M3, a check not tied to a photo is one
+-- per case (check_result_case_check_idx); it does not limit checks of photos.
 begin;
 do $$ begin
   insert into public.check_result (verification_id, capture_id, check_name, check_version, outcome)
@@ -385,11 +391,16 @@ do $$ begin
 exception when unique_violation then raise notice 'ok: one mrz check result per photo';
 end $$;
 insert into public.check_result (verification_id, check_name, check_version, outcome) values
-  ('d3000000-0000-0000-0000-000000000001', 'face_match', 'v0', 'pass'),
   ('d3000000-0000-0000-0000-000000000001', 'face_match', 'v0', 'pass');
+do $$ begin
+  insert into public.check_result (verification_id, check_name, check_version, outcome)
+    values ('d3000000-0000-0000-0000-000000000001', 'face_match', 'v0', 'pass');
+  raise exception 'FAIL: a second check of the whole case was stored';
+exception when unique_violation then raise notice 'ok: one check of each kind per case when it is not tied to a photo (M3)';
+end $$;
 select pg_temp.assert_eq((select count(*) from public.check_result
-  where verification_id = 'd3000000-0000-0000-0000-000000000001' and capture_id is null), 2,
-  'checks without a photo are not limited by the index');
+  where verification_id = 'd3000000-0000-0000-0000-000000000001' and capture_id is not null and check_name = 'mrz'), 2,
+  'the per-case index does not limit checks of photos');
 rollback;
 
 -- Erasing a photo row takes its document data and check result with it.
@@ -463,7 +474,7 @@ begin;
 set local role service_role;
 create temp table m2_supervisor_read as
   select * from public.staff_read_document_data('d3000000-0000-0000-0000-000000000001', 'd1000000-0000-0000-0000-000000000002', 'supervisor')
-    with ordinality as r(capture_id, source, format, lines, recorded_at, n);
+    with ordinality as r(capture_id, source, format, lines, fields, recorded_at, n); -- fields: M3
 select pg_temp.assert_eq((select count(*) from m2_supervisor_read), 2, 'read: a supervisor gets both reads of the case');
 select pg_temp.assert_true((select array_agg(capture_id order by n) from m2_supervisor_read)
     = array['d4000000-0000-0000-0000-000000000013', 'd4000000-0000-0000-0000-000000000012']::uuid[],

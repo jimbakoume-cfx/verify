@@ -1,0 +1,5 @@
+# Everything generated (rendered data, .lstmf files, checkpoints, models, benchmarks, reports) lives
+# in work/ and is never committed: it is reproducible from the pinned inputs and the seeds.
+work/
+.venv/
+__pycache__/

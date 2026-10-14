@@ -1,5 +1,7 @@
 // Rider flow API (contract.ts, "Flow API"). Routing and business rules only: data access goes through
 // the injected FlowRepo / CaptureStorage so the rules can be tested with in-memory fakes.
+// M3: rings the AI worker (warm-up when a document is chosen, then after each accepted photo), erases a
+// photo replaced by a newer one of the same side, and reports the server's checks (GET /checks).
 import {
   CAPTURE_LIMITS,
   CAPTURE_SIDES,
@@ -28,6 +30,9 @@ import { badRequest, createRouter, type Handler, HttpError, isOneOf, jsonRespons
 import { isJpeg, readJpegSize } from "../_shared/jpeg.ts";
 import { consoleLogger, type Logger } from "../_shared/log.ts";
 import { documentCodeFits, MRZ_PARSER_VERSION, parseMrz } from "../_shared/mrz.ts";
+import { type CaseStore, refreshCase } from "../worker/case.ts";
+import { type CheckStateRow, flowChecks } from "./checks.ts";
+import { noRing, type WorkerRing } from "./ring.ts";
 import { buildCapturePath, isOwnCapturePath, sanitizeQuality, validateMrzReport } from "./validation.ts";
 
 export interface FlowVerification {
@@ -78,6 +83,14 @@ export interface MrzRecord {
 /** "exists": this photo already has its MRZ check (a retried report); nothing was changed. */
 export type MrzRecordResult = "ok" | "exists" | "not_found";
 
+/** What follows an accepted photo (M3): the photos it replaced, and whether the worker should be rung. */
+export interface CaptureFollowUp {
+  /** Storage paths of the older photos of the same side that the database marked replaced. */
+  supersededPaths: string[];
+  /** The photo's job waits for the worker (false when the session is not eligible). */
+  jobPending: boolean;
+}
+
 export interface FlowRepo {
   findVerificationByTokenHash(tokenHash: string): Promise<FlowVerification | null>;
   getVerification(id: string): Promise<FlowVerification | null>;
@@ -111,6 +124,14 @@ export interface FlowRepo {
    */
   recordMrz(record: MrzRecord): Promise<MrzRecordResult>;
   audit(entry: AuditEntry): Promise<void>;
+  /** M3: the photos replaced by this one and the state of its job (see the capture_worker_job trigger). */
+  captureFollowUp(captureId: string): Promise<CaptureFollowUp>;
+  /** M3: the worker could not be rung for this photo; reported unchecked while its job waits. */
+  markRingFailed(captureId: string): Promise<void>;
+  /** M3: flow_check_state, every document photo of the case. */
+  checkState(verificationId: string): Promise<CheckStateRow[]>;
+  /** M3: worker_settings.enabled_for_real_sessions (off until Vercel Pro and its DPA). */
+  workerEnabledForRealSessions(): Promise<boolean>;
 }
 
 export interface CaptureStorage {
@@ -124,6 +145,10 @@ export interface FlowDeps {
   repo: FlowRepo;
   storage: CaptureStorage;
   allowedOrigins: ReadonlySet<string>;
+  /** The AI worker's doorbell (M3); default: never rung. */
+  ring?: WorkerRing;
+  /** Rewrites a case's server checks after a photo is replaced (M3); default: left to the next result. */
+  cases?: CaseStore;
   now?: () => Date;
   randomUUID?: () => string;
   log?: Logger;
@@ -135,6 +160,7 @@ const MAX_USER_AGENT = 512;
 
 export function createFlowHandler(deps: FlowDeps): Handler {
   const { repo, storage } = deps;
+  const ring = deps.ring ?? noRing;
   const now = deps.now ?? (() => new Date());
   const randomUUID = deps.randomUUID ?? (() => crypto.randomUUID());
   const log = deps.log ?? consoleLogger;
@@ -236,6 +262,9 @@ export function createFlowHandler(deps: FlowDeps): Handler {
     // Audit only a change that happened: a submit may have closed the session meanwhile.
     if (!(await repo.setDeclaredDocument(v.id, declaredDocument))) throw new HttpError(409, "already_submitted");
     await riderAudit(v, "document.declare", { declaredDocument });
+    // Warm-up: the worker starts while the rider frames the first photo. Only for sessions it may
+    // process, so a real rider never triggers it while the switch is off.
+    if (v.isTest || (await repo.workerEnabledForRealSessions())) ring("warm_up");
     return sessionResponse(v.id);
   };
 
@@ -267,9 +296,13 @@ export function createFlowHandler(deps: FlowDeps): Handler {
     const quality = sanitizeQuality(body.quality);
     if (!quality) throw badRequest("Invalid quality metrics.");
 
-    // A retry after a lost response: report the capture already recorded instead of a duplicate.
+    // A retry after a lost response: report the capture already recorded instead of a duplicate, and
+    // finish what the first attempt may not have done.
     const existing = await repo.findCaptureByPath(v.id, path);
-    if (existing) return jsonResponse(200, toCaptureResponse(existing));
+    if (existing) {
+      await afterCapture(v, existing.id);
+      return jsonResponse(200, toCaptureResponse(existing));
+    }
 
     const bytes = await storage.download(path);
     if (!bytes) throw new HttpError(404, "upload_missing");
@@ -294,7 +327,8 @@ export function createFlowHandler(deps: FlowDeps): Handler {
       height,
       quality: { ...quality, server: { validated: true, reusedElsewhere } },
     });
-    await riderAudit(v, "capture.create", { kind, byteSize: bytes.byteLength, reusedElsewhere }, {
+    const replaced = await afterCapture(v, captureId);
+    await riderAudit(v, "capture.create", { kind, byteSize: bytes.byteLength, reusedElsewhere, replaced }, {
       type: "capture",
       id: captureId,
     });
@@ -307,6 +341,26 @@ export function createFlowHandler(deps: FlowDeps): Handler {
       reusedElsewhere,
     }));
   };
+
+  /**
+   * M3, once a photo is recorded: erase the photos it replaced (the database has already marked them
+   * erased and deleted the data read from them, as for a refused upload), decide the case's server
+   * checks again without them, and ring the worker. Returns how many photos were replaced. Only the
+   * follow-up lookup can fail the request; the rest is logged, never shown to the rider.
+   */
+  async function afterCapture(v: FlowVerification, captureId: string): Promise<number> {
+    const followUp = await repo.captureFollowUp(captureId);
+    for (const path of followUp.supersededPaths) {
+      await storage.remove(path).catch((err) => log.error("flow.superseded_remove_failed", err));
+    }
+    if (followUp.supersededPaths.length > 0 && deps.cases) {
+      await refreshCase(deps.cases, v.id).catch((err) => log.error("flow.case_refresh_failed", err));
+    }
+    if (followUp.jobPending) {
+      ring("capture", () => repo.markRingFailed(captureId));
+    }
+    return followUp.supersededPaths.length;
+  }
 
   // Never logs or audits the lines: they reach the database only as a parameter of flow_record_mrz,
   // which stores them encrypted.
@@ -341,6 +395,15 @@ export function createFlowHandler(deps: FlowDeps): Handler {
     return jsonResponse(200, response);
   };
 
+  // The rider polls this after uploading (CHECKS_POLL_MS, for at most CHECKS_WAIT_MS).
+  const getChecks: Handler = async (req) => {
+    const v = await loadSession(req);
+    if (!v.declaredDocument) throw new HttpError(409, "document_type_required");
+    const checks = flowChecks(REQUIRED_SIDES[v.declaredDocument], await repo.checkState(v.id));
+    if (!checks) throw new HttpError(409, "missing_sides");
+    return jsonResponse(200, checks);
+  };
+
   const postSubmit: Handler = async (req) => {
     const v = await loadSession(req);
     if (!v.declaredDocument) throw new HttpError(409, "document_type_required");
@@ -361,6 +424,7 @@ export function createFlowHandler(deps: FlowDeps): Handler {
       "/upload-url": { POST: postUploadUrl },
       "/captures": { POST: postCaptures },
       "/mrz": { POST: postMrz },
+      "/checks": { GET: getChecks },
       "/submit": { POST: postSubmit },
     },
   });
@@ -377,9 +441,11 @@ export function checkImage(bytes: Uint8Array): ImageCheck {
   if (!isJpeg(bytes)) return { ok: false, code: "invalid_image" };
   const size = readJpegSize(bytes);
   if (!size) return { ok: false, code: "invalid_image" };
-  if (Math.max(size.width, size.height) < CAPTURE_LIMITS.minLongSide) {
-    return { ok: false, code: "image_resolution_too_low" };
-  }
+  const longSide = Math.max(size.width, size.height);
+  if (longSide < CAPTURE_LIMITS.minLongSide) return { ok: false, code: "image_resolution_too_low" };
+  // The rider app never sends more; the AI worker refuses larger photos, so one sent around the app
+  // would never be checked and would hold up the worker's queue.
+  if (longSide > CAPTURE_LIMITS.maxLongSide) return { ok: false, code: "image_too_large" };
   return { ok: true, ...size };
 }
 

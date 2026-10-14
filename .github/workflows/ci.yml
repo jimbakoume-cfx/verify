@@ -22,11 +22,15 @@ jobs:
       - run: npm run licenses
       - run: npm run typecheck
       # Deno comes from devDependencies (pinned in the lockfile). The workspace tsconfigs do not cover
-      # supabase/functions and vitest does not type-check, so Deno checks the entrypoints and the tests.
+      # supabase/functions and vitest does not type-check, so Deno checks the entrypoints and the tests,
+      # and the AI worker's test tools that run Edge Function code (worker/tests/tools).
       - name: Edge Functions type check (Deno)
-        run: npx deno check supabase/functions/flow/index.ts supabase/functions/admin/index.ts supabase/functions/*/*.test.ts
+        run: >-
+          npx deno check supabase/functions/flow/index.ts supabase/functions/admin/index.ts
+          supabase/functions/worker/index.ts supabase/functions/*/*.test.ts
+          worker/tests/tools/server_mrz.ts worker/tests/tools/server_worker.ts
       - name: Edge Functions lint (Deno)
-        run: npx deno lint supabase/functions
+        run: npx deno lint supabase/functions worker/tests/tools/server_mrz.ts worker/tests/tools/server_worker.ts
       - run: npm test
       - run: npm run build
 
@@ -59,8 +63,9 @@ jobs:
     name: Database schema and security rules
     runs-on: ubuntu-latest
     services:
+      # The Supabase project runs PostgreSQL 17. The M3 migration needs 16 or later (IS JSON OBJECT).
       postgres:
-        image: postgres:16
+        image: postgres:17
         env:
           POSTGRES_PASSWORD: test
         ports: ["5432:5432"]
@@ -71,6 +76,48 @@ jobs:
       - run: scripts/test-db.sh
         env:
           DATABASE_URL: postgres://postgres:test@localhost:5432/postgres
+
+  worker:
+    name: AI worker (Python lock, tests with the real OCR models, licences)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: worker
+    steps:
+      - uses: actions/checkout@v6
+      # Node and the repo's pinned Deno (npx deno): the tests run the Edge Function code the worker
+      # talks to (the worker function's signature checks and decisions, the shared MRZ corrector and
+      # parser) instead of a re-implementation. WORKER_REQUIRE_DENO turns their skip into a failure.
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+        working-directory: .
+      # uv installs Python 3.12 (.python-version) and the locked dependencies, with their hashes.
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.11.32"
+          enable-cache: true
+          cache-dependency-glob: worker/uv.lock
+      - name: The lock file matches pyproject.toml
+        run: uv lock --check
+      - run: uv sync --frozen
+      - name: Tests, with the real RapidOCR models on the specimens
+        run: uv run pytest
+        env:
+          WORKER_REQUIRE_DENO: "1"
+      # The MRZ training's gate rules (training/mrz/py/gates.py): standard library only, so no
+      # training environment is installed in CI.
+      - name: MRZ model gate rules
+        run: python3 -m unittest discover -s ../training/mrz/py -p "test_*.py"
+      # What Vercel installs (no dev group), checked against the reviewed table: every package, and
+      # every native library, extension module and model file in it (scripts/python-licenses.toml).
+      - name: Python licences
+        run: |
+          UV_PROJECT_ENVIRONMENT="$RUNNER_TEMP/worker-prod" uv sync --frozen --no-dev
+          uv run python ../scripts/check-python-licenses.py --prod-python "$RUNNER_TEMP/worker-prod/bin/python"
 
   secrets:
     name: Secret scan

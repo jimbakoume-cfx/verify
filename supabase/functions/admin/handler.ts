@@ -3,12 +3,14 @@
 import {
   type CaptureViewResponse,
   type DocumentDataItem,
+  type DocumentDataLinesItem,
   type DocumentDataResponse,
   type EnrollResponse,
   type MrzFormat,
   STAFF_PASSWORD_MAX_LENGTH,
   STAFF_PASSWORD_MIN_LENGTH,
   type TestSessionResponse,
+  type WorkerFields,
 } from "../_shared/contract.ts";
 import { STAFF_PASSWORD_MAX_BYTES, passwordByteLength } from "../_shared/staffPassword.ts";
 import type { AuditEntry } from "../_shared/audit.ts";
@@ -27,15 +29,22 @@ export interface CaptureRecord {
   deletedAt: string | null;
 }
 
-/** One row of staff_read_document_data, already decrypted. */
-export interface DocumentDataRow {
-  captureId: string;
-  source: DocumentDataItem["source"];
-  format: MrzFormat;
-  /** The lines joined with "\n", as stored. */
-  lines: string;
-  recordedAt: string;
-}
+/** One row of staff_read_document_data, already decrypted: code lines, or printed fields (M3). */
+export type DocumentDataRow =
+  | {
+    captureId: string;
+    source: DocumentDataLinesItem["source"];
+    format: MrzFormat;
+    /** The lines joined with "\n", as stored. */
+    lines: string;
+    recordedAt: string;
+  }
+  | {
+    captureId: string;
+    source: "ocr_server";
+    fields: WorkerFields;
+    recordedAt: string;
+  };
 
 export interface AdminRepo {
   /** staff_invite_verify: counts a wrong code against an open invite. */
@@ -270,13 +279,17 @@ export function createAdminHandler(deps: AdminDeps): Handler {
     }
 
     const response: DocumentDataResponse = {
-      items: rows.map((row) => ({
-        captureId: row.captureId,
-        source: row.source,
-        format: row.format,
-        lines: row.lines.split("\n"),
-        recordedAt: row.recordedAt,
-      })),
+      items: rows.map((row): DocumentDataItem =>
+        row.source === "ocr_server"
+          ? { captureId: row.captureId, source: row.source, fields: { ...row.fields }, recordedAt: row.recordedAt }
+          : {
+            captureId: row.captureId,
+            source: row.source,
+            format: row.format,
+            lines: row.lines.split("\n"),
+            recordedAt: row.recordedAt,
+          }
+      ),
       expiresIn: CAPTURE_VIEW_SECONDS,
     };
     // jsonResponse marks every response no-store, so no browser or proxy keeps a copy of the data.

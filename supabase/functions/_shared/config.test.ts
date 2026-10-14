@@ -5,6 +5,7 @@ import {
   parseAllowedOrigins,
   parseRiderAppUrl,
   parseTtlMinutes,
+  parseWorkerRingUrl,
   readConfig,
   resolveServiceKey,
   withDefaults,
@@ -42,6 +43,23 @@ describe("parseRiderAppUrl", () => {
     expect(parseRiderAppUrl("javascript:alert(1)")).toBeNull();
     expect(parseRiderAppUrl("not a url")).toBeNull();
     expect(parseRiderAppUrl(undefined)).toBeNull();
+  });
+});
+
+describe("parseWorkerRingUrl", () => {
+  it("accepts an https URL as is", () => {
+    expect(parseWorkerRingUrl(" https://worker.example/api/process ")).toBe("https://worker.example/api/process");
+  });
+
+  it("rejects plain http (even local), queries, fragments, credentials and garbage", () => {
+    expect(parseWorkerRingUrl("http://worker.example/api/process")).toBeNull();
+    expect(parseWorkerRingUrl("http://localhost:3000/api/process")).toBeNull();
+    expect(parseWorkerRingUrl("https://worker.example/api/process?token=x")).toBeNull();
+    expect(parseWorkerRingUrl("https://worker.example/api/process#x")).toBeNull();
+    expect(parseWorkerRingUrl("https://user:pw@worker.example/api/process")).toBeNull();
+    expect(parseWorkerRingUrl("not a url")).toBeNull();
+    expect(parseWorkerRingUrl(undefined)).toBeNull();
+    expect(parseWorkerRingUrl("")).toBeNull();
   });
 });
 
@@ -90,21 +108,33 @@ describe("readConfig", () => {
       ALLOWED_ORIGINS: "https://a.example",
       RIDER_APP_URL: "https://rider.example",
       TEST_SESSION_TTL_MINUTES: "15",
+      WORKER_RING_URL: "https://worker.example/api/process",
     } as Record<string, string>)[name]);
     expect([...config.allowedOrigins]).toEqual(["https://a.example"]);
     expect(config.riderAppUrl).toBe("https://rider.example");
     expect(config.testSessionTtlMinutes).toBe(15);
+    expect(config.workerRingUrl).toBe("https://worker.example/api/process");
   });
 });
 
 describe("configProblems", () => {
-  const good = { allowedOrigins: new Set(["https://a.example"]), riderAppUrl: "https://r.example", testSessionTtlMinutes: 30 };
+  const good = {
+    allowedOrigins: new Set(["https://a.example"]),
+    riderAppUrl: "https://r.example",
+    testSessionTtlMinutes: 30,
+    workerRingUrl: "https://w.example/api/process",
+  };
 
   it("reports settings that make the functions refuse work", () => {
-    expect(configProblems(good, { needsRiderAppUrl: true })).toEqual([]);
+    expect(configProblems(good, { needsRiderAppUrl: true, needsWorkerRingUrl: true })).toEqual([]);
     expect(configProblems({ ...good, allowedOrigins: new Set() })).toHaveLength(1);
     expect(configProblems({ ...good, riderAppUrl: null })).toEqual([]);
     expect(configProblems({ ...good, riderAppUrl: null }, { needsRiderAppUrl: true })).toHaveLength(1);
+  });
+
+  it("reports a missing worker ring URL only where the worker is rung", () => {
+    expect(configProblems({ ...good, workerRingUrl: null })).toEqual([]);
+    expect(configProblems({ ...good, workerRingUrl: null }, { needsWorkerRingUrl: true })).toHaveLength(1);
   });
 });
 
@@ -123,6 +153,7 @@ describe("withDefaults", () => {
       "https://confiance-verify-ops.vercel.app",
       "https://confiance-verify.vercel.app",
     ]);
-    expect(configProblems(config, { needsRiderAppUrl: true })).toEqual([]);
+    expect(config.workerRingUrl).toBe("https://confiance-verify-worker.vercel.app/api/process");
+    expect(configProblems(config, { needsRiderAppUrl: true, needsWorkerRingUrl: true })).toEqual([]);
   });
 });

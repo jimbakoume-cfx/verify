@@ -1,0 +1,145 @@
+{
+ "about": "Doubango's MRZ model (apps/rider/public/ocr/mrz-1, the one in use) measured with this pipeline: the baseline every candidate must beat (G1 and G3). Measured 2026-10-14 on a 4 vCPU sandbox with `bin/10-data.sh --g1`, `bin/20-lstmf.sh --g1`, `bin/50-bench.sh 200`, `bin/60-gates.sh --baseline --docs 200`. All documents and lines are fictitious.",
+ "model": {
+  "dir": "apps/rider/public/ocr/mrz-1",
+  "sha256": "dbbd4add162b8d28ed82b4a384c5f16dff274c63ddcd80b63e0315fd130a3909"
+ },
+ "G1": {
+  "clean": {
+   "lines": 600,
+   "cer": 0.014,
+   "lineExact": 99.5,
+   "firstCharWrong": 0
+  },
+  "degraded": {
+   "lines": 919,
+   "cer": 5.457,
+   "lineExact": 62.24,
+   "firstCharWrong": 10.77
+  },
+  "lowres": {
+   "lines": 980,
+   "cer": 0.922,
+   "lineExact": 90,
+   "firstCharWrong": 2.35
+  }
+ },
+ "G1_engine": "tesseract.js 7.0.0, page segmentation 7; sets from bin/10-data.sh --g1 (seeds 900001-900003; 600/1,000/1,000 rendered, a few skipped by the cutter's checks)",
+ "lstmeval": {
+  "int clean": 0.019,
+  "int degraded": 7.822,
+  "int lowres": 1.395
+ },
+ "G2_G3": {
+  "bench": {
+   "file": "training/mrz/work/bench/bench.json",
+   "sha256": "7aeead4e90d13e5edab73a3d70f7e509601298bf41b12458a7916023e981a73a",
+   "count": 200
+  },
+  "engine": "tesseract.js 7.0.0, page segmentation 6, the rider's reader (apps/rider/src/mrz/reader.ts)",
+  "overall": {
+   "n": 200,
+   "validExact": 196,
+   "validWrong": 1,
+   "validWrongFromCorrection": 1,
+   "invalid": 3,
+   "notFound": 0,
+   "unavailable": 0,
+   "nameExact": 200,
+   "firstCharWrong": 1,
+   "cer": 0.039,
+   "validExactRate": 98,
+   "nameExactRate": 100,
+   "msPerStill": 424
+  },
+  "groups": {
+   "TD1-clean": {
+    "n": 50,
+    "validExact": 49,
+    "validWrong": 1,
+    "validWrongFromCorrection": 1,
+    "invalid": 0,
+    "notFound": 0,
+    "unavailable": 0,
+    "nameExact": 50,
+    "firstCharWrong": 0,
+    "cer": 0.022,
+    "validExactRate": 98,
+    "nameExactRate": 100,
+    "msPerStill": 438
+   },
+   "TD1-degraded": {
+    "n": 50,
+    "validExact": 50,
+    "validWrong": 0,
+    "validWrongFromCorrection": 0,
+    "invalid": 0,
+    "notFound": 0,
+    "unavailable": 0,
+    "nameExact": 50,
+    "firstCharWrong": 0,
+    "cer": 0,
+    "validExactRate": 100,
+    "nameExactRate": 100,
+    "msPerStill": 410
+   },
+   "TD3-clean": {
+    "n": 50,
+    "validExact": 47,
+    "validWrong": 0,
+    "validWrongFromCorrection": 0,
+    "invalid": 3,
+    "notFound": 0,
+    "unavailable": 0,
+    "nameExact": 50,
+    "firstCharWrong": 1,
+    "cer": 0.136,
+    "validExactRate": 94,
+    "nameExactRate": 100,
+    "msPerStill": 424
+   },
+   "TD3-degraded": {
+    "n": 50,
+    "validExact": 50,
+    "validWrong": 0,
+    "validWrongFromCorrection": 0,
+    "invalid": 0,
+    "notFound": 0,
+    "unavailable": 0,
+    "nameExact": 50,
+    "firstCharWrong": 0,
+    "cer": 0,
+    "validExactRate": 100,
+    "nameExactRate": 100,
+    "msPerStill": 423
+   }
+  },
+  "wrongButValid": [
+   {
+    "file": "td1-0132-clean.pgm",
+    "truth": [
+     "IDXXAAM5F7CK<<9<<<<<<<<<<<<<<<",
+     "2801142F8612076BELK<<<<<<<<<<6",
+     "EK<<RAWTFUXLGZKD<<<<<<<<<<<<<<"
+    ],
+    "read": [
+     "IDXXAAM5F7CK<<9<<<<<<<<<<<<<<<",
+     "2801142F8612076BEL<<<<<<<<<<<6",
+     "EK<<RAWTFUXLGZKD<<<<<<<<<<<<<<"
+    ],
+    "ocr": [
+     "IDXXAAM5F7CK<<9<<<<<<<<<<<<<<<",
+     "2801142F8612076BELK<<<<<<<<<<6",
+     "EK<<RAWTFUXLGZKD<<<<<<<<<<<<<<"
+    ],
+    "ocrExact": true,
+    "corrections": 1,
+    "rotated": false
+   }
+  ]
+ },
+ "fixtures": {
+  "count": 6,
+  "failures": []
+ }
+}
