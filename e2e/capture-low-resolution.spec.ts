@@ -9,8 +9,8 @@ test("720p camera: the screen says the camera gives too little detail, no automa
   rider,
   backend,
 }) => {
-  await rider.begin("cni", "?debug=1");
-  await expect(rider.captureHeading("cni", "document_front")).toBeVisible();
+  await rider.begin("cni_legacy", "?debug=1");
+  await expect(rider.captureHeading("cni_legacy", "document_front")).toBeVisible();
   await expect(rider.hint).toHaveText(rider.t("capture.tooLittleDetail"));
 
   // The message fits the two lines the hint reserves: the guide has not moved.
@@ -36,6 +36,6 @@ test("720p camera: the screen says the camera gives too little detail, no automa
   await expect(rider.button("review.retake")).toBeVisible();
 
   await rider.button("review.retake").click();
-  await expect(rider.captureHeading("cni", "document_front")).toBeVisible();
+  await expect(rider.captureHeading("cni_legacy", "document_front")).toBeVisible();
   expect(backend.routes).toEqual(["GET /session", "POST /consent", "POST /document-type"]);
 });

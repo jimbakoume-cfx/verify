@@ -1,6 +1,14 @@
 // Rows read directly from Supabase (RLS decides which ones come back), checked and reshaped for the UI.
 // Rows are typed `unknown` because there are no generated database types; nothing is trusted blindly.
-import { DECLARED_DOCUMENTS, type DeclaredDocument, type FlowStatus } from "@verify/shared";
+import {
+  DECLARED_DOCUMENTS,
+  type DeclaredDocument,
+  type FlowStatus,
+  MRZ_CHECK_NAME,
+  MRZ_FORMATS,
+  type MrzCheckDetails,
+  type MrzFormat,
+} from "@verify/shared";
 import { isStaffRole, type StaffRole } from "./roles";
 
 export interface StaffProfile {
@@ -51,6 +59,23 @@ export interface CaptureRecord {
   quality: CaptureQuality;
 }
 
+/** check_outcome enum of the database. */
+export const CHECK_OUTCOMES = ["pass", "flag", "fail", "error", "skipped"] as const;
+export type CheckOutcome = (typeof CHECK_OUTCOMES)[number];
+
+/** A check_result row of the MRZ check (one per photo of the side that carries the MRZ). */
+export interface MrzCheckRecord {
+  id: string;
+  /** Photo the check ran on; also in details.captureId. */
+  captureId: string | null;
+  /** Parser version that judged the lines, e.g. "mrz-v1". */
+  checkVersion: string;
+  outcome: CheckOutcome;
+  /** Null when the stored details do not have the shape this dashboard knows (e.g. a newer version). */
+  details: MrzCheckDetails | null;
+  createdAt: string;
+}
+
 // Record<FlowStatus, …> makes the compiler flag any status added to the contract but not here.
 const STATUS_SET: Record<FlowStatus, true> = {
   created: true,
@@ -72,6 +97,7 @@ export const CAPTURE_KINDS = ["document_front", "document_back", "selfie", "live
 export const STAFF_PROFILE_COLUMNS = "user_id, role, full_name, active";
 export const VERIFICATION_COLUMNS = "id, status, declared_document, is_test, created_at, submitted_at, session_expires_at";
 export const CAPTURE_COLUMNS = "id, verification_id, kind, byte_size, width, height, quality, created_at, sha256, deleted_at";
+export const MRZ_CHECK_COLUMNS = "id, capture_id, check_name, check_version, outcome, details, created_at";
 
 type Row = Record<string, unknown>;
 
@@ -79,6 +105,7 @@ const asRow = (value: unknown): Row | null =>
   typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Row) : null;
 const str = (value: unknown): string | null => (typeof value === "string" ? value : null);
 const num = (value: unknown): number | null => (typeof value === "number" && Number.isFinite(value) ? value : null);
+const bool = (value: unknown): boolean | null => (typeof value === "boolean" ? value : null);
 
 export function isFlowStatus(value: unknown): value is FlowStatus {
   return typeof value === "string" && Object.prototype.hasOwnProperty.call(STATUS_SET, value);
@@ -145,6 +172,83 @@ export function toCapture(value: unknown): CaptureRecord | null {
     sha256: str(row.sha256) ?? "",
     deleted: row.deleted_at !== null && row.deleted_at !== undefined,
     quality: toCaptureQuality(row.quality),
+  };
+}
+
+function isCheckOutcome(value: unknown): value is CheckOutcome {
+  return typeof value === "string" && (CHECK_OUTCOMES as readonly string[]).includes(value);
+}
+
+function isMrzFormat(value: unknown): value is MrzFormat {
+  return typeof value === "string" && (MRZ_FORMATS as readonly string[]).includes(value);
+}
+
+function toMrzChecks(value: unknown): MrzCheckDetails["checks"] {
+  const c = asRow(value);
+  const documentNumber = bool(c?.documentNumber);
+  const birthDate = bool(c?.birthDate);
+  const expiryDate = bool(c?.expiryDate);
+  const composite = bool(c?.composite);
+  if (!c || documentNumber === null || birthDate === null || expiryDate === null || composite === null) return null;
+  const personalNumber = bool(c.personalNumber);
+  return { documentNumber, birthDate, expiryDate, ...(personalNumber === null ? {} : { personalNumber }), composite };
+}
+
+/**
+ * check_result.details of the MRZ check (MrzCheckDetails in contract.ts). The fields every result
+ * carries must be there; the others fall back to null, which the page shows as "—".
+ */
+export function toMrzCheckDetails(value: unknown): MrzCheckDetails | null {
+  const d = asRow(value);
+  const result = d?.result;
+  const expectedFormat = d?.expectedFormat;
+  const parserVersion = str(d?.parserVersion);
+  const captureId = str(d?.captureId);
+  const attempts = num(d?.attempts);
+  const engine = str(d?.engine);
+  if (
+    !d ||
+    d.source !== "mrz_phone" ||
+    (result !== "read" && result !== "unreadable") ||
+    !isMrzFormat(expectedFormat) ||
+    parserVersion === null ||
+    captureId === null ||
+    attempts === null ||
+    engine === null
+  ) {
+    return null;
+  }
+  return {
+    source: "mrz_phone",
+    parserVersion,
+    captureId,
+    result,
+    reason: d.reason === "not_found" || d.reason === "reader_unavailable" ? d.reason : null,
+    expectedFormat,
+    format: isMrzFormat(d.format) ? d.format : null,
+    checks: toMrzChecks(d.checks),
+    documentCodeFits: bool(d.documentCodeFits),
+    datesValid: bool(d.datesValid),
+    attempts,
+    corrections: num(d.corrections),
+    engine,
+    ms: num(d.ms),
+  };
+}
+
+export function toMrzCheck(value: unknown): MrzCheckRecord | null {
+  const row = asRow(value);
+  const id = str(row?.id);
+  const createdAt = str(row?.created_at);
+  if (!row || !id || !createdAt || row.check_name !== MRZ_CHECK_NAME || !isCheckOutcome(row.outcome)) return null;
+  const details = toMrzCheckDetails(row.details);
+  return {
+    id,
+    captureId: str(row.capture_id) ?? details?.captureId ?? null,
+    checkVersion: str(row.check_version) ?? "",
+    outcome: row.outcome,
+    details,
+    createdAt,
   };
 }
 

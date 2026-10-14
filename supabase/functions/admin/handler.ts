@@ -2,7 +2,10 @@
 // injected AdminRepo / StaffAuth / SignedUrlStorage so the rules can be tested with in-memory fakes.
 import {
   type CaptureViewResponse,
+  type DocumentDataItem,
+  type DocumentDataResponse,
   type EnrollResponse,
+  type MrzFormat,
   STAFF_PASSWORD_MAX_LENGTH,
   STAFF_PASSWORD_MIN_LENGTH,
   type TestSessionResponse,
@@ -22,6 +25,16 @@ export interface CaptureRecord {
   verificationId: string;
   storagePath: string;
   deletedAt: string | null;
+}
+
+/** One row of staff_read_document_data, already decrypted. */
+export interface DocumentDataRow {
+  captureId: string;
+  source: DocumentDataItem["source"];
+  format: MrzFormat;
+  /** The lines joined with "\n", as stored. */
+  lines: string;
+  recordedAt: string;
 }
 
 export interface AdminRepo {
@@ -44,6 +57,12 @@ export interface AdminRepo {
   getCapture(captureId: string): Promise<CaptureRecord | null>;
   /** Same rule as private.is_assigned_reviewer: an 'assigned' review task held by this user. */
   isAssignedReviewer(verificationId: string, userId: string): Promise<boolean>;
+  verificationExists(verificationId: string): Promise<boolean>;
+  /**
+   * staff_read_document_data: writes the document_data.view audit entry, then returns the decrypted
+   * rows (latest first), in one transaction. Throws, returning nothing, when the entry cannot be written.
+   */
+  readDocumentData(verificationId: string, actorId: string, role: "reviewer" | "supervisor"): Promise<DocumentDataRow[]>;
   audit(entry: AuditEntry): Promise<void>;
 }
 
@@ -225,6 +244,45 @@ export function createAdminHandler(deps: AdminDeps): Handler {
     return jsonResponse(200, response);
   };
 
+  // Same access rules as postCaptureView. Never logs the data: errors carry only codes.
+  const postDocumentData: Handler = async (req) => {
+    const staff = await requireStaff(req);
+    // Plan: admins manage the system but have no routine access to ID data.
+    if (staff.role === "admin") throw new HttpError(403, "forbidden_role");
+    const body = await readJsonObject(req);
+    if (!isUuid(body.verificationId)) throw badRequest("verificationId must be a UUID.");
+    const verificationId = body.verificationId.toLowerCase();
+
+    if (!(await repo.verificationExists(verificationId))) throw new HttpError(404, "not_found");
+    // A reviewer who does not hold the case gets the same answer as for a missing one (see postCaptureView).
+    if (staff.role !== "supervisor" && !(await repo.isAssignedReviewer(verificationId, staff.userId))) {
+      throw new HttpError(404, "not_found");
+    }
+
+    // No data without a record of who asked for it: the database writes the audit entry before it
+    // decrypts anything, in the same transaction, so any failure here means nothing was revealed.
+    let rows: DocumentDataRow[];
+    try {
+      rows = await repo.readDocumentData(verificationId, staff.userId, staff.role);
+    } catch (err) {
+      log.error("admin.document_data_read_failed", err);
+      throw new HttpError(500, "audit_failed");
+    }
+
+    const response: DocumentDataResponse = {
+      items: rows.map((row) => ({
+        captureId: row.captureId,
+        source: row.source,
+        format: row.format,
+        lines: row.lines.split("\n"),
+        recordedAt: row.recordedAt,
+      })),
+      expiresIn: CAPTURE_VIEW_SECONDS,
+    };
+    // jsonResponse marks every response no-store, so no browser or proxy keeps a copy of the data.
+    return jsonResponse(200, response);
+  };
+
   return createRouter({
     name: "admin",
     allowedOrigins: config.allowedOrigins,
@@ -233,6 +291,7 @@ export function createAdminHandler(deps: AdminDeps): Handler {
       "/enroll": { POST: postEnroll },
       "/test-sessions": { POST: postTestSessions },
       "/captures/view": { POST: postCaptureView },
+      "/document-data": { POST: postDocumentData },
     },
   });
 }

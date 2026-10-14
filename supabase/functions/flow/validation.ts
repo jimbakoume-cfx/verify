@@ -1,5 +1,14 @@
-// Pure validation for the rider flow: storage paths and the client quality object.
-import { CAPTURE_SIDES, type CaptureSide, type ClientQuality } from "../_shared/contract.ts";
+// Pure validation for the rider flow: storage paths, the client quality object and MRZ reports.
+import {
+  CAPTURE_SIDES,
+  type CaptureSide,
+  type ClientQuality,
+  MRZ_LAYOUT,
+  MRZ_REPORT_LIMITS,
+  type MrzFormat,
+  type MrzReportRequest,
+} from "../_shared/contract.ts";
+import { isUuid } from "../_shared/http.ts";
 
 const CAPTURE_PATH_RE = /^([0-9a-f-]{36})\/(document_front|document_back)-([0-9a-f-]{36})\.jpg$/;
 
@@ -46,4 +55,60 @@ export function sanitizeQuality(value: unknown): ClientQuality | null {
     out[key] = Math.min(max, Math.max(min, n));
   }
   return out as unknown as ClientQuality;
+}
+
+export type MrzReportCheck =
+  | { ok: true; report: MrzReportRequest }
+  | { ok: false; code: "bad_request" | "invalid_mrz"; message: string };
+
+const ENGINE_RE = /^[A-Za-z0-9._/-]+$/;
+
+function isIntegerIn(value: unknown, min: number, max: number): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= min && value <= max;
+}
+
+/**
+ * Checks a POST /flow/mrz body against the format the declared document carries, and returns a fresh
+ * report holding only the known fields. A missing field, a wrong type or an out-of-range number is
+ * bad_request; well-typed lines that are not an MRZ of that format (count, length, characters) are
+ * invalid_mrz. The bad_request checks all come first, so a body wrong in both ways gets bad_request.
+ * Messages never repeat a value.
+ */
+export function validateMrzReport(body: Record<string, unknown>, format: MrzFormat): MrzReportCheck {
+  const bad = (message: string): MrzReportCheck => ({ ok: false, code: "bad_request", message });
+  const { maxAttempts, maxCorrections, maxMs, maxEngineLength } = MRZ_REPORT_LIMITS;
+  if (!isUuid(body.captureId)) return bad("captureId must be a UUID.");
+  if (body.result !== "read" && body.result !== "unreadable") return bad("result must be read or unreadable.");
+  if (!isIntegerIn(body.attempts, 1, maxAttempts)) return bad(`attempts must be an integer from 1 to ${maxAttempts}.`);
+  const engine = body.engine;
+  if (typeof engine !== "string" || engine.length > maxEngineLength || !ENGINE_RE.test(engine)) {
+    return bad(`engine must be 1 to ${maxEngineLength} letters, digits or . _ / -.`);
+  }
+  const base = { captureId: body.captureId.toLowerCase(), attempts: body.attempts, engine };
+
+  if (body.result === "unreadable") {
+    if (body.reason !== "not_found" && body.reason !== "reader_unavailable") {
+      return bad("reason must be not_found or reader_unavailable.");
+    }
+    return { ok: true, report: { ...base, result: "unreadable", reason: body.reason } };
+  }
+
+  if (!isIntegerIn(body.corrections, 0, maxCorrections)) {
+    return bad(`corrections must be an integer from 0 to ${maxCorrections}.`);
+  }
+  if (!isIntegerIn(body.ms, 0, maxMs)) return bad(`ms must be an integer from 0 to ${maxMs}.`);
+  const lines = body.lines;
+  if (!Array.isArray(lines) || !lines.every((line): line is string => typeof line === "string")) {
+    return bad("lines must be an array of strings.");
+  }
+  const layout = MRZ_LAYOUT[format];
+  const lineRe = new RegExp(`^[A-Z0-9<]{${layout.length}}$`);
+  if (lines.length !== layout.lines || !lines.every((line) => lineRe.test(line))) {
+    return {
+      ok: false,
+      code: "invalid_mrz",
+      message: `lines must be ${layout.lines} lines of ${layout.length} characters A-Z, 0-9 or < (${format}).`,
+    };
+  }
+  return { ok: true, report: { ...base, result: "read", lines: [...lines], corrections: body.corrections, ms: body.ms } };
 }

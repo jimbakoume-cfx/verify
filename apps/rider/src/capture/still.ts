@@ -1,5 +1,6 @@
 // The final photo: cut the guide (+4%) from one video frame, size it, compress it under the target
-// with canvas.toBlob, and re-check its quality on a small copy.
+// with canvas.toBlob, and re-check its quality on a small copy. For the side that carries the MRZ,
+// also keep a full-resolution grayscale copy to read it from.
 //
 // The JPEG comes from a canvas, so it carries no EXIF or GPS data. Keep it that way: never upload
 // the camera's original file.
@@ -7,6 +8,7 @@ import {
   ANALYSIS_WIDTH,
   DEFAULT_THRESHOLDS,
   type FrameMetrics,
+  type GrayImage,
   type Hint,
   type QualityThresholds,
   type Rect,
@@ -38,6 +40,8 @@ export interface StillResult {
   hints: Hint[];
   metrics: FrameMetrics;
   quality: ClientQuality;
+  /** Full-resolution grayscale copy (FinishOptions.keepGray); null when not asked for or not possible. */
+  gray: GrayImage | null;
 }
 
 function canvas2d(width: number, height: number): [HTMLCanvasElement, CanvasRenderingContext2D] {
@@ -71,6 +75,23 @@ export interface FinishOptions {
   source: ClientQuality["source"];
   elapsedMs: number;
   thresholds?: QualityThresholds;
+  /** Keep a full-resolution grayscale copy for reading the MRZ (only for the side that carries it). */
+  keepGray?: boolean;
+}
+
+/**
+ * Grayscale copy of the whole canvas at its own resolution. Null when the phone cannot spare the
+ * memory: the MRZ is then not read, which never blocks the rider.
+ */
+function grayCopy(canvas: HTMLCanvasElement): GrayImage | null {
+  try {
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    return toGray(data, canvas.width, canvas.height);
+  } catch {
+    return null;
+  }
 }
 
 /** Compresses the grabbed still and re-checks it. Frees the canvases afterwards. */
@@ -89,6 +110,11 @@ export async function finishStill(still: GrabbedStill, options: FinishOptions): 
   };
 
   try {
+    // The MRZ is read from these pixels, not from the JPEG: its characters are only about 15 px tall
+    // on a passport held upright, and compression artefacts at that size cost characters. Taken
+    // first, while the full-size canvas still exists.
+    const gray = options.keepGray ? grayCopy(canvas) : null;
+
     const longSide = Math.max(canvas.width, canvas.height);
     const result = await compressToTarget((q, s) => toJpeg(at(s), q), undefined, { scales: compressionScales(longSide) });
     const encoded = at(result.scale);
@@ -120,6 +146,7 @@ export async function finishStill(still: GrabbedStill, options: FinishOptions): 
         videoHeight: still.video.height,
         elapsedMs: options.elapsedMs,
       }),
+      gray,
     };
   } finally {
     // Free the full-size pixels at once: phones have little memory to spare.

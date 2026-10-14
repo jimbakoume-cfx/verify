@@ -2,8 +2,8 @@
 import { cameraRequests, expect, test } from "./support/fixtures";
 
 test("camera permission denied: a clear message, a retry, and a way back", async ({ page, rider, backend }) => {
-  await rider.begin("cni");
-  await expect(rider.captureHeading("cni", "document_front")).toBeVisible();
+  await rider.begin("cni_legacy");
+  await expect(rider.captureHeading("cni_legacy", "document_front")).toBeVisible();
 
   // A modal card over the camera screen (role alertdialog), which takes focus.
   const problem = page.getByRole("alertdialog", { name: rider.t("camera.deniedTitle") });

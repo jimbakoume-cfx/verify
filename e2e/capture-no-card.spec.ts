@@ -3,8 +3,8 @@ import { GUIDES } from "./support/camera";
 import { expect, test } from "./support/fixtures";
 
 test("no card: the 'place your ID' hint, a surface tip, and no automatic photo", async ({ page, rider, backend }) => {
-  await rider.begin("cni", "?debug=1");
-  await expect(rider.captureHeading("cni", "document_front")).toBeVisible();
+  await rider.begin("cni_legacy", "?debug=1");
+  await expect(rider.captureHeading("cni_legacy", "document_front")).toBeVisible();
   await expect(rider.hint).toHaveText(rider.t("hints.no_document"));
 
   const live = await rider.debugValues("live");

@@ -1,15 +1,25 @@
 // Everything the signed-in screens need from the backend, behind one interface so the dev-only
 // screen preview can swap in fake data.
 import { createContext, useContext } from "react";
-import type { CaptureViewResponse, TestSessionRequest, TestSessionResponse, getSupabase } from "@verify/shared";
+import {
+  type CaptureViewResponse,
+  type DocumentDataResponse,
+  type getSupabase,
+  MRZ_CHECK_NAME,
+  type TestSessionRequest,
+  type TestSessionResponse,
+} from "@verify/shared";
 import { ClientError } from "../lib/errors";
 import {
   CAPTURE_COLUMNS,
   type CaptureRecord,
   countCaptures,
+  MRZ_CHECK_COLUMNS,
+  type MrzCheckRecord,
   STAFF_PROFILE_COLUMNS,
   type StaffProfile,
   toCapture,
+  toMrzCheck,
   toStaffProfile,
   toVerification,
   VERIFICATION_COLUMNS,
@@ -26,8 +36,12 @@ export interface DashboardServices {
   /** Null when the case does not exist or RLS hides it. */
   verification(id: string): Promise<VerificationSummary | null>;
   captures(verificationId: string): Promise<CaptureRecord[]>;
+  /** Results of the MRZ check, latest first. Outcomes and counts only: no data read from the document. */
+  mrzChecks(verificationId: string): Promise<MrzCheckRecord[]>;
   createTestSession(request: TestSessionRequest): Promise<TestSessionResponse>;
   viewCapture(captureId: string): Promise<CaptureViewResponse>;
+  /** The decrypted MRZ lines of a case (POST /admin/document-data, audited before decryption). */
+  documentData(verificationId: string): Promise<DocumentDataResponse>;
 }
 
 export const RECENT_LIMIT = 20;
@@ -94,12 +108,27 @@ export function createSupabaseServices(supabase: Supabase): DashboardServices {
       return (data ?? []).map(toCapture).filter((c): c is CaptureRecord => c !== null);
     },
 
+    async mrzChecks(verificationId) {
+      const { data, error } = await supabase
+        .from("check_result")
+        .select(MRZ_CHECK_COLUMNS)
+        .eq("verification_id", verificationId)
+        .eq("check_name", MRZ_CHECK_NAME)
+        .order("created_at", { ascending: false });
+      if (error) throw dbError(error);
+      return (data ?? []).map(toMrzCheck).filter((c): c is MrzCheckRecord => c !== null);
+    },
+
     async createTestSession(request) {
       return admin.createTestSession(await accessToken(), request);
     },
 
     async viewCapture(captureId) {
       return admin.viewCapture(await accessToken(), { captureId });
+    },
+
+    async documentData(verificationId) {
+      return admin.documentData(await accessToken(), { verificationId });
     },
   };
 }

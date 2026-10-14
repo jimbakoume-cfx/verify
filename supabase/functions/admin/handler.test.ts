@@ -8,6 +8,7 @@ import {
   type AdminRepo,
   type CaptureRecord,
   createAdminHandler,
+  type DocumentDataRow,
   type InviteResult,
   isAcceptablePassword,
   normaliseEmail,
@@ -20,7 +21,8 @@ import {
 
 // ---------------------------------------------------------------------------
 // In-memory fakes. The invite functions mirror staff_invite_verify / staff_invite_accept /
-// staff_find_auth_user from the M1 migration; auth users are shared with the StaffAuth fake.
+// staff_find_auth_user from the M1 migration, readDocumentData mirrors staff_read_document_data from
+// the M2 migration; auth users are shared with the StaffAuth fake.
 // ---------------------------------------------------------------------------
 interface Invite {
   email: string;
@@ -57,6 +59,8 @@ class MemoryAdminRepo implements AdminRepo {
   verifications: { id: string; applicantId: string; tokenHash: string; expiresAt: string; locale: string; isTest: boolean }[] = [];
   captures = new Map<string, CaptureRecord>();
   reviewTasks: { verificationId: string; assignedTo: string | null; status: string }[] = [];
+  /** Decrypted document data by verification id. */
+  documentData = new Map<string, DocumentDataRow[]>();
   audits: AuditEntry[] = [];
   failAudit = false;
   /** Simulates another enrollment winning the race between verify and accept. */
@@ -146,6 +150,25 @@ class MemoryAdminRepo implements AdminRepo {
     return this.reviewTasks.some((t) =>
       t.verificationId === verificationId && t.assignedTo === userId && t.status === "assigned"
     );
+  }
+
+  async verificationExists(verificationId: string) {
+    return this.verifications.some((v) => v.id === verificationId);
+  }
+
+  /** Audit first, then decrypt, as the SQL function does: a failed audit reveals nothing. */
+  async readDocumentData(verificationId: string, actorId: string, role: "reviewer" | "supervisor") {
+    const rows = this.documentData.get(verificationId) ?? [];
+    await this.audit({
+      actorType: "staff",
+      actorId,
+      action: "document_data.view",
+      targetType: "verification",
+      targetId: verificationId,
+      details: { role, items: rows.length },
+    });
+    this.world.events.push("decrypt");
+    return [...rows].sort((a, b) => b.recordedAt.localeCompare(a.recordedAt));
   }
 
   async audit(entry: AuditEntry) {
@@ -520,6 +543,7 @@ describe("staff authentication", () => {
   const routes: [string, Record<string, unknown>][] = [
     ["/test-sessions", {}],
     ["/captures/view", { captureId: crypto.randomUUID() }],
+    ["/document-data", { verificationId: crypto.randomUUID() }],
   ];
 
   it.each(routes)("%s: missing or malformed Authorization -> 401 unauthorized", async (path, body) => {
@@ -738,6 +762,152 @@ describe("POST /captures/view", () => {
     h.storage.fail = true;
     await expectError(await h.call("/captures/view", { body: { captureId: capture.id }, token }), 500, "server_error");
     expect(h.repo.audits).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST /document-data
+// ---------------------------------------------------------------------------
+describe("POST /document-data", () => {
+  // ICAO Doc 9303 specimens (fictitious state "UTO").
+  const TD1 = ["I<UTOD231458907<<<<<<<<<<<<<<<", "7408122F1204159UTO<<<<<<<<<<<6", "ERIKSSON<<ANNA<MARIA<<<<<<<<<<"];
+  // The first read had a wrong document number check digit; the rider retook the photo.
+  const TD1_FIRST = [TD1[0].slice(0, 14) + "8" + TD1[0].slice(15), TD1[1], TD1[2]];
+
+  /** A verification with two reads of its back, the retake recorded later. */
+  function withCase(h: ReturnType<typeof setup>, rows?: DocumentDataRow[]) {
+    const id = crypto.randomUUID();
+    h.repo.verifications.push({
+      id,
+      applicantId: crypto.randomUUID(),
+      tokenHash: "0".repeat(64),
+      expiresAt: NOW.toISOString(),
+      locale: "fr",
+      isTest: true,
+    });
+    const first: DocumentDataRow = {
+      captureId: crypto.randomUUID(),
+      source: "mrz_phone",
+      format: "TD1",
+      lines: TD1_FIRST.join("\n"),
+      recordedAt: "2026-10-13T09:00:00.000Z",
+    };
+    const second: DocumentDataRow = { ...first, captureId: crypto.randomUUID(), lines: TD1.join("\n"), recordedAt: "2026-10-13T09:05:00.000Z" };
+    h.repo.documentData.set(id, rows ?? [first, second]);
+    return { id, first, second };
+  }
+
+  it("is refused to admins -> 403 forbidden_role, with no audit and nothing decrypted", async () => {
+    const h = setup();
+    const { id } = withCase(h);
+    const { token } = h.staff("admin");
+    await expectError(await h.call("/document-data", { body: { verificationId: id }, token }), 403, "forbidden_role");
+    expect(h.repo.audits).toHaveLength(0);
+    expect(h.world.events).toEqual([]);
+  });
+
+  it.each([["missing", {}], ["not a UUID", { verificationId: "1 or 1=1" }], ["a number", { verificationId: 5 }]])(
+    "verificationId %s -> 400 bad_request",
+    async (_label, body) => {
+      const h = setup();
+      const { token } = h.staff("supervisor");
+      await expectError(await h.call("/document-data", { body, token }), 400, "bad_request");
+      expect(h.world.events).toEqual([]);
+    },
+  );
+
+  it("unknown verification -> 404 not_found, with no audit", async () => {
+    const h = setup();
+    const { token } = h.staff("supervisor");
+    await expectError(
+      await h.call("/document-data", { body: { verificationId: crypto.randomUUID() }, token }),
+      404,
+      "not_found",
+    );
+    expect(h.repo.audits).toHaveLength(0);
+    expect(h.world.events).toEqual([]);
+  });
+
+  it("lets a supervisor read: audit first, then the lines, latest first, never cached", async () => {
+    const h = setup();
+    const { id, first, second } = withCase(h);
+    const { id: staffId, token } = h.staff("supervisor");
+    const res = await h.call("/document-data", { body: { verificationId: id.toUpperCase() }, token });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(await readJson(res)).toEqual({
+      items: [
+        { captureId: second.captureId, source: "mrz_phone", format: "TD1", lines: TD1, recordedAt: second.recordedAt },
+        { captureId: first.captureId, source: "mrz_phone", format: "TD1", lines: TD1_FIRST, recordedAt: first.recordedAt },
+      ],
+      expiresIn: 60,
+    });
+    expect(h.world.events).toEqual(["audit:document_data.view", "decrypt"]);
+    expect(h.repo.audits).toEqual([{
+      actorType: "staff",
+      actorId: staffId,
+      action: "document_data.view",
+      targetType: "verification",
+      targetId: id,
+      details: { role: "supervisor", items: 2 },
+    }]);
+  });
+
+  it("returns no items for a case without data, and still audits the read", async () => {
+    const h = setup();
+    const { id } = withCase(h, []);
+    const { token } = h.staff("supervisor");
+    const res = await h.call("/document-data", { body: { verificationId: id }, token });
+    expect(res.status).toBe(200);
+    expect(await readJson(res)).toEqual({ items: [], expiresIn: 60 });
+    expect(h.repo.audits.map((a) => a.details)).toEqual([{ role: "supervisor", items: 0 }]);
+  });
+
+  it("lets a reviewer read only a case assigned to them", async () => {
+    const h = setup();
+    const { id } = withCase(h);
+    const reviewer = h.staff("reviewer");
+    const colleague = h.staff("reviewer");
+    const body = { verificationId: id };
+
+    await expectError(await h.call("/document-data", { body, token: reviewer.token }), 404, "not_found");
+    h.repo.reviewTasks.push({ verificationId: id, assignedTo: null, status: "open" });
+    await expectError(await h.call("/document-data", { body, token: reviewer.token }), 404, "not_found");
+    h.repo.reviewTasks.push({ verificationId: id, assignedTo: colleague.id, status: "assigned" });
+    await expectError(await h.call("/document-data", { body, token: reviewer.token }), 404, "not_found");
+    h.repo.reviewTasks.push({ verificationId: id, assignedTo: reviewer.id, status: "done" });
+    await expectError(await h.call("/document-data", { body, token: reviewer.token }), 404, "not_found");
+    expect(h.repo.audits).toHaveLength(0);
+    expect(h.world.events).toEqual([]);
+
+    const res = await h.call("/document-data", { body, token: colleague.token });
+    expect(res.status).toBe(200);
+    expect((await readJson(res)).items).toHaveLength(2);
+    expect(h.world.events).toEqual(["audit:document_data.view", "decrypt"]);
+    expect(h.repo.audits[0]).toMatchObject({ actorId: colleague.id, details: { role: "reviewer", items: 2 } });
+  });
+
+  it("refuses the data when the audit cannot be written -> 500 audit_failed", async () => {
+    const h = setup();
+    const { id } = withCase(h);
+    const { token } = h.staff("supervisor");
+    h.repo.failAudit = true;
+    await expectError(await h.call("/document-data", { body: { verificationId: id }, token }), 500, "audit_failed");
+    expect(h.world.events).toEqual([]);
+    expect(h.log.error).toHaveBeenCalledWith("admin.document_data_read_failed", expect.any(Error));
+  });
+
+  it("never logs the data when the read fails", async () => {
+    const h = setup({}, { logToConsole: true });
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { id } = withCase(h);
+    const { token } = h.staff("supervisor");
+    vi.spyOn(h.repo, "readDocumentData").mockRejectedValue(new Error(`decrypt failed: ${TD1.join("\n")}`));
+    const res = await h.call("/document-data", { body: { verificationId: id }, token });
+    expect(res.status).toBe(500);
+    const output = (await res.text()) + spy.mock.calls.flat().join(" ");
+    expect(spy).toHaveBeenCalled();
+    for (const value of [...TD1, "ERIKSSON", "D23145890", "decrypt failed"]) expect(output).not.toContain(value);
   });
 });
 

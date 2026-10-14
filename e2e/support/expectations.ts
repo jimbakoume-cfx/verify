@@ -16,6 +16,20 @@ export const CARD_FLOW = [
   "POST /submit",
 ];
 
+/** The new CNI: as above, plus the report of its code lines once the back is on the server. */
+export const NEW_CNI_FLOW = [...CARD_FLOW.slice(0, -1), "POST /mrz", "POST /submit"];
+
+/** A passport: one photo (the data page), the report of its code lines, then the submit. */
+export const PASSPORT_FLOW = [
+  "GET /session",
+  "POST /consent",
+  "POST /document-type",
+  "POST /upload-url",
+  "POST /captures",
+  "POST /mrz",
+  "POST /submit",
+];
+
 /** A photo as the server must receive it: a small canvas JPEG, no metadata, big enough to read. */
 export function expectCleanPhoto(object: StoredObject): void {
   expect(object.contentType).toBe("image/jpeg");

@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import type { CaptureSide, FlowSession, UploadUrlResponse } from "@verify/shared";
+import { MRZ_REPORT_LIMITS, type CaptureSide, type FlowSession, type UploadUrlResponse } from "@verify/shared";
+import { OCR_ASSETS, type MrzReadResult, type MrzReadStatus } from "../mrz/types";
 import { FlowError } from "./errors";
 import type { Shot, UploadProgress } from "./machine";
 import { classifyStorageError } from "./storage";
-import { type UploadDeps, Uploader } from "./upload";
+import { STEPS_PER_PHOTO, type UploadDeps, Uploader, mrzReport, uploadSteps } from "./upload";
 
 const VID = "11111111-2222-4333-8444-555555555555";
 
@@ -32,7 +33,7 @@ const submitted: FlowSession = {
   status: "submitted",
   locale: "fr",
   consentGiven: true,
-  declaredDocument: "cni",
+  declaredDocument: "cni_legacy",
   requiredSides: ["document_front", "document_back"],
   captures: [],
   expiresAt: "2026-10-13T12:30:00Z",
@@ -58,10 +59,15 @@ function fakeBackend() {
       n++;
       return { path: `${VID}/${kind}-${n}.jpg`, token: `tok${n}`, bucket: "id-captures" } satisfies UploadUrlResponse;
     }),
-    completeCapture: vi.fn(async ({ path }) => {
+    completeCapture: vi.fn(async ({ path, kind }) => {
       calls.push(`captures:${path}`);
       maybeFail("completeCapture");
-      return { captureId: "c", byteSize: 10, width: 1000, height: 640, sha256: "x" };
+      return { captureId: `capture-${kind}`, byteSize: 10, width: 1000, height: 640, sha256: "x" };
+    }),
+    reportMrz: vi.fn(async (body) => {
+      calls.push(`mrz:${body.captureId}:${body.result}`);
+      maybeFail("reportMrz");
+      return { recorded: true as const };
     }),
     submit: vi.fn(async () => {
       calls.push("submit");
@@ -82,13 +88,38 @@ function fakeBackend() {
 
 function uploaderFor(backend: ReturnType<typeof fakeBackend>) {
   const waits: number[] = [];
+  const warnings: string[] = [];
   const uploader = new Uploader({
     api: backend.api,
     putObject: backend.putObject,
     sleep: async (ms) => void waits.push(ms),
     random: () => 0.5,
+    warn: (message) => void warnings.push(message),
   });
-  return { uploader, waits };
+  return { uploader, waits, warnings };
+}
+
+/** The ICAO 9303 TD3 specimen ("Utopia" passport): public example data. */
+const TD3 = ["P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<", "L898902C36UTO7408122F1204159ZE184226B<<<<<10"];
+
+function read(status: MrzReadStatus, overrides: Partial<MrzReadResult> = {}): MrzReadResult {
+  return {
+    status,
+    format: "TD3",
+    lines: status === "valid" || status === "invalid" ? TD3 : null,
+    parsed: null,
+    corrections: 1,
+    ms: 412.6,
+    rawText: "P<UTOERIKSS0N",
+    charHeight: 15,
+    rotated: false,
+    ...overrides,
+  };
+}
+
+/** A photo of the side that carries the MRZ, read on its `attempt`th try. */
+function readShot(side: CaptureSide, status: MrzReadStatus = "valid", attempt = 1): Shot {
+  return { ...shot(side), gray: null, mrz: read(status), mrzAttempt: attempt };
 }
 
 function listener() {
@@ -224,6 +255,172 @@ describe("Uploader", () => {
     backend.failNext("submit", new FlowError("already_submitted", 409));
     const { uploader } = uploaderFor(backend);
     expect(await uploader.run([], listener().l)).toEqual({ ok: false, error: "already_submitted", side: null });
+  });
+});
+
+describe("the MRZ report", () => {
+  it("is sent once, right after its photo is confirmed, naming the capture", async () => {
+    const backend = fakeBackend();
+    const { uploader } = uploaderFor(backend);
+    const { l, progress, done } = listener();
+    const outcome = await uploader.run([shot("document_front"), readShot("document_back", "valid", 2)], l);
+    expect(outcome).toEqual({ ok: true, session: submitted });
+    expect(backend.calls).toEqual([
+      "upload-url:document_front",
+      `put:${VID}/document_front-1.jpg:tok1`,
+      `captures:${VID}/document_front-1.jpg`,
+      "upload-url:document_back",
+      `put:${VID}/document_back-2.jpg:tok2`,
+      `captures:${VID}/document_back-2.jpg`,
+      "mrz:capture-document_back:read",
+      "submit",
+    ]);
+    expect(done).toEqual(["document_front", "document_back"]);
+    expect(backend.api.reportMrz).toHaveBeenCalledWith({
+      captureId: "capture-document_back",
+      result: "read",
+      lines: TD3,
+      corrections: 1,
+      ms: 413,
+      attempts: 2,
+      engine: OCR_ASSETS.engine,
+    });
+    // Three steps per photo, one more for the report, and the submit.
+    expect(progress.every((p) => p.total === 8)).toBe(true);
+    expect(progress.map((p) => [p.phase, p.done, p.photo])).toEqual([
+      ["link", 0, 1],
+      ["send", 1, 1],
+      ["check", 2, 1],
+      ["link", 3, 2],
+      ["send", 4, 2],
+      ["check", 5, 2],
+      ["check", 6, 2],
+      ["submit", 7, 0],
+    ]);
+  });
+
+  it("counts its step in the progress total", () => {
+    expect(uploadSteps([])).toBe(1);
+    expect(uploadSteps([shot("document_front"), shot("document_back")])).toBe(2 * STEPS_PER_PHOTO + 1);
+    expect(uploadSteps([shot("document_front"), readShot("document_back")])).toBe(2 * STEPS_PER_PHOTO + 2);
+  });
+
+  it("is retried on a network error", async () => {
+    const backend = fakeBackend();
+    backend.failNext("reportMrz", new FlowError("network"));
+    const { uploader, waits } = uploaderFor(backend);
+    expect((await uploader.run([readShot("document_front")], listener().l)).ok).toBe(true);
+    expect(backend.calls.filter((c) => c.startsWith("mrz"))).toHaveLength(2);
+    expect(waits).toEqual([1500]);
+  });
+
+  it("never holds back the submit, and is sent again on the next run with the same capture", async () => {
+    const backend = fakeBackend();
+    backend.failNext("reportMrz", new FlowError("server_error", 503), new FlowError("network"), new FlowError("timeout"));
+    backend.failNext("submit", new FlowError("network"), new FlowError("network"), new FlowError("network"));
+    const { uploader } = uploaderFor(backend);
+    const front = readShot("document_front", "invalid", 3);
+    const first = await uploader.run([front], listener().l);
+    expect(first).toEqual({ ok: false, error: "network", side: null });
+    expect(backend.calls.filter((c) => c.startsWith("mrz"))).toHaveLength(3);
+    expect(backend.calls.filter((c) => c === "submit")).toHaveLength(3);
+
+    // The rider's "Try again": the photo is on the server, so only the report and the submit remain.
+    const before = backend.calls.length;
+    const second = await uploader.run([], listener().l);
+    expect(second).toEqual({ ok: true, session: submitted });
+    expect(backend.calls.slice(before)).toEqual(["mrz:capture-document_front:read", "submit"]);
+    expect(backend.api.reportMrz).toHaveBeenLastCalledWith(
+      expect.objectContaining({ captureId: "capture-document_front", attempts: 3, result: "read" }),
+    );
+  });
+
+  it("does not stop the upload when every try fails", async () => {
+    const backend = fakeBackend();
+    backend.failNext("reportMrz", new FlowError("network"), new FlowError("network"), new FlowError("network"));
+    const { uploader } = uploaderFor(backend);
+    expect(await uploader.run([readShot("document_front")], listener().l)).toEqual({ ok: true, session: submitted });
+    expect(backend.calls.slice(-1)).toEqual(["submit"]);
+  });
+
+  it("is dropped, not retried, when the server refuses it for good", async () => {
+    const backend = fakeBackend();
+    backend.failNext("reportMrz", new FlowError("invalid_mrz", 422));
+    backend.failNext("submit", new FlowError("network"), new FlowError("network"), new FlowError("network"));
+    const { uploader, waits, warnings } = uploaderFor(backend);
+    expect((await uploader.run([readShot("document_front")], listener().l)).ok).toBe(false);
+    expect(backend.calls.filter((c) => c.startsWith("mrz"))).toHaveLength(1);
+    // Only the submit's tries waited.
+    expect(waits).toEqual([1500, 3000]);
+    expect(warnings).toEqual(["MRZ report not recorded: invalid_mrz"]);
+    expect(warnings.join()).not.toContain("UTO");
+
+    expect((await uploader.run([], listener().l)).ok).toBe(true);
+    expect(backend.calls.filter((c) => c.startsWith("mrz"))).toHaveLength(1);
+  });
+
+  it("is not sent again once recorded, even when a later step fails", async () => {
+    const backend = fakeBackend();
+    backend.failNext("submit", new FlowError("network"), new FlowError("network"), new FlowError("network"));
+    const { uploader } = uploaderFor(backend);
+    expect((await uploader.run([readShot("document_front")], listener().l)).ok).toBe(false);
+    expect((await uploader.run([], listener().l)).ok).toBe(true);
+    expect(backend.calls.filter((c) => c.startsWith("mrz"))).toEqual(["mrz:capture-document_front:read"]);
+  });
+
+  it("waits for the photo: no report when its confirmation failed", async () => {
+    const backend = fakeBackend();
+    backend.failNext("completeCapture", new FlowError("image_too_small", 422));
+    const { uploader } = uploaderFor(backend);
+    expect(await uploader.run([readShot("document_front")], listener().l)).toEqual({
+      ok: false,
+      error: "image_too_small",
+      side: "document_front",
+    });
+    expect(backend.api.reportMrz).not.toHaveBeenCalled();
+  });
+});
+
+describe("mrzReport", () => {
+  const ID = "c0ffee00-0000-4000-8000-000000000001";
+
+  it("sends the lines whenever a complete MRZ was read, right or not", () => {
+    expect(mrzReport(read("valid"), 1, ID)).toEqual({
+      captureId: ID,
+      result: "read",
+      lines: TD3,
+      corrections: 1,
+      ms: 413,
+      attempts: 1,
+      engine: OCR_ASSETS.engine,
+    });
+    expect(mrzReport(read("invalid"), 3, ID)).toMatchObject({ result: "read", lines: TD3, attempts: 3 });
+  });
+
+  it("says why nothing was read, without lines", () => {
+    expect(mrzReport(read("not_found"), 2, ID)).toEqual({
+      captureId: ID,
+      result: "unreadable",
+      reason: "not_found",
+      attempts: 2,
+      engine: OCR_ASSETS.engine,
+    });
+    expect(mrzReport(read("unavailable"), 1, ID)).toMatchObject({ result: "unreadable", reason: "reader_unavailable" });
+  });
+
+  it("keeps every number within the server's limits", () => {
+    const { maxAttempts, maxCorrections, maxMs } = MRZ_REPORT_LIMITS;
+    const report = mrzReport(read("valid", { corrections: 500, ms: 10_000_000 }), 99, ID);
+    expect(report).toMatchObject({ attempts: maxAttempts, corrections: maxCorrections, ms: maxMs });
+    expect(mrzReport(read("valid", { corrections: -1, ms: Number.NaN }), 0, ID)).toMatchObject({
+      attempts: 1,
+      corrections: 0,
+      ms: 0,
+    });
+  });
+
+  it("never carries the raw OCR text", () => {
+    expect(JSON.stringify(mrzReport(read("valid"), 1, ID))).not.toContain("ERIKSS0N");
   });
 });
 

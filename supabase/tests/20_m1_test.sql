@@ -488,14 +488,15 @@ select pg_temp.assert_eq((select count(*) from public.verification
   'new verification columns default to no document, not a test, zero upload links');
 insert into public.verification (applicant_id, attempt_no, declared_document, is_test)
   select 'c2000000-0000-0000-0000-000000000001', 100 + n, d, true
-  from unnest(array['cni', 'passport', 'residence_permit', 'driving_licence', 'voter_card']) with ordinality as t(d, n);
+  from unnest(array['cni_biometric', 'cni_legacy', 'passport', 'residence_permit', 'driving_licence', 'voter_card'])
+    with ordinality as t(d, n);
 select pg_temp.assert_eq((select count(*) from public.verification
-  where applicant_id = 'c2000000-0000-0000-0000-000000000001' and is_test), 5, 'all five declared documents are accepted');
+  where applicant_id = 'c2000000-0000-0000-0000-000000000001' and is_test), 6, 'all six declared documents are accepted');
 do $$ begin
   insert into public.verification (applicant_id, attempt_no, declared_document)
-    values ('c2000000-0000-0000-0000-000000000001', 2, 'cni_legacy');
+    values ('c2000000-0000-0000-0000-000000000001', 2, 'cni');
   raise exception 'FAIL: unknown declared document was stored';
-exception when check_violation then raise notice 'ok: declared_document only accepts the five documents';
+exception when check_violation then raise notice 'ok: declared_document only accepts the six documents (the M1 ''cni'' is gone)';
 end $$;
 do $$ begin
   insert into public.verification (applicant_id, attempt_no, declared_document)
@@ -524,8 +525,8 @@ rollback;
 
 -- flow_claim_upload_slot -------------------------------------------------------------------------------
 insert into public.verification (id, applicant_id, attempt_no, status, declared_document, upload_url_count) values
-  ('c3000000-0000-0000-0000-000000000010', 'c2000000-0000-0000-0000-000000000001', 10, 'in_progress', 'cni', 0),
-  ('c3000000-0000-0000-0000-000000000011', 'c2000000-0000-0000-0000-000000000001', 11, 'in_progress', 'cni', 19);
+  ('c3000000-0000-0000-0000-000000000010', 'c2000000-0000-0000-0000-000000000001', 10, 'in_progress', 'cni_legacy', 0),
+  ('c3000000-0000-0000-0000-000000000011', 'c2000000-0000-0000-0000-000000000001', 11, 'in_progress', 'cni_legacy', 19);
 
 begin;
 set local role service_role;
@@ -544,10 +545,10 @@ commit;
 
 -- flow_submit ------------------------------------------------------------------------------------------
 insert into public.verification (id, applicant_id, attempt_no, status, declared_document) values
-  ('c3000000-0000-0000-0000-000000000020', 'c2000000-0000-0000-0000-000000000001', 20, 'in_progress', 'cni'),
+  ('c3000000-0000-0000-0000-000000000020', 'c2000000-0000-0000-0000-000000000001', 20, 'in_progress', 'cni_legacy'),
   ('c3000000-0000-0000-0000-000000000021', 'c2000000-0000-0000-0000-000000000001', 21, 'created', 'passport'),
-  ('c3000000-0000-0000-0000-000000000022', 'c2000000-0000-0000-0000-000000000001', 22, 'in_progress', 'cni'),
-  ('c3000000-0000-0000-0000-000000000023', 'c2000000-0000-0000-0000-000000000001', 23, 'in_progress', 'cni');
+  ('c3000000-0000-0000-0000-000000000022', 'c2000000-0000-0000-0000-000000000001', 22, 'in_progress', 'cni_legacy'),
+  ('c3000000-0000-0000-0000-000000000023', 'c2000000-0000-0000-0000-000000000001', 23, 'in_progress', 'cni_legacy');
 insert into public.capture (verification_id, kind, storage_path, sha256, mime_type, byte_size, deleted_at) values
   ('c3000000-0000-0000-0000-000000000020', 'document_front', 'm1/20/front.jpg', 'm1-20-front', 'image/jpeg', 20000, null),
   ('c3000000-0000-0000-0000-000000000020', 'document_back', 'm1/20/back-erased.jpg', 'm1-20-back-erased', 'image/jpeg', 20000, now()),
@@ -693,13 +694,16 @@ select pg_temp.assert_true(
   (select array_agg(p.proname || '(' || array_to_string(p.proargnames, ',') || ')' order by p.proname)
      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'public'
-      and p.proname in ('flow_claim_upload_slot', 'flow_submit', 'staff_find_auth_user', 'staff_invite_accept', 'staff_invite_verify'))
+      and p.proname in ('flow_claim_upload_slot', 'flow_submit', 'staff_find_auth_user', 'staff_invite_accept', 'staff_invite_verify',
+                        'flow_record_mrz', 'staff_read_document_data'))
   = array[
     'flow_claim_upload_slot(p_verification,p_max)',
+    'flow_record_mrz(p_verification,p_capture,p_lines,p_format,p_outcome,p_details)',
     'flow_submit(p_verification,p_required)',
     'staff_find_auth_user(p_email,user_id,email_confirmed)',
     'staff_invite_accept(p_email,p_code_hash,p_user_id)',
-    'staff_invite_verify(p_email,p_code_hash)'
+    'staff_invite_verify(p_email,p_code_hash)',
+    'staff_read_document_data(p_verification,p_actor,p_role,capture_id,source,format,lines,recorded_at)'
   ],
   'the RPCs and their parameter and result names are those the repos call');
 
@@ -723,7 +727,11 @@ begin
     ('applicant', 'id'), ('applicant', 'api_client_id'), ('applicant', 'external_user_id'), ('applicant', 'subject_type'),
     ('review_task', 'id'), ('review_task', 'verification_id'), ('review_task', 'assigned_to'), ('review_task', 'status'),
     ('audit_event', 'actor_type'), ('audit_event', 'actor_id'), ('audit_event', 'action'),
-    ('audit_event', 'target_type'), ('audit_event', 'target_id'), ('audit_event', 'details')
+    ('audit_event', 'target_type'), ('audit_event', 'target_id'), ('audit_event', 'details'),
+    -- M2: the MRZ check, read by the dashboard through RLS.
+    ('check_result', 'id'), ('check_result', 'verification_id'), ('check_result', 'capture_id'),
+    ('check_result', 'check_name'), ('check_result', 'check_version'), ('check_result', 'outcome'),
+    ('check_result', 'details'), ('check_result', 'created_at')
   ) as used(t, c)
   where not exists (
     select 1 from information_schema.columns ic

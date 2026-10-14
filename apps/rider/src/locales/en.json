@@ -34,7 +34,7 @@
     "placeholderBadge": "Placeholder text",
     "placeholderNote": "This wording is for testing only. The final text will be written by our lawyer.",
     "whatTitle": "What we collect",
-    "what": "Photos of your identity document (front, and back if needed). Later, a short check of your face in front of the camera.",
+    "what": "Photos of your identity document (front, and back if needed), and the details read from its code lines (name, number, dates). Later, a short check of your face in front of the camera.",
     "whyTitle": "Why",
     "why": "To confirm that you are who you say you are, for the safety of riders and drivers.",
     "howTitle": "How they are protected",
@@ -58,10 +58,13 @@
     "intro": "Choose the original document you have with you.",
     "bothSides": "Front and back",
     "photoPage": "Photo page",
+    "cniBiometricHint": "3 lines of <<< on the back",
+    "cniLegacyHint": "no <<< lines on the back",
     "continue": "Continue"
   },
   "documents": {
-    "cni": "National ID card (CNI)",
+    "cni_biometric": "New national ID card (2025)",
+    "cni_legacy": "Old national ID card",
     "passport": "Passport",
     "residence_permit": "Residence permit",
     "driving_licence": "Driving licence",
@@ -115,6 +118,13 @@
     "body": "The front is done. Turn your card over to photograph the back.",
     "continue": "Photograph the back"
   },
+  "reading": {
+    "title": "Reading the code lines…",
+    "body": "We're reading the code lines (the lines with <<<). This takes a few seconds.",
+    "download": "Getting the reader ready. The first time, this can take up to a minute.",
+    "percent": "{{percent}}%",
+    "progressLabel": "Getting the reader ready"
+  },
   "review": {
     "title": "Check the photo",
     "alt": "Photo taken: {{side}}",
@@ -128,6 +138,20 @@
     "refused": "This photo cannot be used. Please take it again.",
     "lowResolution": "This photo does not have enough detail to be sent. Hold your phone upright and take it again. If this keeps happening, use another phone.",
     "refusedOverride": "This photo looks blurry or has glare. Take it again if you can."
+  },
+  "mrz": {
+    "read": "Code lines read",
+    "unreadTitle": "The code lines could not be read",
+    "retake": "Please take the photo again, following these tips:",
+    "retakeIfYouCan": "Take the photo again if you can, following these tips:",
+    "tipLines": {
+      "TD1": "All 3 lines with <<< must be whole and sharp",
+      "TD3": "Both lines with <<< must be whole and sharp"
+    },
+    "tipGlare": "No glare on those lines: tilt the document slightly",
+    "tipSteady": "Move the phone closer and hold still for the photo",
+    "continueNote": "If it still doesn't work, you can continue: the check will just take a little longer.",
+    "continue": "Continue anyway"
   },
   "upload": {
     "title": "Sending your photos",
@@ -175,6 +199,7 @@
     "image_too_small": "The photo file is too small (probably blank). Please take the photo again.",
     "image_too_large": "The photo file is too large. Please take the photo again.",
     "image_resolution_too_low": "The photo is not detailed enough. Hold your phone upright and take it again; if this keeps happening, use another phone.",
+    "invalid_mrz": "The code lines sent are not valid.",
     "audit_failed": "The action could not be recorded. Please try again.",
     "invalid_invite": "The email address or invite code is not valid.",
     "weak_password": "The password does not meet the rules.",
@@ -207,7 +232,42 @@
     "quality": "JPEG quality",
     "scale": "scale",
     "size": "size",
-    "attempts": "attempts"
+    "attempts": "attempts",
+    "mrz": {
+      "title": "Code lines (MRZ)",
+      "status": "result",
+      "format": "format",
+      "charHeight": "character height",
+      "time": "read time",
+      "corrections": "corrected characters",
+      "rotated": "turned (180°)",
+      "yes": "yes",
+      "no": "no",
+      "attempt": "try #",
+      "checks": "Check digits",
+      "check": {
+        "documentNumber": "document number",
+        "birthDate": "birth date",
+        "expiryDate": "expiry date",
+        "personalNumber": "personal number",
+        "composite": "overall (composite)"
+      },
+      "fields": "Data read",
+      "field": {
+        "documentCode": "document code",
+        "issuingState": "issuing state",
+        "documentNumber": "number",
+        "surname": "surname",
+        "givenNames": "given names",
+        "nationality": "nationality",
+        "birthDate": "birth",
+        "sex": "sex",
+        "expiryDate": "expiry",
+        "optionalData": "optional data"
+      },
+      "lines": "Corrected lines",
+      "raw": "Raw OCR text"
+    }
   },
   "fatal": {
     "title": "Something went wrong",

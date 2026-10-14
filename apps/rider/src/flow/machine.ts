@@ -1,14 +1,20 @@
 // The rider flow as a pure reducer: which screen is shown and what the rider has done so far.
 // Side effects (API calls, camera, uploads) live in useFlow.ts and report back through actions.
 import {
+  MRZ_EXPECTATION,
+  MRZ_TRIES_BEFORE_OVERRIDE,
   REQUIRED_SIDES,
   type CaptureSide,
   type ClientQuality,
   type DeclaredDocument,
   type FlowSession,
   type FlowStatus,
+  type MrzExpectation,
+  type MrzFormat,
 } from "@verify/shared";
-import type { Hint } from "@verify/capture";
+import type { GrayImage, Hint } from "@verify/capture";
+import { unavailableRead } from "../mrz/lazyReader";
+import type { MrzReadResult } from "../mrz/types";
 import { type FlowErrorCode, type SessionErrorReason, isImageRejection, sessionErrorReason } from "./errors";
 
 /** How the final photo was encoded (shown in the debug panel). */
@@ -32,6 +38,16 @@ export interface Shot {
   /** Long side under the server's minimum: the server would refuse it. */
   lowResolution: boolean;
   info: StillInfo;
+  /**
+   * Full-resolution grayscale copy of the still, made before JPEG compression, for reading the MRZ
+   * (its characters are only about 15 px tall on a passport held upright). Only on the side that
+   * carries the MRZ, and only until it has been read: phones have little memory to spare.
+   */
+  gray?: GrayImage | null;
+  /** What was read on the side that carries the MRZ (set when the reading screen finishes). */
+  mrz?: MrzReadResult;
+  /** Reads of this side so far, this one included (sent as MrzReportRequest.attempts). */
+  mrzAttempt?: number;
 }
 
 /** Problems that make a manual photo unusable (spec: sharpness or glare). */
@@ -48,6 +64,17 @@ export function refusalHints(shot: Shot): Hint[] {
  */
 export const REFUSALS_BEFORE_OVERRIDE = 2;
 
+/** Where `document` carries its MRZ when `side` is that side; null for every other side. */
+export function mrzExpectationFor(document: DeclaredDocument | null, side: CaptureSide): MrzExpectation | null {
+  const expectation = document ? MRZ_EXPECTATION[document] : null;
+  return expectation && expectation.side === side ? expectation : null;
+}
+
+/** A read that asks for a retake: no complete MRZ, or a wrong check digit. "unavailable" never does. */
+function isFailedRead(result: MrzReadResult): boolean {
+  return result.status === "invalid" || result.status === "not_found";
+}
+
 export type Screen =
   | { name: "welcome" }
   | { name: "consent" }
@@ -55,6 +82,8 @@ export type Screen =
   | { name: "document" }
   | { name: "capture"; side: CaptureSide }
   | { name: "turnOver"; side: CaptureSide }
+  /** Reading the MRZ of the photo just taken (the side that carries it), before its review. */
+  | { name: "reading"; side: CaptureSide }
   | { name: "review"; side: CaptureSide }
   | { name: "upload" }
   | { name: "done" }
@@ -97,6 +126,15 @@ export interface FlowState {
   upload: UploadState;
   /** Manual photos refused per side. */
   refusals: Partial<Record<CaptureSide, number>>;
+  /** MRZ reads per side, whatever their outcome. Reset when the document changes. */
+  mrzReads: Partial<Record<CaptureSide, number>>;
+  /**
+   * Failed reads of a required MRZ per side (invalid or not found). After MRZ_TRIES_BEFORE_OVERRIDE
+   * the rider may continue anyway (the server flags the case). Reset when the document changes.
+   */
+  mrzFailures: Partial<Record<CaptureSide, number>>;
+  /** First-use download progress of the reader (0..1) on the reading screen; null when not reported. */
+  readProgress: number | null;
 }
 
 export type FlowAction =
@@ -112,6 +150,9 @@ export type FlowAction =
   | { type: "document/chosen"; session: FlowSession }
   | { type: "document/change" }
   | { type: "capture/taken"; shot: Shot }
+  /** From the reader, for `shot`: ignored unless `shot` is still the photo being read. */
+  | { type: "mrz/progress"; shot: Shot; progress: number }
+  | { type: "mrz/read"; shot: Shot; result: MrzReadResult }
   | { type: "review/retake" }
   | { type: "review/accept" }
   | { type: "turnOver/ready" }
@@ -140,6 +181,9 @@ export function initialFlowState(boot: { hasToken: boolean; invalidLink: boolean
     uploaded: {},
     upload: IDLE_UPLOAD,
     refusals: {},
+    mrzReads: {},
+    mrzFailures: {},
+    readProgress: null,
   };
 }
 
@@ -173,6 +217,30 @@ function fail(state: FlowState, error: FlowErrorCode): FlowState {
     return { ...settled, upload: IDLE_UPLOAD, screen: { name: "document" } };
   }
   return settled;
+}
+
+/** Whether `shot` is the photo on the reading screen: a reader's result for any other is stale. */
+function isBeingRead(state: FlowState, shot: Shot): boolean {
+  const { screen } = state;
+  return screen.name === "reading" && screen.side === shot.side && state.shots[shot.side] === shot;
+}
+
+/**
+ * Keeps what was read with the photo, drops its grayscale copy, counts the try, and shows the
+ * review. Only a required MRZ counts failed tries (an optional one never asks for a retake).
+ */
+function recordRead(state: FlowState, shot: Shot, result: MrzReadResult): FlowState {
+  const { side } = shot;
+  const reads = (state.mrzReads[side] ?? 0) + 1;
+  const failed = mrzExpectationFor(state.document, side)?.required === true && isFailedRead(result);
+  return {
+    ...state,
+    shots: { ...state.shots, [side]: { ...shot, gray: null, mrz: result, mrzAttempt: reads } },
+    mrzReads: { ...state.mrzReads, [side]: reads },
+    mrzFailures: failed ? { ...state.mrzFailures, [side]: (state.mrzFailures[side] ?? 0) + 1 } : state.mrzFailures,
+    readProgress: null,
+    screen: { name: "review", side },
+  };
 }
 
 /** The screen that captures `side`: the back is preceded by a "turn the card over" step. */
@@ -240,6 +308,10 @@ export function flowReducer(state: FlowState, action: FlowAction): FlowState {
         shots: {},
         uploaded: {},
         refusals: {},
+        // The tries belong to the document: another one starts with none.
+        mrzReads: {},
+        mrzFailures: {},
+        readProgress: null,
         upload: IDLE_UPLOAD,
         screen: { name: "capture", side: sides[0] },
       };
@@ -253,15 +325,35 @@ export function flowReducer(state: FlowState, action: FlowAction): FlowState {
       const { shot } = action;
       if (state.screen.name !== "capture" || state.screen.side !== shot.side) return state;
       const refused = refusalHints(shot).length > 0;
-      return {
+      const taken: FlowState = {
         ...state,
         error: null,
-        shots: { ...state.shots, [shot.side]: shot },
         uploaded: without(state.uploaded, shot.side),
         refusals: refused ? { ...state.refusals, [shot.side]: (state.refusals[shot.side] ?? 0) + 1 } : state.refusals,
-        screen: { name: "review", side: shot.side },
+        readProgress: null,
       };
+      const expectation = mrzExpectationFor(state.document, shot.side);
+      // A photo under the server's minimum can only be retaken: reading it would waste the rider's time.
+      if (expectation && !shot.lowResolution) {
+        if (shot.gray) {
+          return { ...taken, shots: { ...taken.shots, [shot.side]: shot }, screen: { name: "reading", side: shot.side } };
+        }
+        // No grayscale copy (the phone could not spare the memory): nothing to read, which never blocks.
+        return recordRead(taken, shot, unavailableRead(expectation.format));
+      }
+      const kept = shot.gray ? { ...shot, gray: null } : shot;
+      return { ...taken, shots: { ...taken.shots, [shot.side]: kept }, screen: { name: "review", side: shot.side } };
     }
+
+    case "mrz/progress": {
+      if (!isBeingRead(state, action.shot) || !Number.isFinite(action.progress)) return state;
+      const progress = Math.round(Math.min(1, Math.max(0, action.progress)) * 100) / 100;
+      return progress === state.readProgress ? state : { ...state, readProgress: progress };
+    }
+
+    case "mrz/read":
+      if (!isBeingRead(state, action.shot)) return state;
+      return recordRead(state, action.shot, action.result);
 
     case "review/retake": {
       if (state.screen.name !== "review") return state;
@@ -330,17 +422,26 @@ export function flowReducer(state: FlowState, action: FlowAction): FlowState {
 }
 
 /**
- * One step back, as the phone's Back button should feel: from a photo's review to its camera, from
- * the back's camera to the "turn over" step, from there to the front's review, and from the first
- * camera to the document list. Consent and the document list are not stepped back to from later
- * screens by this (consent is already recorded); during an upload Back does nothing. Other screens
- * return the same state: the browser may leave the page.
+ * One step back, as the phone's Back button should feel: from a photo's review (or its reading) to
+ * its camera, from the back's camera to the "turn over" step, from there to the front's review, and
+ * from the first camera to the document list. Consent and the document list are not stepped back
+ * to from later screens by this (consent is already recorded); during an upload Back does nothing.
+ * Other screens return the same state: the browser may leave the page.
  */
 function back(state: FlowState): FlowState {
   const { screen } = state;
   switch (screen.name) {
     case "review":
       return flowReducer(state, { type: "review/retake" });
+    case "reading":
+      // useFlow aborts the read when this screen goes away.
+      return {
+        ...state,
+        error: null,
+        shots: without(state.shots, screen.side),
+        readProgress: null,
+        screen: { name: "capture", side: screen.side },
+      };
     case "capture": {
       const index = state.sides.indexOf(screen.side);
       if (index <= 0) return flowReducer(state, { type: "document/change" });
@@ -364,17 +465,52 @@ function back(state: FlowState): FlowState {
 
 /** Screens where the phone's Back button is handled by the flow rather than leaving the page. */
 export function handlesBack(screen: Screen): boolean {
-  return screen.name === "capture" || screen.name === "turnOver" || screen.name === "review" || screen.name === "upload";
+  return (
+    screen.name === "capture" ||
+    screen.name === "turnOver" ||
+    screen.name === "reading" ||
+    screen.name === "review" ||
+    screen.name === "upload"
+  );
+}
+
+/** What the review screen says about the MRZ ("code lines") of a photo. */
+export type MrzReview =
+  /** Read, every check digit right: the rider sees "Code lines read ✓". */
+  | { status: "read" }
+  /**
+   * A required MRZ was not read: tips and Retake. `canContinue` once MRZ_TRIES_BEFORE_OVERRIDE
+   * tries have failed on this side ("Continue anyway"; the server flags the case).
+   */
+  | { status: "unread"; format: MrzFormat; canContinue: boolean };
+
+type ReviewState = Pick<FlowState, "refusals" | "document" | "mrzFailures">;
+
+/**
+ * The MRZ verdict for `shot`; null when there is nothing to say: no MRZ on this side, the reader
+ * could not run ("unavailable" never blocks), or an optional MRZ was not read.
+ */
+export function mrzReview(state: Pick<FlowState, "document" | "mrzFailures">, shot: Shot): MrzReview | null {
+  const expectation = mrzExpectationFor(state.document, shot.side);
+  const result = shot.mrz;
+  if (!expectation || !result) return null;
+  if (result.status === "valid") return { status: "read" };
+  if (!expectation.required || !isFailedRead(result)) return null;
+  const failures = state.mrzFailures[shot.side] ?? 0;
+  return { status: "unread", format: expectation.format, canContinue: failures >= MRZ_TRIES_BEFORE_OVERRIDE };
 }
 
 /**
  * Whether "Use this photo" is offered for `shot`: never for a photo under the server's minimum
- * resolution (the server would refuse it every time, so overriding cannot help); a refused photo
- * only after repeated refusals.
+ * resolution (the server would refuse it every time, so overriding cannot help). Otherwise both
+ * checks must allow it: a blurry or glary manual photo only after repeated refusals, and a required
+ * MRZ that was not read only after repeated tries.
  */
-export function canUseShot(state: Pick<FlowState, "refusals">, shot: Shot): boolean {
+export function canUseShot(state: ReviewState, shot: Shot): boolean {
   if (shot.lowResolution) return false;
-  return refusalHints(shot).length === 0 || (state.refusals[shot.side] ?? 0) >= REFUSALS_BEFORE_OVERRIDE;
+  const quality = refusalHints(shot).length === 0 || (state.refusals[shot.side] ?? 0) >= REFUSALS_BEFORE_OVERRIDE;
+  const mrz = mrzReview(state, shot);
+  return quality && (mrz?.status !== "unread" || mrz.canContinue);
 }
 
 /** Shots still to send, in capture order. */

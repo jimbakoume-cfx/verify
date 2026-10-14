@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { DECLARED_DOCUMENTS } from "@verify/shared";
-import { CAPTURE_KINDS, VERIFICATION_STATUSES } from "./lib/records";
+import { CAPTURE_SIDES, DECLARED_DOCUMENTS, parseMrz } from "@verify/shared";
+import { mrzCheckLines, mrzFields } from "./lib/mrz";
+import { CAPTURE_KINDS, CHECK_OUTCOMES, VERIFICATION_STATUSES } from "./lib/records";
 import { STAFF_ROLES } from "./lib/roles";
 import en from "./locales/en.json";
 import fr from "./locales/fr.json";
@@ -44,6 +45,44 @@ describe("FR/EN locales", () => {
       "capture.source.auto",
       "capture.source.manual",
     ];
+    for (const key of keys) {
+      expect(FR.has(key), `fr: ${key}`).toBe(true);
+      expect(EN.has(key), `en: ${key}`).toBe(true);
+    }
+  });
+
+  it("label every check outcome and everything the MRZ section can show", () => {
+    // A passport result gives every ✅/❌ line (TD1 has the same ones minus the personal number).
+    const lines = mrzCheckLines({
+      source: "mrz_phone",
+      parserVersion: "mrz-v1",
+      captureId: "c",
+      result: "read",
+      reason: null,
+      expectedFormat: "TD3",
+      format: "TD3",
+      checks: { documentNumber: true, birthDate: true, expiryDate: true, personalNumber: true, composite: true },
+      documentCodeFits: true,
+      datesValid: true,
+      attempts: 1,
+      corrections: 0,
+      engine: "e",
+      ms: 1,
+    });
+    const passport = parseMrz([
+      "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<",
+      "L898902C36UTO7408122F1204159ZE184226B<<<<<10",
+    ])!;
+    const keys = [
+      ...CHECK_OUTCOMES.map((o) => `checkOutcome.${o}`),
+      ...CAPTURE_SIDES.map((side) => `mrz.expectedOn.${side}`),
+      ...["not_found", "reader_unavailable", "unknown"].map((reason) => `mrz.unreadable.${reason}`),
+      ...["M", "F", "X"].map((sex) => `mrz.sex.${sex}`),
+      ...["ok", "bad", "unknown"].map((tick) => `mrz.tick.${tick}`),
+      ...lines.map((line) => line.key),
+      ...mrzFields(passport).map((field) => `mrz.fields.${field.key}`),
+    ];
+    expect(lines).toHaveLength(8);
     for (const key of keys) {
       expect(FR.has(key), `fr: ${key}`).toBe(true);
       expect(EN.has(key), `en: ${key}`).toBe(true);

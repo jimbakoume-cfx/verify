@@ -14,6 +14,16 @@ export function formatDateTime(iso: string | null, lang: Language): string {
   return new Intl.DateTimeFormat(LOCALE[lang], { dateStyle: "medium", timeStyle: "short" }).format(date);
 }
 
+/**
+ * A calendar date (YYYY-MM-DD, e.g. a birth date read from the MRZ) in words. Formatted in UTC: it
+ * is a day, not an instant, so the staff PC's time zone must not move it to the day before.
+ */
+export function formatCalendarDate(isoDate: string, lang: Language): string {
+  const date = new Date(`${isoDate}T00:00:00Z`);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(isoDate) || Number.isNaN(date.getTime())) return "—";
+  return new Intl.DateTimeFormat(LOCALE[lang], { dateStyle: "long", timeZone: "UTC" }).format(date);
+}
+
 /** Size in kilobytes (1 kB = 1000 bytes, as the 300 kB capture target is stated). FR writes "ko". */
 export function formatBytes(bytes: number, lang: Language): string {
   const kb = bytes / 1000;

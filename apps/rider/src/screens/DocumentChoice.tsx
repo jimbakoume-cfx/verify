@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { DECLARED_DOCUMENTS, REQUIRED_SIDES, type DeclaredDocument } from "@verify/shared";
 import type { FlowErrorCode } from "../flow/errors";
+import { documentHintKey } from "../labels";
 import { ErrorNotice, Page, ScreenTitle } from "../ui";
 
 interface Props {
@@ -22,17 +23,21 @@ export function DocumentChoiceScreen({ initial, busy, error, onChoose }: Props) 
 
       <fieldset className="choices" disabled={busy}>
         <legend className="sr-only">{t("document.title")}</legend>
-        {DECLARED_DOCUMENTS.map((doc) => (
-          <label key={doc} className="choice">
-            <input type="radio" name="document" value={doc} checked={choice === doc} onChange={() => setChoice(doc)} />
-            <span className="choice-text">
-              <span className="choice-name">{t(`documents.${doc}`)}</span>
-              <span className="choice-sub">
-                {REQUIRED_SIDES[doc].length > 1 ? t("document.bothSides") : t("document.photoPage")}
+        {DECLARED_DOCUMENTS.map((doc) => {
+          const hint = documentHintKey(doc);
+          return (
+            <label key={doc} className="choice">
+              <input type="radio" name="document" value={doc} checked={choice === doc} onChange={() => setChoice(doc)} />
+              <span className="choice-text">
+                <span className="choice-name">{t(`documents.${doc}`)}</span>
+                <span className="choice-sub">
+                  {REQUIRED_SIDES[doc].length > 1 ? t("document.bothSides") : t("document.photoPage")}
+                  {hint && ` · ${t(hint)}`}
+                </span>
               </span>
-            </span>
-          </label>
-        ))}
+            </label>
+          );
+        })}
       </fieldset>
 
       {error && <ErrorNotice code={error} />}

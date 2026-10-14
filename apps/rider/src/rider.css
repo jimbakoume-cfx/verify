@@ -113,6 +113,34 @@ button.primary, button.secondary { min-height: 52px; font-size: 1rem; }
 .checklist li { display: flex; gap: 8px; align-items: center; }
 .checklist svg { color: var(--ok); flex: none; }
 
+/* Code lines (MRZ): read on the review screen, or tips to retake */
+.mrz-read { margin: 0; display: flex; gap: 8px; align-items: center; font-weight: 600; color: var(--ok); }
+.mrz-read svg { flex: none; }
+.notice .tips { margin: 6px 0 0; padding-left: 1.2em; }
+.notice .tips li + li { margin-top: 2px; }
+
+/* Reading the code lines: the photo with a line sweeping over it while the reader works. */
+.reading-photo { position: relative; }
+.reading-scan {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 6%;
+  height: 3px;
+  background: #32d74b;
+  box-shadow: 0 0 12px #32d74b;
+  animation: reading-scan 1.6s ease-in-out infinite alternate;
+}
+@keyframes reading-scan {
+  to { top: 92%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .reading-scan { animation: none; top: auto; bottom: 20%; }
+}
+.reading-status { margin: 0; font-weight: 600; min-height: 3em; }
+.reading-status + .progress { margin-top: 12px; }
+.reading-percent { margin: 6px 0 0; color: var(--text-2); font-size: 0.9rem; text-align: right; font-variant-numeric: tabular-nums; }
+
 /* Upload */
 .progress { height: 12px; border-radius: 999px; background: var(--border); overflow: hidden; }
 .progress-bar { height: 100%; background: var(--brand); border-radius: inherit; transition: width 0.3s ease; }
@@ -143,6 +171,20 @@ button.primary, button.secondary { min-height: 52px; font-size: 1rem; }
 .debug-box dl > div, .capture-debug > div { display: contents; }
 .debug-box dt, .capture-debug dt { opacity: 0.75; }
 .debug-box dd, .capture-debug dd { margin: 0; font-family: ui-monospace, monospace; overflow-wrap: anywhere; }
+.mrz-debug h2 { margin: 14px 0 4px; font-size: 0.9rem; color: var(--brand); }
+.mrz-debug h3 { margin: 10px 0 4px; font-size: 0.8rem; }
+.mrz-checks { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+/* One MRZ line per row, never wrapped: a 44-character passport line scrolls sideways on a narrow phone. */
+.mrz-lines {
+  margin: 0;
+  padding: 8px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  font: 0.75rem/1.4 ui-monospace, monospace;
+  white-space: pre;
+  overflow-x: auto;
+}
 
 /* ------------------------------------------------------------------------------------------------
    Camera. The stage fills the screen; the <video> fills the stage (object-fit: cover). The free

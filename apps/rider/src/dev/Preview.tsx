@@ -1,11 +1,12 @@
 // Dev-only (never in production builds): every rider screen with fake data, for screenshots and
 // layout checks without a camera or backend. Open /?screen=<name>; add &lang=en for English.
 import { type CSSProperties, useEffect, useState } from "react";
-import type { CaptureSide, FlowSession } from "@verify/shared";
+import { type CaptureSide, type DeclaredDocument, type FlowSession, REQUIRED_SIDES, parseMrz } from "@verify/shared";
 import type { Hint } from "@verify/capture";
 import { FlowView } from "../FlowView";
 import type { FlowErrorCode } from "../flow/errors";
-import { type FlowState, type Shot, initialFlowState } from "../flow/machine";
+import { type FlowState, type Shot, initialFlowState, mrzExpectationFor } from "../flow/machine";
+import type { MrzReadResult, MrzReadStatus } from "../mrz/types";
 import type { FlowActions } from "../flow/useFlow";
 import { type CameraErrorKind } from "../capture/camera";
 import { CaptureDebug } from "../capture/CaptureDebug";
@@ -35,7 +36,7 @@ const SESSION: FlowSession = {
   status: "in_progress",
   locale: "fr",
   consentGiven: true,
-  declaredDocument: "cni",
+  declaredDocument: "cni_legacy",
   requiredSides: ["document_front", "document_back"],
   captures: [],
   expiresAt: minutes(25),
@@ -48,7 +49,7 @@ const READY: FlowState = {
   session: { ...SESSION, status: "created", consentGiven: false, declaredDocument: null, requiredSides: null },
 };
 
-const CNI: FlowState = { ...READY, session: SESSION, document: "cni", sides: ["document_front", "document_back"] };
+const CNI: FlowState = { ...READY, session: SESSION, document: "cni_legacy", sides: ["document_front", "document_back"] };
 
 function state(patch: Partial<FlowState>): FlowState {
   return { ...CNI, ...patch };
@@ -107,12 +108,69 @@ const CAPTURES: Record<string, CapturePreview> = {
   "capture-debug": { message: "blurry", readiness: "adjust", debug: true, shutter: true, card: "fit" },
 };
 
-const REVIEWS: Record<string, { hints: Hint[]; source: "auto" | "manual"; refusals: number; lowResolution?: boolean }> = {
-  review: { hints: [], source: "auto", refusals: 0 },
+interface ReviewPreview {
+  hints: Hint[];
+  source: "auto" | "manual";
+  refusals: number;
+  lowResolution?: boolean;
+  /** The photo of the side that carries the MRZ, read with this outcome after `failures` failed tries. */
+  mrz?: { document: DeclaredDocument; status: MrzReadStatus; failures: number };
+  debug?: boolean;
+}
+
+const REVIEWS: Record<string, ReviewPreview> = {
+  review: { hints: [], source: "auto", refusals: 0, debug: true },
   "review-refused": { hints: ["blurry"], source: "manual", refusals: 1 },
   "review-override": { hints: ["glare"], source: "manual", refusals: 2 },
   "review-lowres": { hints: [], source: "auto", refusals: 0, lowResolution: true },
+  // A passport read correctly, with the debug panel: every check digit ✅.
+  "review-mrz": {
+    hints: [],
+    source: "auto",
+    refusals: 0,
+    mrz: { document: "passport", status: "valid", failures: 0 },
+    debug: true,
+  },
+  // The new CNI's code lines not found: tips and Retake only.
+  "review-mrz-retry": {
+    hints: [],
+    source: "auto",
+    refusals: 0,
+    mrz: { document: "cni_biometric", status: "not_found", failures: 1 },
+  },
+  // A check digit wrong on the third try: "Continue anyway", and ❌ in the debug panel.
+  "review-mrz-override": {
+    hints: [],
+    source: "auto",
+    refusals: 0,
+    mrz: { document: "cni_biometric", status: "invalid", failures: 3 },
+    debug: true,
+  },
 };
+
+/** The ICAO 9303 specimens ("Utopia"): public example data, no real person. */
+const SPECIMEN_TD3 = ["P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<", "L898902C36UTO7408122F1204159ZE184226B<<<<<10"];
+const SPECIMEN_TD1 = ["I<UTOD231458907<<<<<<<<<<<<<<<", "7408122F1204159UTO<<<<<<<<<<<6", "ERIKSSON<<ANNA<MARIA<<<<<<<<<<"];
+/** The TD1 specimen with its birth date check digit misread (2 read as 3). */
+const MISREAD_TD1 = [SPECIMEN_TD1[0], "7408123F1204159UTO<<<<<<<<<<<6", SPECIMEN_TD1[2]];
+
+/** A read result as the reader would return it, for the previews. */
+function previewRead(document: DeclaredDocument, status: MrzReadStatus): MrzReadResult {
+  const format = document === "passport" ? "TD3" : "TD1";
+  const valid = format === "TD3" ? SPECIMEN_TD3 : SPECIMEN_TD1;
+  const lines = status === "valid" ? valid : status === "invalid" ? MISREAD_TD1 : null;
+  return {
+    status,
+    format,
+    lines,
+    parsed: lines ? parseMrz(lines) : null,
+    corrections: status === "valid" ? 2 : 1,
+    ms: 412,
+    rawText: lines ? lines.join("\n").replace(/0/g, "O") : "1D<UT0 D23 1458<<\nERIKS5ON",
+    charHeight: format === "TD3" ? 15.2 : 19.8,
+    rotated: false,
+  };
+}
 
 /** A specimen card drawn in a canvas: a real JPEG blob, no ID image involved. */
 function useSpecimenBlob(): Blob | null {
@@ -137,17 +195,16 @@ function useSpecimenBlob(): Blob | null {
     ctx.fillRect(60, 150, 240, 300);
     ctx.fillStyle = "#334";
     for (let i = 0; i < 6; i++) ctx.fillRect(340, 170 + i * 48, 300 + ((i * 97) % 280), 20);
-    ctx.font = "32px monospace";
-    ctx.fillText("IDCMR<<<<SPECIMEN<<<<<<<<<<<<<", 60, 540);
-    ctx.fillText("<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<", 60, 590);
+    ctx.font = "30px monospace";
+    SPECIMEN_TD1.forEach((line, i) => ctx.fillText(line, 60, 510 + i * 44));
     canvas.toBlob((b) => setBlob(b), "image/jpeg", 0.85);
   }, []);
   return blob;
 }
 
-function previewShot(blob: Blob, preview: (typeof REVIEWS)[string]): Shot {
+function previewShot(blob: Blob, preview: ReviewPreview, side: CaptureSide): Shot {
   return {
-    side: "document_front",
+    side,
     blob,
     quality: {
       source: preview.source,
@@ -162,6 +219,10 @@ function previewShot(blob: Blob, preview: (typeof REVIEWS)[string]): Shot {
     hints: preview.hints,
     lowResolution: preview.lowResolution ?? false,
     info: { width: 1040, height: 656, bytes: blob.size, jpegQuality: 0.88, scale: 1, attempts: 1 },
+    ...(preview.mrz && {
+      mrz: previewRead(preview.mrz.document, preview.mrz.status),
+      mrzAttempt: Math.max(1, preview.mrz.failures),
+    }),
   };
 }
 
@@ -194,7 +255,7 @@ function CapturePreviewScreen({ preview }: { preview: CapturePreview }) {
   return (
     <CaptureView
       side={preview.side ?? "document_front"}
-      document="cni"
+      document="cni_legacy"
       media={
         <div style={TABLE}>{preview.card && preview.card !== "none" && <FakeCard size={preview.card} />}</div>
       }
@@ -248,25 +309,61 @@ function CapturePreviewScreen({ preview }: { preview: CapturePreview }) {
   );
 }
 
-function ReviewPreview({ name }: { name: string }) {
+/** The state for a photo of `document`'s MRZ side (or the front of the base CNI). */
+function documentState(document: DeclaredDocument | undefined): { patch: Partial<FlowState>; side: CaptureSide } {
+  if (!document) return { patch: {}, side: "document_front" };
+  const sides = [...REQUIRED_SIDES[document]];
+  const side = sides.find((s) => mrzExpectationFor(document, s)) ?? sides[0];
+  return {
+    patch: { document, sides, session: { ...SESSION, declaredDocument: document, requiredSides: sides } },
+    side,
+  };
+}
+
+function ReviewPreviewScreen({ name }: { name: string }) {
   const blob = useSpecimenBlob();
   if (!blob) return null;
   const preview = REVIEWS[name];
-  const shot = previewShot(blob, preview);
+  const { patch, side } = documentState(preview.mrz?.document);
+  const shot = previewShot(blob, preview, side);
   const reviewState = state({
-    screen: { name: "review", side: "document_front" },
-    shots: { document_front: shot },
-    refusals: preview.refusals ? { document_front: preview.refusals } : {},
+    ...patch,
+    screen: { name: "review", side },
+    shots: { [side]: shot },
+    refusals: preview.refusals ? { [side]: preview.refusals } : {},
+    mrzReads: preview.mrz ? { [side]: shot.mrzAttempt } : {},
+    mrzFailures: preview.mrz?.failures ? { [side]: preview.mrz.failures } : {},
   });
-  return <FlowView state={reviewState} actions={ACTIONS} debug={name === "review"} />;
+  return <FlowView state={reviewState} actions={ACTIONS} debug={preview.debug ?? false} />;
+}
+
+/** The reading screen of the new CNI's back; with progress, the first-time download. */
+const READINGS: Record<string, { progress: number | null }> = {
+  reading: { progress: null },
+  "reading-download": { progress: 0.42 },
+};
+
+function ReadingPreviewScreen({ name }: { name: string }) {
+  const blob = useSpecimenBlob();
+  if (!blob) return null;
+  const { patch, side } = documentState("cni_biometric");
+  const shot = previewShot(blob, { hints: [], source: "auto", refusals: 0 }, side);
+  const readingState = state({
+    ...patch,
+    screen: { name: "reading", side },
+    shots: { [side]: shot },
+    readProgress: READINGS[name].progress,
+  });
+  return <FlowView state={readingState} actions={ACTIONS} debug={false} />;
 }
 
 export function Preview({ screen }: { screen: string }) {
   if (screen in CAPTURES) return <CapturePreviewScreen preview={CAPTURES[screen]} />;
-  if (screen in REVIEWS) return <ReviewPreview name={screen} />;
+  if (screen in REVIEWS) return <ReviewPreviewScreen name={screen} />;
+  if (screen in READINGS) return <ReadingPreviewScreen name={screen} />;
   const preview = STATES[screen];
   if (!preview) {
-    const names = [...Object.keys(STATES), ...Object.keys(CAPTURES), ...Object.keys(REVIEWS)];
+    const names = [...Object.keys(STATES), ...Object.keys(CAPTURES), ...Object.keys(READINGS), ...Object.keys(REVIEWS)];
     return (
       <main className="page">
         <h1>Unknown screen</h1>

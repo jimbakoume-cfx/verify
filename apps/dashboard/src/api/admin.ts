@@ -2,6 +2,8 @@
 import {
   type CaptureViewRequest,
   type CaptureViewResponse,
+  type DocumentDataRequest,
+  type DocumentDataResponse,
   type EnrollRequest,
   type EnrollResponse,
   functionUrl,
@@ -30,7 +32,7 @@ async function postAdmin<T>(path: string, body: unknown, accessToken: string | n
       method: "POST",
       headers,
       body: JSON.stringify(body),
-      // Nothing from these calls (tokens, signed links) belongs in the HTTP cache.
+      // Nothing from these calls (tokens, signed links, document data) belongs in the HTTP cache.
       cache: "no-store",
       credentials: "omit",
     });
@@ -54,4 +56,9 @@ export function createTestSession(accessToken: string, request: TestSessionReque
 
 export function viewCapture(accessToken: string, request: CaptureViewRequest): Promise<CaptureViewResponse> {
   return postAdmin<CaptureViewResponse>("/captures/view", request, accessToken);
+}
+
+/** The decrypted MRZ lines of a case. The server records the read in the audit log before decrypting. */
+export function documentData(accessToken: string, request: DocumentDataRequest): Promise<DocumentDataResponse> {
+  return postAdmin<DocumentDataResponse>("/document-data", request, accessToken);
 }

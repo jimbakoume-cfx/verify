@@ -1,7 +1,9 @@
 // An in-memory stand-in for the rider's side of the backend, installed with page.route: the "flow"
-// Edge Function (rules from docs/M1_SPEC.md, types from contract.ts), the signed storage upload and
-// the health RPC. It answers like the real server, records every request for assertions, and can
-// inject faults (an expired session, failing uploads).
+// Edge Function (rules from docs/M1_SPEC.md and docs/M2_SPEC.md, types from contract.ts), the signed
+// storage upload and the health RPC. It answers like the real server, records every request for
+// assertions, and can inject faults (an expired session, failing uploads). POST /mrz runs the real
+// handler's own validation and verdict (flow/validation.ts, assessMrzReport), so the reports the
+// tests see are judged exactly as the server judges them.
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { Page, Request, Route } from "@playwright/test";
 import {
@@ -17,12 +19,21 @@ import {
   type ErrorCode,
   type FlowSession,
   type FlowStatus,
+  MRZ_EXPECTATION,
+  type MrzCheckDetails,
+  type MrzReportRequest,
 } from "../../supabase/functions/_shared/contract";
+import { assessMrzReport } from "../../supabase/functions/flow/handler";
+import { validateMrzReport } from "../../supabase/functions/flow/validation";
 import { type JpegInfo, inspectJpeg } from "./jpeg";
 import { readFilePart } from "./multipart";
 
-/** What the rider app is built with for the E2E run (see playwright.config.ts). */
-export const SUPABASE_URL = "http://127.0.0.1:54321";
+/**
+ * What the rider app is built with for the E2E run (see playwright.config.ts). A *.supabase.co
+ * address, so the real CSP sent by the preview server (connect-src https://*.supabase.co) allows
+ * it, as it allows the real project. Only the page routes below answer it: nothing reaches the network.
+ */
+export const SUPABASE_URL = "https://e2e.supabase.co";
 export const PUBLISHABLE_KEY = "sb_publishable_e2e";
 const BUCKET = "id-captures";
 const FLOW_PREFIX = "/functions/v1/flow";
@@ -48,6 +59,24 @@ export interface StorageAttempt {
   status: number;
 }
 
+export interface AcceptedCapture {
+  /** As returned by POST /captures; MRZ reports name it. */
+  captureId: string;
+  path: string;
+  kind: CaptureSide;
+  quality: ClientQuality;
+  object: StoredObject;
+}
+
+/** An MRZ report the server recorded, with the verdict the real server gives it. */
+export interface RecordedMrzReport {
+  /** The request body, as the app sent it. */
+  body: MrzReportRequest;
+  outcome: "pass" | "flag";
+  /** check_result.details as the server would store them. */
+  details: MrzCheckDetails;
+}
+
 class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -69,7 +98,9 @@ export class FakeBackend {
   /** Objects in the bucket, by path. */
   readonly objects = new Map<string, StoredObject>();
   /** Captures accepted by POST /captures, in order. */
-  readonly captures: { path: string; kind: CaptureSide; quality: ClientQuality; object: StoredObject }[] = [];
+  readonly captures: AcceptedCapture[] = [];
+  /** MRZ reports recorded by POST /mrz, in order: one per photo (a repeated report changes nothing). */
+  readonly mrzReports: RecordedMrzReport[] = [];
   /** Requests the real backend would refuse or never receive: each one is a bug in the app. */
   readonly problems: string[] = [];
 
@@ -135,7 +166,7 @@ export class FakeBackend {
     );
   }
 
-  // Cross-origin from the app (localhost:<port> to 127.0.0.1:54321), so every answer needs CORS.
+  // Cross-origin from the app (localhost:<port> to e2e.supabase.co), so every answer needs CORS.
   #reply(route: Route, status: number, body: unknown): Promise<void> {
     const origin = route.request().headers()["origin"] ?? "*";
     return route.fulfill({
@@ -219,6 +250,8 @@ export class FakeBackend {
       }
       case "POST /captures":
         return this.#completeCapture(name, input);
+      case "POST /mrz":
+        return this.#recordMrz(name, input);
       case "POST /submit": {
         if (!this.declaredDocument) throw new ApiError(409, "missing_sides");
         if (REQUIRED_SIDES[this.declaredDocument].some((side) => !this.#latest.has(side))) throw new ApiError(409, "missing_sides");
@@ -249,16 +282,45 @@ export class FakeBackend {
     if (!object.jpeg) refuse("invalid_image");
     if (Math.max(object.jpeg!.width, object.jpeg!.height) < CAPTURE_LIMITS.minLongSide) refuse("image_resolution_too_low");
 
-    this.captures.push({ path, kind, quality, object });
+    const captureId = randomUUID();
+    this.captures.push({ captureId, path, kind, quality, object });
     this.#latest.set(kind, path);
     return {
-      captureId: randomUUID(),
+      captureId,
       byteSize: object.bytes.length,
       width: object.jpeg!.width,
       height: object.jpeg!.height,
       sha256: createHash("sha256").update(object.bytes).digest("hex"),
-      reusedElsewhere: false,
     };
+  }
+
+  /**
+   * POST /mrz, in the real handler's order: the declared document must carry an MRZ, the body must
+   * pass validateMrzReport (400 bad_request for a malformed field, 422 invalid_mrz for lines that are
+   * not an MRZ of the expected format), the capture must be one of this session's (404), of the side
+   * that carries the MRZ (422). The app should never be refused here: every refusal is a problem.
+   */
+  #recordMrz(name: string, input: Record<string, unknown>): unknown {
+    const refuse = (status: number, code: ErrorCode, why: string): never => {
+      this.problems.push(`${name}: ${why}`);
+      throw new ApiError(status, code);
+    };
+    if (!this.declaredDocument) refuse(409, "document_type_required", "no document chosen");
+    const expectation = MRZ_EXPECTATION[this.declaredDocument!];
+    if (!expectation) return refuse(422, "invalid_mrz", `${this.declaredDocument} carries no MRZ`);
+    const check = validateMrzReport(input, expectation.format);
+    if (!check.ok) return refuse(check.code === "bad_request" ? 400 : 422, check.code, check.message);
+    const capture = this.captures.find((c) => c.captureId === check.report.captureId);
+    if (!capture) return refuse(404, "not_found", `unknown capture ${check.report.captureId}`);
+    if (capture.kind !== expectation.side) refuse(422, "invalid_mrz", `capture of the ${capture.kind}, not the ${expectation.side}`);
+
+    // Idempotent per photo, like flow_record_mrz: a repeated report (an answer lost on the way back)
+    // is accepted and changes nothing.
+    if (!this.mrzReports.some((r) => r.body.captureId === check.report.captureId)) {
+      const { outcome, details } = assessMrzReport(check.report, expectation, new Date());
+      this.mrzReports.push({ body: input as unknown as MrzReportRequest, outcome, details });
+    }
+    return { recorded: true };
   }
 
   #checkQuality(name: string, quality: unknown): void {

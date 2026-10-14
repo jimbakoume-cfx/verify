@@ -1,11 +1,16 @@
-// Camera: a sharp, well-framed ID card, as a Full HD phone held upright sees it.
+// Camera: a sharp, well-framed ID card, as a Full HD phone held upright sees it. These tests declare
+// the old CNI, which has no code lines: nothing is read. The new CNI is in capture-cni-biometric.spec.ts.
 import { CONSENT_VERSION } from "../supabase/functions/_shared/contract";
 import { CARD_FLOW, expectAutoQuality, expectCleanPhoto } from "./support/expectations";
 import { cameraRequests, expect, liveCameraTracks, test } from "./support/fixtures";
 
 const readStoredToken = () => sessionStorage.getItem("verify.session");
 
-test("CNI happy path: both sides captured automatically, uploaded and submitted", async ({ page, rider, backend }) => {
+test("old CNI happy path: both sides captured automatically, uploaded and submitted, nothing read", async ({
+  page,
+  rider,
+  backend,
+}) => {
   await rider.open("?debug=1");
   // The token leaves the address bar before anything renders, and is kept for this tab only.
   await expect(rider.button("start")).toBeEnabled();
@@ -16,9 +21,9 @@ test("CNI happy path: both sides captured automatically, uploaded and submitted"
 
   await rider.start();
   await rider.acceptConsent();
-  await rider.chooseDocument("cni");
+  await rider.chooseDocument("cni_legacy");
 
-  await rider.autoCapture("cni", "document_front");
+  await rider.autoCapture("cni_legacy", "document_front");
   // The camera is released as soon as the photo is taken.
   expect(await liveCameraTracks(page)).toBe(0);
   const still = await rider.debugValues("still");
@@ -26,12 +31,16 @@ test("CNI happy path: both sides captured automatically, uploaded and submitted"
   expect(Number(still[rider.t("debug.framing")])).toBeGreaterThan(0.8);
   await rider.usePhoto();
   await rider.turnOver();
-  await rider.autoCapture("cni", "document_back");
+  await rider.autoCapture("cni_legacy", "document_back");
+  // The old card has no code lines: no reading, nothing about them on the review.
+  await expect(rider.mrzDebug).toHaveCount(0);
+  await expect(rider.mrzRead).toHaveCount(0);
   await rider.usePhoto();
 
   await expect(rider.heading("done.title")).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText(rider.t("done.next"))).toBeVisible();
   expect(await liveCameraTracks(page)).toBe(0);
+  expect(await rider.screensSeen()).not.toContain(rider.t("reading.title"));
 
   // The app asked for the back camera at Full HD, without audio (spec).
   const requests = await cameraRequests(page);
@@ -45,7 +54,7 @@ test("CNI happy path: both sides captured automatically, uploaded and submitted"
 
   expect(backend.routes).toEqual(CARD_FLOW);
   expect(backend.calls[1].body).toEqual({ consentVersion: CONSENT_VERSION, language: "fr" });
-  expect(backend.calls[2].body).toEqual({ declaredDocument: "cni" });
+  expect(backend.calls[2].body).toEqual({ declaredDocument: "cni_legacy" });
   expect(backend.calls.filter((c) => c.route === "POST /upload-url").map((c) => c.body)).toEqual([
     { kind: "document_front" },
     { kind: "document_back" },
@@ -65,8 +74,8 @@ test("upload failure: automatic retries, then the rider's retry succeeds without
   backend,
 }) => {
   backend.failUploads(3); // every automatic try of the first photo
-  await rider.begin("cni");
-  await rider.photographCard();
+  await rider.begin("cni_legacy");
+  await rider.photographCard("cni_legacy");
 
   await expect(page.locator(".upload-status")).toHaveText(rider.t("upload.retrying", { attempt: 2, tries: 3 }));
   await expect(rider.heading("upload.failedTitle")).toBeVisible({ timeout: 20_000 });
@@ -97,12 +106,12 @@ test("expired link: the expiry screen, and the token is forgotten", async ({ pag
 });
 
 test("session expiring during the photos: the upload ends on the expiry screen", async ({ page, rider, backend }) => {
-  await rider.begin("cni");
-  await rider.autoCapture("cni", "document_front");
+  await rider.begin("cni_legacy");
+  await rider.autoCapture("cni_legacy", "document_front");
   backend.expire(); // the 30 minutes run out while the rider is busy with the photos
   await rider.usePhoto();
   await rider.turnOver();
-  await rider.autoCapture("cni", "document_back");
+  await rider.autoCapture("cni_legacy", "document_back");
   await rider.usePhoto();
 
   await expect(rider.heading("sessionError.expiredTitle")).toBeVisible();
@@ -128,8 +137,8 @@ test.describe("language", () => {
 
     await rider.start();
     await rider.acceptConsent();
-    await rider.chooseDocument("cni");
-    await rider.autoCapture("cni", "document_front");
+    await rider.chooseDocument("cni_legacy");
+    await rider.autoCapture("cni_legacy", "document_front");
     const front = () => page.getByRole("img", { name: rider.t("review.alt", { side: rider.t("sides.document_front") }) });
     const photo = await front().getAttribute("src");
     expect(photo).toMatch(/^blob:/);
@@ -138,12 +147,12 @@ test.describe("language", () => {
     // Same screen, same photo, now in English; the choice is remembered.
     await expect(rider.heading("review.title")).toBeVisible();
     await expect(front()).toHaveAttribute("src", photo!);
-    await expect(page.getByText(`${rider.t("sides.document_front")} · ${rider.t("documents.cni")}`)).toBeVisible();
+    await expect(page.getByText(`${rider.t("sides.document_front")} · ${rider.t("documents.cni_legacy")}`)).toBeVisible();
     expect(await page.evaluate(() => localStorage.getItem("verify.lang"))).toBe("en");
 
     await rider.usePhoto();
     await rider.turnOver();
-    await rider.autoCapture("cni", "document_back");
+    await rider.autoCapture("cni_legacy", "document_back");
     await rider.usePhoto();
     await expect(rider.heading("done.title")).toBeVisible({ timeout: 20_000 });
 

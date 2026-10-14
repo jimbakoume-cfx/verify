@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
-import type { CaptureSide, ClientQuality, DeclaredDocument, FlowSession, FlowStatus } from "@verify/shared";
+import {
+  MRZ_TRIES_BEFORE_OVERRIDE,
+  REQUIRED_SIDES,
+  type CaptureSide,
+  type ClientQuality,
+  type DeclaredDocument,
+  type FlowSession,
+  type FlowStatus,
+  type MrzFormat,
+} from "@verify/shared";
 import type { Hint } from "@verify/capture";
+import type { MrzReadResult, MrzReadStatus } from "../mrz/types";
 import {
   type FlowAction,
   type FlowState,
@@ -11,6 +21,8 @@ import {
   flowReducer,
   handlesBack,
   initialFlowState,
+  mrzExpectationFor,
+  mrzReview,
   pendingShots,
   refusalHints,
 } from "./machine";
@@ -64,7 +76,7 @@ const cniChosen = run(
   ready,
   { type: "start" },
   { type: "consent/accepted", session: session({ status: "in_progress", consentGiven: true }) },
-  { type: "document/chosen", session: withDocument("cni", ["document_front", "document_back"]) },
+  { type: "document/chosen", session: withDocument("cni_legacy", ["document_front", "document_back"]) },
 );
 
 describe("initial state", () => {
@@ -159,7 +171,7 @@ describe("start, consent and document", () => {
   it("starts with the front once the document is chosen", () => {
     expect(cniChosen).toMatchObject({
       busy: false,
-      document: "cni",
+      document: "cni_legacy",
       sides: ["document_front", "document_back"],
       screen: { name: "capture", side: "document_front" },
     });
@@ -251,7 +263,7 @@ describe("capture and review", () => {
     let state = run(cniChosen, { type: "capture/taken", shot: shot("document_front") }, { type: "review/accept" });
     state = run(state, { type: "turnOver/ready" }, { type: "document/change" });
     expect(state.screen).toEqual({ name: "document" });
-    state = run(state, { type: "document/chosen", session: withDocument("cni", ["document_front", "document_back"]) });
+    state = run(state, { type: "document/chosen", session: withDocument("cni_legacy", ["document_front", "document_back"]) });
     expect(state.shots.document_front).toBeDefined();
     expect(state.screen).toEqual({ name: "turnOver", side: "document_back" });
   });
@@ -288,7 +300,7 @@ describe("upload", () => {
       running,
       { type: "upload/sideDone", side: "document_front" },
       { type: "upload/sideDone", side: "document_back" },
-      { type: "upload/submitted", session: withDocument("cni", ["document_front", "document_back"]) },
+      { type: "upload/submitted", session: withDocument("cni_legacy", ["document_front", "document_back"]) },
     );
     expect(state.screen).toEqual({ name: "done" });
     expect(state.upload.status).toBe("idle");
@@ -389,13 +401,262 @@ describe("the phone's Back button", () => {
     }
   });
 
-  it("is handled by the flow only on the camera, turn-over, review and upload screens", () => {
+  it("is handled by the flow only on the camera, turn-over, reading, review and upload screens", () => {
     expect(handlesBack({ name: "capture", side: "document_front" })).toBe(true);
     expect(handlesBack({ name: "turnOver", side: "document_back" })).toBe(true);
+    expect(handlesBack({ name: "reading", side: "document_back" })).toBe(true);
     expect(handlesBack({ name: "review", side: "document_back" })).toBe(true);
     expect(handlesBack({ name: "upload" })).toBe(true);
     for (const name of ["welcome", "consent", "declined", "document", "done"] as const) {
       expect(handlesBack({ name })).toBe(false);
     }
+  });
+});
+
+describe("reading the code lines (MRZ)", () => {
+  const gray = () => ({ width: 8, height: 4, data: new Uint8Array(32) });
+  /** A photo of `side` with its full-resolution grayscale copy, as the camera hands it over. */
+  const withGray = (side: CaptureSide, source: ClientQuality["source"] = "auto", hints: Hint[] = []): Shot => ({
+    ...shot(side, source, hints),
+    gray: gray(),
+  });
+  const LINES: Record<MrzFormat, string[]> = {
+    TD1: ["I<UTOD231458907<<<<<<<<<<<<<<<", "7408122F1204159UTO<<<<<<<<<<<6", "ERIKSSON<<ANNA<MARIA<<<<<<<<<<"],
+    TD3: ["P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<", "L898902C36UTO7408122F1204159ZE184226B<<<<<10"],
+  };
+  function read(status: MrzReadStatus, format: MrzFormat = "TD1"): MrzReadResult {
+    const lines = status === "valid" || status === "invalid" ? LINES[format] : null;
+    return { status, format, lines, parsed: null, corrections: 0, ms: 300, rawText: "", charHeight: 18, rotated: false };
+  }
+
+  function chosen(document: DeclaredDocument): FlowState {
+    return run(ready, { type: "document/chosen", session: withDocument(document, [...REQUIRED_SIDES[document]]) });
+  }
+  /** At the camera of the back of a two-sided document, the front accepted. */
+  function atBack(document: DeclaredDocument): FlowState {
+    return run(
+      chosen(document),
+      { type: "capture/taken", shot: shot("document_front") },
+      { type: "review/accept" },
+      { type: "turnOver/ready" },
+    );
+  }
+  /** Takes a photo of `side` and finishes reading it with `result`. */
+  function takeAndRead(state: FlowState, side: CaptureSide, result: MrzReadResult, photo = withGray(side)): FlowState {
+    const reading = run(state, { type: "capture/taken", shot: photo });
+    expect(reading.screen).toEqual({ name: "reading", side });
+    return run(reading, { type: "mrz/read", shot: photo, result });
+  }
+
+  it("knows which side carries the MRZ", () => {
+    expect(mrzExpectationFor("passport", "document_front")).toMatchObject({ format: "TD3", required: true });
+    expect(mrzExpectationFor("cni_biometric", "document_back")).toMatchObject({ format: "TD1", required: true });
+    expect(mrzExpectationFor("cni_biometric", "document_front")).toBeNull();
+    expect(mrzExpectationFor("residence_permit", "document_back")).toMatchObject({ required: false });
+    expect(mrzExpectationFor("cni_legacy", "document_back")).toBeNull();
+    expect(mrzExpectationFor(null, "document_front")).toBeNull();
+  });
+
+  it("reads the new CNI's back, then shows its review with the result and without the grayscale copy", () => {
+    let state = atBack("cni_biometric");
+    // The front carries no MRZ: straight to its review (checked by atBack's accept).
+    const photo = withGray("document_back");
+    state = run(state, { type: "capture/taken", shot: photo });
+    expect(state.screen).toEqual({ name: "reading", side: "document_back" });
+    expect(state.shots.document_back).toBe(photo);
+
+    state = run(state, { type: "mrz/read", shot: photo, result: read("valid") });
+    expect(state.screen).toEqual({ name: "review", side: "document_back" });
+    const kept = state.shots.document_back!;
+    expect(kept.gray).toBeNull();
+    expect(kept.mrz?.status).toBe("valid");
+    expect(kept.mrzAttempt).toBe(1);
+    expect(state.mrzReads).toEqual({ document_back: 1 });
+    expect(state.mrzFailures).toEqual({});
+    expect(mrzReview(state, kept)).toEqual({ status: "read" });
+    expect(canUseShot(state, kept)).toBe(true);
+    expect(run(state, { type: "review/accept" }).screen).toEqual({ name: "upload" });
+  });
+
+  it("reads the passport's photo page", () => {
+    const state = takeAndRead(chosen("passport"), "document_front", read("valid", "TD3"));
+    expect(state.screen).toEqual({ name: "review", side: "document_front" });
+    expect(mrzReview(state, state.shots.document_front!)).toEqual({ status: "read" });
+  });
+
+  it("does not read the old CNI, and drops any grayscale copy", () => {
+    const state = run(atBack("cni_legacy"), { type: "capture/taken", shot: withGray("document_back") });
+    expect(state.screen).toEqual({ name: "review", side: "document_back" });
+    expect(state.shots.document_back?.gray).toBeNull();
+    expect(state.shots.document_back?.mrz).toBeUndefined();
+    expect(state.mrzReads).toEqual({});
+  });
+
+  it("does not read a photo under the server's minimum resolution", () => {
+    const small = { ...withGray("document_front"), lowResolution: true };
+    const state = run(chosen("passport"), { type: "capture/taken", shot: small });
+    expect(state.screen).toEqual({ name: "review", side: "document_front" });
+    expect(state.shots.document_front?.gray).toBeNull();
+    expect(state.mrzReads).toEqual({});
+    expect(canUseShot(state, state.shots.document_front!)).toBe(false);
+  });
+
+  it("skips the reading screen when the phone could not keep a grayscale copy, which never blocks", () => {
+    const state = run(chosen("passport"), { type: "capture/taken", shot: shot("document_front") });
+    expect(state.screen).toEqual({ name: "review", side: "document_front" });
+    const kept = state.shots.document_front!;
+    expect(kept.mrz?.status).toBe("unavailable");
+    expect(kept.mrzAttempt).toBe(1);
+    expect(state.mrzFailures).toEqual({});
+    expect(mrzReview(state, kept)).toBeNull();
+    expect(canUseShot(state, kept)).toBe(true);
+  });
+
+  it("shows the first download's progress for the photo being read only", () => {
+    const photo = withGray("document_front");
+    const reading = run(chosen("passport"), { type: "capture/taken", shot: photo });
+    expect(reading.readProgress).toBeNull();
+    const half = run(reading, { type: "mrz/progress", shot: photo, progress: 0.4999 });
+    expect(half.readProgress).toBe(0.5);
+    // Same rounded value: same state (no re-render).
+    expect(run(half, { type: "mrz/progress", shot: photo, progress: 0.501 })).toBe(half);
+    expect(run(half, { type: "mrz/progress", shot: photo, progress: Number.NaN })).toBe(half);
+    expect(run(half, { type: "mrz/progress", shot: withGray("document_front"), progress: 0.9 })).toBe(half);
+    expect(run(half, { type: "mrz/read", shot: photo, result: read("valid", "TD3") }).readProgress).toBeNull();
+  });
+
+  it("goes back from the reading screen to the camera, and ignores the abandoned read", () => {
+    const photo = withGray("document_front");
+    const reading = run(chosen("passport"), { type: "capture/taken", shot: photo });
+    const back = run(reading, { type: "nav/back" });
+    expect(back.screen).toEqual({ name: "capture", side: "document_front" });
+    expect(back.shots.document_front).toBeUndefined();
+    expect(run(back, { type: "mrz/read", shot: photo, result: read("valid", "TD3") })).toBe(back);
+    expect(run(back, { type: "mrz/progress", shot: photo, progress: 0.3 })).toBe(back);
+
+    // The next photo is read normally; a late result for the first one still changes nothing.
+    const again = withGray("document_front");
+    const rereading = run(back, { type: "capture/taken", shot: again });
+    expect(run(rereading, { type: "mrz/read", shot: photo, result: read("not_found", "TD3") })).toBe(rereading);
+    const done = run(rereading, { type: "mrz/read", shot: again, result: read("valid", "TD3") });
+    expect(done.shots.document_front?.mrz?.status).toBe("valid");
+    // The abandoned read was never counted.
+    expect(done.shots.document_front?.mrzAttempt).toBe(1);
+  });
+
+  it("ignores a result once the review is showing (a duplicate)", () => {
+    const photo = withGray("document_front");
+    const reviewed = takeAndRead(chosen("passport"), "document_front", read("valid", "TD3"), photo);
+    expect(run(reviewed, { type: "mrz/read", shot: photo, result: read("not_found", "TD3") })).toBe(reviewed);
+  });
+
+  it(`asks for retakes, then offers "Continue anyway" after ${MRZ_TRIES_BEFORE_OVERRIDE} failed tries`, () => {
+    let state = atBack("cni_biometric");
+    const outcomes: MrzReadStatus[] = ["not_found", "invalid", "not_found"];
+    for (const [index, status] of outcomes.entries()) {
+      state = takeAndRead(state, "document_back", read(status));
+      const kept = state.shots.document_back!;
+      expect(kept.mrzAttempt).toBe(index + 1);
+      expect(state.mrzFailures.document_back).toBe(index + 1);
+      const last = index + 1 === MRZ_TRIES_BEFORE_OVERRIDE;
+      expect(mrzReview(state, kept)).toEqual({ status: "unread", format: "TD1", canContinue: last });
+      expect(canUseShot(state, kept)).toBe(last);
+      if (!last) {
+        expect(run(state, { type: "review/accept" })).toBe(state);
+        state = run(state, { type: "review/retake" });
+        expect(state.screen).toEqual({ name: "capture", side: "document_back" });
+      }
+    }
+    expect(run(state, { type: "review/accept" }).screen).toEqual({ name: "upload" });
+  });
+
+  it("needs no override when a later try reads the lines", () => {
+    let state = takeAndRead(chosen("passport"), "document_front", read("invalid", "TD3"));
+    expect(canUseShot(state, state.shots.document_front!)).toBe(false);
+    state = takeAndRead(run(state, { type: "review/retake" }), "document_front", read("valid", "TD3"));
+    expect(state.shots.document_front?.mrzAttempt).toBe(2);
+    expect(state.mrzFailures.document_front).toBe(1);
+    expect(mrzReview(state, state.shots.document_front!)).toEqual({ status: "read" });
+    expect(canUseShot(state, state.shots.document_front!)).toBe(true);
+  });
+
+  it("never blocks when the reader is unavailable, and does not count it as a failed try", () => {
+    const state = takeAndRead(chosen("passport"), "document_front", read("unavailable", "TD3"));
+    const kept = state.shots.document_front!;
+    expect(state.mrzFailures).toEqual({});
+    expect(state.mrzReads).toEqual({ document_front: 1 });
+    expect(mrzReview(state, kept)).toBeNull();
+    expect(canUseShot(state, kept)).toBe(true);
+    expect(run(state, { type: "review/accept" }).screen).toEqual({ name: "upload" });
+  });
+
+  it("never blocks on an optional MRZ (residence permit), but says when it was read", () => {
+    const unread = takeAndRead(atBack("residence_permit"), "document_back", read("not_found"));
+    const kept = unread.shots.document_back!;
+    expect(unread.mrzFailures).toEqual({});
+    expect(unread.mrzReads).toEqual({ document_back: 1 });
+    expect(mrzReview(unread, kept)).toBeNull();
+    expect(canUseShot(unread, kept)).toBe(true);
+    expect(run(unread, { type: "review/accept" }).screen).toEqual({ name: "upload" });
+
+    const readOk = takeAndRead(run(unread, { type: "review/retake" }), "document_back", read("valid"));
+    expect(mrzReview(readOk, readOk.shots.document_back!)).toEqual({ status: "read" });
+  });
+
+  it("needs both checks to allow a photo: blur and glare, and the code lines", () => {
+    const blurry = () => withGray("document_front", "manual", ["blurry"]);
+    let state = chosen("passport");
+    // Enough refusals for the blur override, but too few MRZ tries.
+    for (let i = 0; i < REFUSALS_BEFORE_OVERRIDE; i++) {
+      state = takeAndRead(state, "document_front", read("not_found", "TD3"), blurry());
+      if (i < REFUSALS_BEFORE_OVERRIDE - 1) state = run(state, { type: "review/retake" });
+    }
+    expect(state.refusals.document_front).toBe(REFUSALS_BEFORE_OVERRIDE);
+    expect(canUseShot(state, state.shots.document_front!)).toBe(false);
+    // The MRZ tries reach the override too: now both allow it.
+    while ((state.mrzFailures.document_front ?? 0) < MRZ_TRIES_BEFORE_OVERRIDE) {
+      state = takeAndRead(run(state, { type: "review/retake" }), "document_front", read("not_found", "TD3"), blurry());
+    }
+    expect(canUseShot(state, state.shots.document_front!)).toBe(true);
+
+    // Lines read, but a fresh blurry refusal not yet overridable: still refused.
+    const fresh = takeAndRead(chosen("passport"), "document_front", read("valid", "TD3"), blurry());
+    expect(mrzReview(fresh, fresh.shots.document_front!)).toEqual({ status: "read" });
+    expect(canUseShot(fresh, fresh.shots.document_front!)).toBe(false);
+  });
+
+  it("keeps the tries when the rider picks the same document again, and resets them for another", () => {
+    let state = takeAndRead(chosen("passport"), "document_front", read("not_found", "TD3"));
+    state = takeAndRead(run(state, { type: "review/retake" }), "document_front", read("invalid", "TD3"));
+    expect(state.mrzFailures.document_front).toBe(2);
+    state = run(state, { type: "document/change" });
+    expect(state.screen).toEqual({ name: "document" });
+
+    const same = run(state, { type: "document/chosen", session: withDocument("passport", ["document_front"]) });
+    expect(same.mrzFailures).toEqual({ document_front: 2 });
+    expect(same.mrzReads).toEqual({ document_front: 2 });
+
+    const other = run(state, {
+      type: "document/chosen",
+      session: withDocument("cni_biometric", ["document_front", "document_back"]),
+    });
+    expect(other.mrzFailures).toEqual({});
+    expect(other.mrzReads).toEqual({});
+    expect(other.shots).toEqual({});
+    expect(other.readProgress).toBeNull();
+  });
+
+  it("reads again after the server refused the photo", () => {
+    let state = takeAndRead(chosen("passport"), "document_front", read("valid", "TD3"));
+    state = run(
+      state,
+      { type: "review/accept" },
+      { type: "upload/started", progress: { done: 0, total: 5, phase: "link", photo: 1, photos: 1, attempt: 1 } },
+      { type: "upload/failed", error: "image_too_small", side: "document_front" },
+    );
+    expect(state.screen).toEqual({ name: "capture", side: "document_front" });
+    state = takeAndRead(state, "document_front", read("valid", "TD3"));
+    expect(state.shots.document_front?.mrzAttempt).toBe(2);
+    expect(pendingShots(state).map((s) => s.side)).toEqual(["document_front"]);
   });
 });

@@ -24,6 +24,7 @@ const DEFAULT_MESSAGES: Record<ErrorCode, string> = {
   image_too_small: "The image file is too small.",
   image_too_large: "The image file is too large.",
   image_resolution_too_low: "The image resolution is too low.",
+  invalid_mrz: "The code lines do not fit the declared document.",
   audit_failed: "The access could not be recorded, so it was refused.",
   invalid_invite: "The email or invite code is not valid.",
   weak_password: "The password does not meet the requirements.",

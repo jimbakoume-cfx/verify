@@ -2,10 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   type CaptureRecord,
   countCaptures,
+  MRZ_CHECK_COLUMNS,
   sessionOpen,
   sortCaptures,
   toCapture,
   toCaptureQuality,
+  toMrzCheck,
+  toMrzCheckDetails,
   toStaffProfile,
   toVerification,
   type VerificationSummary,
@@ -188,5 +191,137 @@ describe("sessionOpen", () => {
     expect(sessionOpen(base, at("2026-10-13T08:30:00Z"))).toBe(false);
     expect(sessionOpen({ ...base, status: "submitted" }, at("2026-10-13T08:10:00Z"))).toBe(false);
     expect(sessionOpen({ ...base, sessionExpiresAt: null }, at("2026-10-13T08:10:00Z"))).toBe(false);
+  });
+});
+
+describe("toMrzCheck", () => {
+  // As written by the flow function (assessMrzReport): outcomes and counts, no data from the document.
+  const details = {
+    source: "mrz_phone",
+    parserVersion: "mrz-v1",
+    captureId: "c2",
+    result: "read",
+    reason: null,
+    expectedFormat: "TD3",
+    format: "TD3",
+    checks: { documentNumber: true, birthDate: true, expiryDate: false, personalNumber: true, composite: false },
+    documentCodeFits: true,
+    datesValid: true,
+    attempts: 2,
+    corrections: 3,
+    engine: "tesseract.js-7.0.0/mrz-1",
+    ms: 812,
+  };
+  const row = {
+    id: "r1",
+    capture_id: "c2",
+    check_name: "mrz",
+    check_version: "mrz-v1",
+    outcome: "flag",
+    details,
+    created_at: "2026-10-14T08:10:00+00:00",
+  };
+
+  it("asks for the columns it reads", () => {
+    expect(MRZ_CHECK_COLUMNS.split(", ").sort()).toEqual(
+      ["capture_id", "check_name", "check_version", "created_at", "details", "id", "outcome"].sort(),
+    );
+  });
+
+  it("maps a result and its details", () => {
+    expect(toMrzCheck(row)).toEqual({
+      id: "r1",
+      captureId: "c2",
+      checkVersion: "mrz-v1",
+      outcome: "flag",
+      details,
+      createdAt: row.created_at,
+    });
+  });
+
+  it("reads an unreadable MRZ, which carries no checks", () => {
+    const unreadable = {
+      ...details,
+      result: "unreadable",
+      reason: "reader_unavailable",
+      format: null,
+      checks: null,
+      documentCodeFits: null,
+      datesValid: null,
+      corrections: null,
+      ms: null,
+    };
+    expect(toMrzCheck({ ...row, details: unreadable })?.details).toEqual(unreadable);
+  });
+
+  it("takes the photo from the details when the column is empty", () => {
+    expect(toMrzCheck({ ...row, capture_id: null })?.captureId).toBe("c2");
+  });
+
+  it("rejects rows of another check or with an unknown outcome", () => {
+    expect(toMrzCheck({ ...row, check_name: "ocr" })).toBeNull();
+    expect(toMrzCheck({ ...row, outcome: "maybe" })).toBeNull();
+    expect(toMrzCheck({ ...row, id: 3 })).toBeNull();
+    expect(toMrzCheck(null)).toBeNull();
+  });
+
+  it("keeps the outcome but drops details of an unknown shape", () => {
+    const check = toMrzCheck({ ...row, details: { source: "mrz_server", result: "read" } });
+    expect(check).toMatchObject({ outcome: "flag", details: null });
+  });
+});
+
+describe("toMrzCheckDetails", () => {
+  const base = {
+    source: "mrz_phone",
+    parserVersion: "mrz-v1",
+    captureId: "c2",
+    result: "read",
+    expectedFormat: "TD1",
+    attempts: 1,
+    engine: "e",
+  };
+
+  it("turns optional fields of the wrong type into null", () => {
+    expect(
+      toMrzCheckDetails({
+        ...base,
+        reason: "tired",
+        format: "TD2",
+        checks: { documentNumber: true, birthDate: "yes", expiryDate: true, composite: true },
+        documentCodeFits: "true",
+        datesValid: 1,
+        corrections: "3",
+        ms: Number.NaN,
+      }),
+    ).toEqual({
+      ...base,
+      reason: null,
+      format: null,
+      checks: null,
+      documentCodeFits: null,
+      datesValid: null,
+      corrections: null,
+      ms: null,
+    });
+  });
+
+  it("leaves out a personal number check that is not there (TD1)", () => {
+    const checks = toMrzCheckDetails({
+      ...base,
+      checks: { documentNumber: true, birthDate: true, expiryDate: true, composite: true },
+    })?.checks;
+    expect(checks).toEqual({ documentNumber: true, birthDate: true, expiryDate: true, composite: true });
+    expect(checks && "personalNumber" in checks).toBe(false);
+  });
+
+  it("needs the fields every result carries", () => {
+    for (const key of Object.keys(base)) {
+      const { [key]: _removed, ...rest } = base as Record<string, unknown>;
+      expect(toMrzCheckDetails(rest), key).toBeNull();
+    }
+    expect(toMrzCheckDetails({ ...base, expectedFormat: "TD2" })).toBeNull();
+    expect(toMrzCheckDetails({ ...base, result: "partly" })).toBeNull();
+    expect(toMrzCheckDetails([base])).toBeNull();
   });
 });

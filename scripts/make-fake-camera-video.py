@@ -3,11 +3,15 @@
 
     chrome --use-fake-device-for-media-stream --use-file-for-fake-video-capture=<file.y4m>
 
-The scene is a clearly fake ID card ("SPECIMEN", made-up fields, a portrait box and MRZ-like
-lines) lying on a darker textured table, with a slight hand jitter and exposure drift. Nothing in
-it resembles a real document. Variants:
+The scene is a clearly fake ID card ("SPECIMEN", made-up fields, a portrait box) lying on a
+darker textured table, with a slight hand jitter and exposure drift. Nothing in it resembles a real
+document. Its code lines (MRZ) are the fictitious specimen lines rendered in OCR-B by
+scripts/make-mrz-fixtures.py: the bare strips in e2e/fixtures/mrz are read from there and pasted
+at their physical size and place (manifest.json), so the rider app's reader sees real MRZ
+characters with valid check digits. Variants:
     sharp    the card, in focus, filling the rider app's guide
     blurred  the same card, heavily out of focus
+    smudged  the card in focus, but its code lines smudged (they cannot be read)
     none     the table only, no card
 
 The card is placed where the rider app's guide falls in the video: the guide is measured in CSS
@@ -19,18 +23,23 @@ Pure Python standard library (no numpy), so it runs on any CI image. The playbac
 jitter and exposure paths are periodic, so the loop point is seamless.
 
 Usage:
-    python3 scripts/make-fake-camera-video.py OUT.y4m [--variant sharp|blurred|none]
+    python3 scripts/make-fake-camera-video.py OUT.y4m [--variant sharp|blurred|smudged|none]
         [--document id1|passport] [--size 1280x720] [--fps 30] [--seconds 4] [--viewport 390x844]
-        [--guide X,Y,W,H] [--fill 0.93] [--blur 0.012] [--seed 7]
+        [--guide X,Y,W,H] [--fill 0.93] [--blur 0.012] [--seed 7] [--fixtures DIR]
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import random
 import sys
 from itertools import accumulate
+from pathlib import Path
+
+# The MRZ strips and their manifest (written by scripts/make-mrz-fixtures.py).
+DEFAULT_FIXTURES = Path(__file__).resolve().parent.parent / "e2e" / "fixtures" / "mrz"
 
 # Luma (Y) in video range, 16..235: Chromium converts it to RGB with the limited-range rule, so
 # 235 is already white. The card stays well under the analysis glare level (RGB 250 = Y 233).
@@ -104,19 +113,20 @@ GLYPH_W, GLYPH_H, ADVANCE = 5, 7, 6
 FIELDS = [("NOM", "SPECIMEN"), ("PRENOM", "TEST E2E"), ("NE LE", "01.01.1990"), ("NO", "E2E-000000")]
 STAMP = "SPECIMEN"
 
-# Per document: header text, MRZ-like lines, corner radius (share of the width), and the default
-# guide: where the rider app draws it on a 390x844 screen, in CSS pixels, measured on the capture
-# screen with a one-line hint (a two-line hint moves it down 2 px; that does not matter here).
+# Per document: header text, the MRZ strip it carries (a document of manifest.json), corner radius
+# (share of the width), and the default guide: where the rider app draws it on a 390x844 screen, in
+# CSS pixels, measured on the capture screen with a one-line hint (a two-line hint moves it down
+# 2 px; that does not matter here).
 DOCUMENTS = {
-    "id1": {  # ID-1 card (CNI, residence permit, licence, voter card): 85.6 x 53.98 mm
+    "id1": {  # ID-1 card (CNI, residence permit, licence, voter card): 85.6 x 53.98 mm, TD1 code lines
         "band": "FAKE ID - SPECIMEN",
-        "mrz": ["IDXFK<SPECIMEN<<TEST<E2E<<<<<<", "0000000000XFK9001017M3001019<<<"],
+        "mrz": "td1",
         "radius": 0.037,
         "guide": "15.6,338.5,358.8,226.3",
     },
     "passport": {  # TD3 passport data page: 125 x 88 mm
         "band": "FAKE PASSPORT - SPECIMEN",
-        "mrz": ["P<XFKSPECIMEN<<TEST<E2E<<<<<<<<<<<<<<<<<<<<<", "E2E0000000XFK9001017M3001019<<<<<<<<<<<<<<00"],
+        "mrz": "td3",
         "radius": 0.025,
         "guide": "15.6,325.4,358.8,252.6",
     },
@@ -206,9 +216,103 @@ def text_scale(width_px: float, chars: int, height_px: float) -> int:
     return max(1, min(int(width_px / (chars * ADVANCE)), int(height_px / GLYPH_H)))
 
 
-def draw_card(y_plane: Plane, u_plane: Plane, v_plane: Plane, card: tuple[float, float, float, float], doc: dict) -> None:
+def read_pgm(path: Path) -> tuple[int, int, bytes]:
+    """A binary 8-bit PGM (P5): width, height and the pixels, row by row."""
+    data = path.read_bytes()
+    fields: list[bytes] = []
+    pos = 0
+    while len(fields) < 4:
+        while data[pos : pos + 1].isspace():
+            pos += 1
+        if data[pos : pos + 1] == b"#":  # a comment runs to the end of the line
+            pos = data.index(b"\n", pos) + 1
+            continue
+        end = pos
+        while not data[end : end + 1].isspace():
+            end += 1
+        fields.append(data[pos:end])
+        pos = end
+    if fields[0] != b"P5" or fields[3] != b"255":
+        raise ValueError(f"{path}: not an 8-bit binary PGM")
+    width, height = int(fields[1]), int(fields[2])
+    pixels = data[pos + 1 : pos + 1 + width * height]  # a single whitespace ends the header
+    if len(pixels) != width * height:
+        raise ValueError(f"{path}: truncated")
+    return width, height, pixels
+
+
+def load_strip(fixtures: Path, document: str, smudged: bool) -> dict:
+    """The code-line strip of `document` ("td1" or "td3") from manifest.json: its pixels (black ink on
+    white), physical size, and where it sits on the document."""
+    manifest = json.loads((fixtures / "manifest.json").read_text())
+    strip = next(s for s in manifest["strips"] if s["document"] == document and s["smudged"] == smudged)
+    width, height, pixels = read_pgm(fixtures / strip["file"])
+    return {
+        "width": width,
+        "height": height,
+        "pixels": pixels,
+        "size_mm": (strip["widthMm"], strip["heightMm"]),
+        "placement_mm": (strip["placementFromBottomLeft"]["leftMm"], strip["placementFromBottomLeft"]["bottomMm"]),
+        "document_mm": tuple(manifest["documents"][document]["sizeMm"]),
+    }
+
+
+def resample_weights(src_len: int, src_per_dst: float, start: float, first: int, count: int) -> list[list[tuple[int, float]]]:
+    """For destination pixels first..first+count-1 (a strip whose edge is at `start` in destination
+    pixels), the source pixels and weights of a triangle filter, widened when shrinking so that
+    every source pixel counts (no aliasing). Source pixels outside the strip are left out: they
+    are paper, like the strip's own margin."""
+    support = max(1.0, src_per_dst)
+    out = []
+    for x in range(first, first + count):
+        u = (x + 0.5 - start) * src_per_dst  # the destination pixel's centre, in source pixels
+        lo, hi = max(0, math.floor(u - support)), min(src_len, math.ceil(u + support) + 1)
+        taps = [(i, 1 - abs(i + 0.5 - u) / support) for i in range(lo, hi)]
+        out.append([(i, w) for i, w in taps if w > 0])
+    return out
+
+
+def paste_strip(y_plane: Plane, card: tuple[float, float, float, float], strip: dict) -> None:
+    """Prints the strip on the card at its physical size and place, resampled to the card's scale.
+    The ink darkens what is under it (multiply), so the card's own pattern shows through the paper."""
+    cx, cy, cw, ch = card
+    doc_w_mm, doc_h_mm = strip["document_mm"]
+    px_per_mm = cw / doc_w_mm
+    (w_mm, h_mm), (left_mm, bottom_mm) = strip["size_mm"], strip["placement_mm"]
+    x0, y0 = cx + left_mm * px_per_mm, cy + ch - (bottom_mm + h_mm) * px_per_mm
+    sw, sh, pixels = strip["width"], strip["height"], strip["pixels"]
+    first_x, first_y = math.floor(x0), math.floor(y0)
+    cols = resample_weights(sw, sw / (w_mm * px_per_mm), x0, first_x, math.ceil(x0 + w_mm * px_per_mm) - first_x)
+    rows = resample_weights(sh, sh / (h_mm * px_per_mm), y0, first_y, math.ceil(y0 + h_mm * px_per_mm) - first_y)
+    # Horizontal pass on every source row, then the vertical pass. Missing taps count as paper (255).
+    wide = []
+    for r in range(sh):
+        line = pixels[r * sw : (r + 1) * sw]
+        wide.append([sum(line[i] * w for i, w in taps) + 255 * (1 - sum(w for _, w in taps)) if taps else 255.0 for taps in cols])
+    ink_scale = (CARD_LUMA - INK_LUMA) / 255
+    for dy, taps in enumerate(rows):
+        y = first_y + dy
+        if not 0 <= y < y_plane.height:
+            continue
+        total = sum(w for _, w in taps)
+        row = y_plane.rows[y]
+        for dx in range(len(cols)):
+            x = first_x + dx
+            if not 0 <= x < y_plane.width:
+                continue
+            value = sum(wide[i][dx] * w for i, w in taps) + 255 * (1 - total) if taps else 255.0
+            row[x] = clamp8(row[x] * (INK_LUMA + ink_scale * value) / CARD_LUMA + 0.5)
+
+
+def draw_card(
+    y_plane: Plane, u_plane: Plane, v_plane: Plane, card: tuple[float, float, float, float], doc: dict, strip: dict
+) -> None:
     cx, cy, cw, ch = card
     radius = doc["radius"] * cw
+    # Everything else stays above the code lines, as on a real document (ICAO's clear zone).
+    _, doc_h_mm = strip["document_mm"]
+    mrz_top = 1 - (strip["placement_mm"][1] + strip["size_mm"][1]) / doc_h_mm
+    content_bottom = mrz_top - 0.03
 
     # Body with rounded corners, and a faint diagonal guilloche (a periodic row pattern, shifted per row).
     period = max(6, round(cw / 60))
@@ -242,7 +346,7 @@ def draw_card(y_plane: Plane, u_plane: Plane, v_plane: Plane, card: tuple[float,
 
     # Portrait box with a plain silhouette.
     px0, py0 = at(0.05, 0.26)
-    px1, py1 = at(0.3, 0.76)
+    px1, py1 = at(0.3, content_bottom)
     pw, ph = px1 - px0, py1 - py0
     y_plane.fill(px0, py0, px1, py1, PHOTO_LUMA)
     head_x, head_y, head_r = px0 + pw / 2, py0 + 0.38 * ph, 0.21 * pw
@@ -255,9 +359,9 @@ def draw_card(y_plane: Plane, u_plane: Plane, v_plane: Plane, card: tuple[float,
             if in_head or in_body:
                 row[x] = SILHOUETTE_LUMA
 
-    # Fields: label in grey, value in dark ink.
+    # Fields: label in grey, value in dark ink; four rows, then the stamp, down to the code lines.
     fx0, fy = at(0.35, 0.27)
-    line_h = 0.11 * ch
+    line_h = (content_bottom - 0.27) / (len(FIELDS) + 1) * ch
     longest = max(len(f"{k}: {v}") for k, v in FIELDS)
     s = text_scale(0.6 * cw, longest, 0.55 * line_h)
     for label, value in FIELDS:
@@ -265,19 +369,15 @@ def draw_card(y_plane: Plane, u_plane: Plane, v_plane: Plane, card: tuple[float,
         draw_text(y_plane, x + ADVANCE * s, fy, value, s, INK_LUMA)
         fy += line_h
 
-    # Red "SPECIMEN" stamp across the lower right.
-    sx0, sy0 = at(0.36, 0.7)
-    s = text_scale(0.56 * cw, len(STAMP), 0.12 * ch)
+    # Red "SPECIMEN" stamp across the lower right, above the code lines.
+    sx0, sy0 = fx0 + 0.01 * cw, fy
+    s = text_scale(0.56 * cw, len(STAMP), min(0.12 * ch, 0.8 * line_h))
     end = draw_text(y_plane, sx0, sy0, STAMP, s, STAMP_LUMA)
     u_plane.fill(sx0 / 2, sy0 / 2, end / 2, (sy0 + GLYPH_H * s) / 2, STAMP_CHROMA[0])
     v_plane.fill(sx0 / 2, sy0 / 2, end / 2, (sy0 + GLYPH_H * s) / 2, STAMP_CHROMA[1])
 
-    # Two MRZ-like lines at the bottom.
-    mx0, my = at(0.05, 0.83)
-    s = text_scale(0.9 * cw, max(len(line) for line in doc["mrz"]), 0.06 * ch)
-    for line in doc["mrz"]:
-        draw_text(y_plane, mx0, my, line, s, INK_LUMA)
-        my += (GLYPH_H + 3) * s
+    # The code lines: the real OCR-B strip, at its physical size and place.
+    paste_strip(y_plane, card, strip)
 
 
 def box_blur(plane: Plane, radius: int, passes: int = 3) -> None:
@@ -326,7 +426,7 @@ def write_y4m(path: str, frames: int, fps: int, size: tuple[int, int], planes: t
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("output", help="the .y4m file to write")
-    parser.add_argument("--variant", choices=["sharp", "blurred", "none"], default="sharp")
+    parser.add_argument("--variant", choices=["sharp", "blurred", "smudged", "none"], default="sharp")
     parser.add_argument("--document", choices=sorted(DOCUMENTS), default="id1", help="card shape and content")
     parser.add_argument("--size", default="1280x720", help="video size WxH (even numbers)")
     parser.add_argument("--fps", type=int, default=30)
@@ -339,6 +439,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--fill", type=float, default=0.93, help="card width as a share of the guide width")
     parser.add_argument("--blur", type=float, default=0.012, help="blur radius as a share of the card width (blurred variant)")
     parser.add_argument("--seed", type=int, default=7)
+    parser.add_argument("--fixtures", type=Path, default=DEFAULT_FIXTURES, help="folder of the MRZ strips and manifest.json")
     args = parser.parse_args(argv)
 
     w, h = parse_pair(args.size)
@@ -361,7 +462,8 @@ def main(argv: list[str]) -> int:
     cw, ch = gw * args.fill, gh * args.fill
     card = (MARGIN + gx + (gw - cw) / 2, MARGIN + gy + (gh - ch) / 2, cw, ch)
     if args.variant != "none":
-        draw_card(y_plane, u_plane, v_plane, card, doc)
+        strip = load_strip(args.fixtures, doc["mrz"], smudged=args.variant == "smudged")
+        draw_card(y_plane, u_plane, v_plane, card, doc, strip)
     if args.variant == "blurred":
         radius = max(1, round(args.blur * cw))
         box_blur(y_plane, radius)

@@ -6,6 +6,8 @@ import {
   type ConsentRequest,
   type DocumentTypeRequest,
   type FlowSession,
+  type MrzReportRequest,
+  type MrzReportResponse,
   type UploadUrlRequest,
   type UploadUrlResponse,
 } from "@verify/shared";
@@ -17,6 +19,8 @@ export interface FlowApi {
   setDocumentType(body: DocumentTypeRequest): Promise<FlowSession>;
   uploadUrl(body: UploadUrlRequest): Promise<UploadUrlResponse>;
   completeCapture(body: CaptureCompleteRequest): Promise<CaptureCompleteResponse>;
+  /** What the phone read from the MRZ of a capture (M2). */
+  reportMrz(body: MrzReportRequest): Promise<MrzReportResponse>;
   submit(): Promise<FlowSession>;
 }
 
@@ -89,6 +93,7 @@ export function createFlowApi(options: FlowApiOptions): FlowApi {
     setDocumentType: (body) => call<FlowSession>("POST", "/document-type", body),
     uploadUrl: (body) => call<UploadUrlResponse>("POST", "/upload-url", body),
     completeCapture: (body) => call<CaptureCompleteResponse>("POST", "/captures", body),
+    reportMrz: (body) => call<MrzReportResponse>("POST", "/mrz", body),
     submit: () => call<FlowSession>("POST", "/submit", {}),
   };
 }

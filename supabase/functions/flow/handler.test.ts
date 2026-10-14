@@ -7,23 +7,30 @@ import {
   type ClientQuality,
   CONSENT_VERSION,
   type FlowSession,
+  MRZ_REPORT_LIMITS,
+  type MrzCheckDetails,
   REQUIRED_SIDES,
 } from "../_shared/contract.ts";
 import { randomToken, sha256Hex } from "../_shared/crypto.ts";
+import { checkDigit, MRZ_PARSER_VERSION } from "../_shared/mrz.ts";
 import { ALLOWED_ORIGIN, buildJpeg, type CallOptions, makeRequest, readJson } from "../_shared/test-helpers.ts";
 import {
+  assessMrzReport,
   type CaptureStorage,
   checkImage,
   createFlowHandler,
   type FlowRepo,
   type FlowVerification,
+  type MrzRecord,
+  type MrzRecordResult,
   type NewCapture,
   type StoredCapture,
   type SubmitResult,
 } from "./handler.ts";
 
 // ---------------------------------------------------------------------------
-// In-memory fakes. submit() and claimUploadSlot() mirror the SQL functions in the M1 migration.
+// In-memory fakes. submit() and claimUploadSlot() mirror the SQL functions in the M1 migration,
+// recordMrz() mirrors flow_record_mrz in the M2 migration.
 // ---------------------------------------------------------------------------
 interface VerificationRecord extends FlowVerification {
   tokenHash: string;
@@ -43,9 +50,12 @@ class MemoryFlowRepo implements FlowRepo {
   captures: CaptureRecord[] = [];
   audits: AuditEntry[] = [];
   reviewTasks: { verificationId: string; status: string }[] = [];
+  mrzRecords: MrzRecord[] = [];
   /** Name of a method that throws, to exercise the 500 path. */
   failOn: keyof FlowRepo | null = null;
   submitOverride: SubmitResult | null = null;
+  /** Simulates a capture erased between the handler's lookup and the RPC. */
+  recordMrzOverride: MrzRecordResult | null = null;
   private clock = Date.parse("2026-10-13T09:00:00Z");
 
   private maybeFail(method: keyof FlowRepo, detail: string) {
@@ -151,6 +161,32 @@ class MemoryFlowRepo implements FlowRepo {
     return "ok";
   }
 
+  async findActiveCapture(verificationId: string, captureId: string) {
+    const c = this.captures.find((x) => x.id === captureId && x.verificationId === verificationId && !x.deletedAt);
+    return c ? { kind: c.kind as string } : null;
+  }
+
+  async recordMrz(record: MrzRecord): Promise<MrzRecordResult> {
+    // The detail carries the lines on purpose: the logs must not repeat them.
+    this.maybeFail("recordMrz", record.lines ?? "no lines");
+    if (this.recordMrzOverride) return this.recordMrzOverride;
+    const live = this.captures.some((c) =>
+      c.id === record.captureId && c.verificationId === record.verificationId && !c.deletedAt
+    );
+    if (!live) return "not_found";
+    if (this.mrzRecords.some((r) => r.captureId === record.captureId)) return "exists";
+    this.mrzRecords.push(structuredClone(record));
+    this.audits.push({
+      actorType: "rider",
+      actorId: record.verificationId,
+      action: "mrz.record",
+      targetType: "verification",
+      targetId: record.verificationId,
+      details: { captureId: record.captureId, outcome: record.outcome, result: record.details.result },
+    });
+    return "ok";
+  }
+
   async audit(entry: AuditEntry) {
     this.maybeFail("audit", entry.action);
     this.audits.push(entry);
@@ -234,7 +270,7 @@ function setup() {
 
   /** A session with consent and a declared CNI, ready for uploads. */
   function ready(overrides: Partial<VerificationRecord> = {}) {
-    return seed({ status: "in_progress", declaredDocument: "cni", ...overrides }, { consent: true });
+    return seed({ status: "in_progress", declaredDocument: "cni_legacy", ...overrides }, { consent: true });
   }
 
   function call(path: string, token: string | null, options: CallOptions = {}) {
@@ -288,9 +324,10 @@ describe("session lookup", () => {
   const routes: [string, CallOptions][] = [
     ["/session", {}],
     ["/consent", { body: { consentVersion: CONSENT_VERSION, language: "fr" } }],
-    ["/document-type", { body: { declaredDocument: "cni" } }],
+    ["/document-type", { body: { declaredDocument: "cni_legacy" } }],
     ["/upload-url", { body: { kind: "document_front" } }],
     ["/captures", { body: {} }],
+    ["/mrz", { body: {} }],
     ["/submit", {}],
   ];
 
@@ -336,7 +373,7 @@ describe("session lookup", () => {
     "status %s: every route but GET /session -> 409 already_submitted",
     async (status) => {
       const { call, seed } = setup();
-      const { token } = await seed({ status, declaredDocument: "cni" }, { consent: true });
+      const { token } = await seed({ status, declaredDocument: "cni_legacy" }, { consent: true });
       expect((await call("/session", token)).status).toBe(200);
       for (const [path, options] of routes.slice(1)) {
         await expectError(await call(path, token, options), 409, "already_submitted");
@@ -401,7 +438,7 @@ describe("GET /session", () => {
     const session: FlowSession = await (await call("/session", token)).json();
     expect(session.verificationId).toBe(id);
     expect(session.consentGiven).toBe(true);
-    expect(session.declaredDocument).toBe("cni");
+    expect(session.declaredDocument).toBe("cni_legacy");
     expect(session.requiredSides).toEqual(["document_front", "document_back"]);
     expect(session.captures).toEqual([{ kind: "document_front", createdAt: fronts[1].createdAt }]);
   });
@@ -496,10 +533,15 @@ describe("POST /document-type", () => {
   it("requires consent -> 403 consent_required", async () => {
     const { call, seed } = setup();
     const { token } = await seed();
-    await expectError(await call("/document-type", token, { body: { declaredDocument: "cni" } }), 403, "consent_required");
+    await expectError(await call("/document-type", token, { body: { declaredDocument: "cni_legacy" } }), 403, "consent_required");
   });
 
-  it.each([["unknown", { declaredDocument: "library_card" }], ["missing", {}], ["not a string", { declaredDocument: 3 }]])(
+  it.each([
+    ["unknown", { declaredDocument: "library_card" }],
+    ["the M1 CNI", { declaredDocument: "cni" }],
+    ["missing", {}],
+    ["not a string", { declaredDocument: 3 }],
+  ])(
     "%s document -> 400 bad_request",
     async (_label, body) => {
       const { call, seed } = setup();
@@ -508,17 +550,24 @@ describe("POST /document-type", () => {
     },
   );
 
+  it.each(["cni_biometric", "cni_legacy"] as const)("accepts the CNI choice %s, with both sides", async (declaredDocument) => {
+    const { call, seed } = setup();
+    const { token } = await seed({ status: "in_progress" }, { consent: true });
+    const session: FlowSession = await (await call("/document-type", token, { body: { declaredDocument } })).json();
+    expect(session).toMatchObject({ declaredDocument, requiredSides: ["document_front", "document_back"] });
+  });
+
   it("declares the document, audits, and may change it before submit", async () => {
     const { call, seed, repo } = setup();
     const { id, token } = await seed({ status: "in_progress" }, { consent: true });
-    const first: FlowSession = await (await call("/document-type", token, { body: { declaredDocument: "cni" } })).json();
-    expect(first).toMatchObject({ declaredDocument: "cni", requiredSides: ["document_front", "document_back"] });
+    const first: FlowSession = await (await call("/document-type", token, { body: { declaredDocument: "cni_legacy" } })).json();
+    expect(first).toMatchObject({ declaredDocument: "cni_legacy", requiredSides: ["document_front", "document_back"] });
     const second: FlowSession = await (await call("/document-type", token, { body: { declaredDocument: "passport" } }))
       .json();
     expect(second).toMatchObject({ declaredDocument: "passport", requiredSides: ["document_front"] });
     expect(repo.verifications.get(id)!.declaredDocument).toBe("passport");
     expect(repo.audits.map((a) => [a.action, a.details])).toEqual([
-      ["document.declare", { declaredDocument: "cni" }],
+      ["document.declare", { declaredDocument: "cni_legacy" }],
       ["document.declare", { declaredDocument: "passport" }],
     ]);
     expect(repo.audits[0]).toMatchObject({ actorType: "rider", actorId: id, targetType: "verification", targetId: id });
@@ -526,14 +575,14 @@ describe("POST /document-type", () => {
 
   it("a submit landing first wins: 409 already_submitted and no audit of a change that did not happen", async () => {
     const { call, seed, repo } = setup();
-    const { id, token } = await seed({ status: "in_progress", declaredDocument: "cni" }, { consent: true });
+    const { id, token } = await seed({ status: "in_progress", declaredDocument: "cni_legacy" }, { consent: true });
     repo.closeBeforeDeclare = true;
     await expectError(
       await call("/document-type", token, { body: { declaredDocument: "passport" } }),
       409,
       "already_submitted",
     );
-    expect(repo.verifications.get(id)!.declaredDocument).toBe("cni");
+    expect(repo.verifications.get(id)!.declaredDocument).toBe("cni_legacy");
     expect(repo.audits.filter((a) => a.action === "document.declare")).toEqual([]);
   });
 });
@@ -544,7 +593,7 @@ describe("POST /document-type", () => {
 describe("POST /upload-url", () => {
   it("requires consent -> 403 consent_required", async () => {
     const { call, seed } = setup();
-    const { token } = await seed({ declaredDocument: "cni" });
+    const { token } = await seed({ declaredDocument: "cni_legacy" });
     await expectError(await call("/upload-url", token, { body: { kind: "document_front" } }), 403, "consent_required");
   });
 
@@ -841,6 +890,486 @@ describe("POST /submit", () => {
 });
 
 // ---------------------------------------------------------------------------
+// POST /mrz
+// ---------------------------------------------------------------------------
+// ICAO Doc 9303 specimens (fictitious state "UTO"): every check digit right, real dates.
+const TD1 = [
+  "I<UTOD231458907<<<<<<<<<<<<<<<",
+  "7408122F1204159UTO<<<<<<<<<<<6",
+  "ERIKSSON<<ANNA<MARIA<<<<<<<<<<",
+];
+const TD3 = [
+  "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<",
+  "L898902C36UTO7408122F1204159ZE184226B<<<<<10",
+];
+const ENGINE = "tesseract.js-7.0.0/mrz-1";
+/** Values read from the specimens: none of them may reach a log, an audit entry or check_result. */
+const READ_VALUES = ["ERIKSSON", "ANNA", "MARIA", "D23145890", "L898902C3", "ZE184226B", "740812", "120415", "UTO", "<<"];
+
+/** Overwrites line `line` from `index` with `text`. */
+function edit(lines: readonly string[], line: number, index: number, text: string): string[] {
+  return lines.map((l, i) => (i === line ? l.slice(0, index) + text + l.slice(index + text.length) : l));
+}
+
+/** The TD1 specimen with another birth date, its check digit and the composite check digit made right. */
+function td1WithBirthDate(birth: string): string[] {
+  const lines = edit(TD1, 1, 0, birth + checkDigit(birth));
+  const composite = checkDigit(lines[0].slice(5, 30) + lines[1].slice(0, 7) + lines[1].slice(8, 15) + lines[1].slice(18, 29));
+  return edit(lines, 1, 29, String(composite));
+}
+
+/** The TD3 specimen with another birth date, its check digit and the composite check digit made right. */
+function td3WithBirthDate(birth: string): string[] {
+  const lines = edit(TD3, 1, 13, birth + checkDigit(birth));
+  const composite = checkDigit(lines[1].slice(0, 10) + lines[1].slice(13, 20) + lines[1].slice(21, 43));
+  return edit(lines, 1, 43, String(composite));
+}
+
+function readReport(captureId: string, lines: readonly string[], overrides: Record<string, unknown> = {}) {
+  return { captureId, result: "read", lines, attempts: 1, corrections: 2, engine: ENGINE, ms: 850, ...overrides };
+}
+
+function unreadableReport(captureId: string, overrides: Record<string, unknown> = {}) {
+  return { captureId, result: "unreadable", reason: "not_found", attempts: 3, engine: ENGINE, ...overrides };
+}
+
+describe("POST /mrz", () => {
+  /** A session for `document` with every side photographed; returns the capture id of each side. */
+  async function photographed(h: ReturnType<typeof setup>, declaredDocument: VerificationRecord["declaredDocument"]) {
+    const session = await h.ready({ declaredDocument });
+    const ids: Partial<Record<CaptureSide, string>> = {};
+    for (const kind of REQUIRED_SIDES[declaredDocument!]) {
+      const res = await h.complete(session.token, kind, buildJpeg({ width: 1600, height: 1009, padTo: 30_000 + h.repo.captures.length }));
+      expect(res.status).toBe(200);
+      ids[kind] = (await readJson(res)).captureId as string;
+    }
+    return { ...session, front: ids.document_front!, back: ids.document_back };
+  }
+
+  it("records a valid new-CNI read from the back as pass, with the details and an audit entry", async () => {
+    const h = setup();
+    const { id, token, back } = await photographed(h, "cni_biometric");
+    const res = await h.call("/mrz", token, { body: readReport(back!, TD1) });
+    expect(res.status).toBe(200);
+    expect(await readJson(res)).toEqual({ recorded: true });
+    expect(h.repo.mrzRecords).toHaveLength(1);
+    const record = h.repo.mrzRecords[0];
+    expect(record).toStrictEqual({
+      verificationId: id,
+      captureId: back,
+      lines: TD1.join("\n"),
+      format: "TD1",
+      outcome: "pass",
+      details: {
+        source: "mrz_phone",
+        parserVersion: MRZ_PARSER_VERSION,
+        captureId: back!,
+        result: "read",
+        reason: null,
+        expectedFormat: "TD1",
+        format: "TD1",
+        // TD1 has no personal number check digit: the key is absent, not false.
+        checks: { documentNumber: true, birthDate: true, expiryDate: true, composite: true },
+        documentCodeFits: true,
+        datesValid: true,
+        attempts: 1,
+        corrections: 2,
+        engine: ENGINE,
+        ms: 850,
+      } satisfies MrzCheckDetails,
+    });
+    expect(h.repo.audits.at(-1)).toEqual({
+      actorType: "rider",
+      actorId: id,
+      action: "mrz.record",
+      targetType: "verification",
+      targetId: id,
+      details: { captureId: back, outcome: "pass", result: "read" },
+    });
+  });
+
+  it("records a valid passport read from the data page as pass, with the personal number check", async () => {
+    const h = setup();
+    const { token, front } = await photographed(h, "passport");
+    expect((await h.call("/mrz", token, { body: readReport(front, TD3) })).status).toBe(200);
+    expect(h.repo.mrzRecords[0]).toMatchObject({
+      lines: TD3.join("\n"),
+      format: "TD3",
+      outcome: "pass",
+      details: {
+        expectedFormat: "TD3",
+        format: "TD3",
+        checks: { documentNumber: true, birthDate: true, expiryDate: true, personalNumber: true, composite: true },
+        documentCodeFits: true,
+        datesValid: true,
+      },
+    });
+  });
+
+  it("accepts the optional MRZ of a residence permit", async () => {
+    const h = setup();
+    const { token, back } = await photographed(h, "residence_permit");
+    expect((await h.call("/mrz", token, { body: readReport(back!, TD1) })).status).toBe(200);
+    expect(h.repo.mrzRecords[0]).toMatchObject({ format: "TD1", outcome: "pass" });
+  });
+
+  it.each([
+    ["a wrong document number check digit", "cni_biometric", edit(TD1, 0, 14, "8"), {
+      documentNumber: false,
+      birthDate: true,
+      expiryDate: true,
+      composite: false,
+    }, true, true],
+    ["a wrong composite check digit only", "passport", edit(TD3, 1, 43, "1"), {
+      documentNumber: true,
+      birthDate: true,
+      expiryDate: true,
+      personalNumber: true,
+      composite: false,
+    }, true, true],
+    ["a wrong birth date check digit", "cni_biometric", edit(TD1, 1, 6, "3"), {
+      documentNumber: true,
+      birthDate: false,
+      expiryDate: true,
+      composite: false,
+    }, true, true],
+    ["an impossible birth date with right check digits", "cni_biometric", td1WithBirthDate("741312"), {
+      documentNumber: true,
+      birthDate: true,
+      expiryDate: true,
+      composite: true,
+    }, true, false],
+    ["a passport document code on a CNI", "cni_biometric", edit(TD1, 0, 0, "P<"), {
+      documentNumber: true,
+      birthDate: true,
+      expiryDate: true,
+      composite: true,
+    }, false, true],
+    ["a card document code on a passport", "passport", edit(TD3, 0, 0, "I<"), {
+      documentNumber: true,
+      birthDate: true,
+      expiryDate: true,
+      personalNumber: true,
+      composite: true,
+    }, false, true],
+  ] as const)("flags %s", async (_label, document, lines, checks, codeFits, datesValid) => {
+    const h = setup();
+    const session = await photographed(h, document);
+    const captureId = document === "passport" ? session.front : session.back!;
+    expect((await h.call("/mrz", session.token, { body: readReport(captureId, lines) })).status).toBe(200);
+    const record = h.repo.mrzRecords[0];
+    expect(record.outcome).toBe("flag");
+    expect(record.lines).toBe(lines.join("\n"));
+    expect(record.details.checks).toStrictEqual(checks);
+    expect(record.details.documentCodeFits).toBe(codeFits);
+    expect(record.details.datesValid).toBe(datesValid);
+  });
+
+  it("accepts the other TD1 document codes (ID, A, C)", async () => {
+    for (const code of ["ID", "AC", "C<"]) {
+      const h = setup();
+      const { token, back } = await photographed(h, "cni_biometric");
+      expect((await h.call("/mrz", token, { body: readReport(back!, edit(TD1, 0, 0, code)) })).status).toBe(200);
+      expect(h.repo.mrzRecords[0].outcome, code).toBe("pass");
+    }
+  });
+
+  it("never takes the phone's word: a verdict sent along with wrong lines is ignored", async () => {
+    const h = setup();
+    const { token, back } = await photographed(h, "cni_biometric");
+    const body = readReport(back!, edit(TD1, 0, 14, "8"), {
+      valid: true,
+      outcome: "pass",
+      checks: { documentNumber: true, birthDate: true, expiryDate: true, composite: true },
+      parserVersion: "phone",
+    });
+    expect((await h.call("/mrz", token, { body })).status).toBe(200);
+    const record = h.repo.mrzRecords[0];
+    expect(record.outcome).toBe("flag");
+    expect(record.details.checks?.documentNumber).toBe(false);
+    expect(record.details.parserVersion).toBe(MRZ_PARSER_VERSION);
+    expect(record.details).not.toHaveProperty("valid");
+    expect(record.details).not.toHaveProperty("outcome");
+  });
+
+  it.each(["not_found", "reader_unavailable"] as const)("records an unreadable MRZ (%s) as flag, without lines", async (reason) => {
+    const h = setup();
+    const { id, token, back } = await photographed(h, "cni_biometric");
+    // Lines sent with an unreadable report are not kept.
+    const res = await h.call("/mrz", token, { body: unreadableReport(back!, { reason, lines: TD1 }) });
+    expect(res.status).toBe(200);
+    expect(h.repo.mrzRecords).toStrictEqual([{
+      verificationId: id,
+      captureId: back,
+      lines: null,
+      format: null,
+      outcome: "flag",
+      details: {
+        source: "mrz_phone",
+        parserVersion: MRZ_PARSER_VERSION,
+        captureId: back!,
+        result: "unreadable",
+        reason,
+        expectedFormat: "TD1",
+        format: null,
+        checks: null,
+        documentCodeFits: null,
+        datesValid: null,
+        attempts: 3,
+        corrections: null,
+        engine: ENGINE,
+        ms: null,
+      } satisfies MrzCheckDetails,
+    }]);
+    expect(h.repo.audits.at(-1)?.details).toEqual({ captureId: back, outcome: "flag", result: "unreadable" });
+  });
+
+  it("is idempotent: a retried report answers 200 and records nothing new", async () => {
+    const h = setup();
+    const { token, back } = await photographed(h, "cni_biometric");
+    expect((await h.call("/mrz", token, { body: readReport(back!, TD1) })).status).toBe(200);
+    const again = await h.call("/mrz", token, { body: readReport(back!, edit(TD1, 0, 14, "8"), { attempts: 2 }) });
+    expect(again.status).toBe(200);
+    expect(await readJson(again)).toEqual({ recorded: true });
+    expect(h.repo.mrzRecords).toHaveLength(1);
+    expect(h.repo.mrzRecords[0].outcome).toBe("pass");
+    expect(h.repo.audits.filter((a) => a.action === "mrz.record")).toHaveLength(1);
+  });
+
+  it("records a retaken photo separately", async () => {
+    const h = setup();
+    const { token, back } = await photographed(h, "cni_biometric");
+    expect((await h.call("/mrz", token, { body: unreadableReport(back!) })).status).toBe(200);
+    const retake = await readJson(await h.complete(token, "document_back", buildJpeg({ width: 1600, height: 1009, padTo: 50_000 })));
+    const res = await h.call("/mrz", token, { body: readReport(retake.captureId as string, TD1, { attempts: 2 }) });
+    expect(res.status).toBe(200);
+    expect(h.repo.mrzRecords.map((r) => [r.captureId, r.outcome])).toEqual([[back, "flag"], [retake.captureId, "pass"]]);
+  });
+
+  it("accepts an upper-case capture id and stores it in lower case", async () => {
+    const h = setup();
+    const { token, back } = await photographed(h, "cni_biometric");
+    expect((await h.call("/mrz", token, { body: readReport(back!.toUpperCase(), TD1) })).status).toBe(200);
+    expect(h.repo.mrzRecords[0].captureId).toBe(back);
+    expect(h.repo.mrzRecords[0].details.captureId).toBe(back);
+  });
+
+  it("accepts every limit exactly", async () => {
+    const h = setup();
+    const { token, back } = await photographed(h, "cni_biometric");
+    const { maxAttempts, maxCorrections, maxMs, maxEngineLength } = MRZ_REPORT_LIMITS;
+    const body = readReport(back!, TD1, {
+      attempts: maxAttempts,
+      corrections: maxCorrections,
+      ms: maxMs,
+      engine: "a/B.c_d-".repeat(5).slice(0, maxEngineLength),
+    });
+    expect((await h.call("/mrz", token, { body })).status).toBe(200);
+    expect(h.repo.mrzRecords[0].details).toMatchObject({ attempts: 20, corrections: 90, ms: 600_000 });
+    const zero = await photographed(h, "passport");
+    expect((await h.call("/mrz", zero.token, { body: readReport(zero.front, TD3, { corrections: 0, ms: 0 }) })).status)
+      .toBe(200);
+  });
+
+  it("judges the dates with the function's clock", async () => {
+    const h = setup();
+    const { token, front } = await photographed(h, "passport");
+    // The session is still open on that day (it expires 30 minutes after NOW).
+    h.setClock(new Date("1999-06-01T00:00:00Z"));
+    expect((await h.call("/mrz", token, { body: readReport(front, td3WithBirthDate("000229")) })).status).toBe(200);
+    expect(h.repo.mrzRecords[0]).toMatchObject({ outcome: "flag", details: { datesValid: false } });
+  });
+
+  it("requires a declared document -> 409 document_type_required", async () => {
+    const { call, seed } = setup();
+    const { token } = await seed({ status: "in_progress" }, { consent: true });
+    await expectError(await call("/mrz", token, { body: readReport(crypto.randomUUID(), TD1) }), 409, "document_type_required");
+  });
+
+  it.each(["cni_legacy", "driving_licence", "voter_card"] as const)(
+    "%s has no code lines -> 422 invalid_mrz",
+    async (document) => {
+      const h = setup();
+      const { token, back } = await photographed(h, document);
+      await expectError(await h.call("/mrz", token, { body: readReport(back!, TD1) }), 422, "invalid_mrz");
+      await expectError(await h.call("/mrz", token, { body: unreadableReport(back!) }), 422, "invalid_mrz");
+      expect(h.repo.mrzRecords).toHaveLength(0);
+    },
+  );
+
+  it("refuses an expired session (410) and a submitted one (409)", async () => {
+    const h = setup();
+    const { id, token, back } = await photographed(h, "cni_biometric");
+    h.repo.verifications.get(id)!.status = "submitted";
+    await expectError(await h.call("/mrz", token, { body: readReport(back!, TD1) }), 409, "already_submitted");
+    h.setClock(new Date(IN_30_MIN));
+    await expectError(await h.call("/mrz", token, { body: readReport(back!, TD1) }), 410, "session_expired");
+    expect(h.repo.mrzRecords).toHaveLength(0);
+  });
+
+  it("validates every field -> 400 bad_request, before the capture is looked up", async () => {
+    const h = setup();
+    const { token, back } = await photographed(h, "cni_biometric");
+    const lookup = vi.spyOn(h.repo, "findActiveCapture");
+    const read = readReport(back!, TD1);
+    const unreadable = unreadableReport(back!);
+    const without = (body: Record<string, unknown>, key: string) => {
+      const copy = { ...body };
+      delete copy[key];
+      return copy;
+    };
+    const cases: unknown[] = [
+      {},
+      without(read, "captureId"),
+      { ...read, captureId: "not-a-uuid" },
+      { ...read, captureId: 42 },
+      { ...read, captureId: `${back} ` },
+      without(read, "result"),
+      { ...read, result: "valid" },
+      without(read, "attempts"),
+      { ...read, attempts: 0 },
+      { ...read, attempts: MRZ_REPORT_LIMITS.maxAttempts + 1 },
+      { ...read, attempts: 1.5 },
+      { ...read, attempts: "1" },
+      without(read, "engine"),
+      { ...read, engine: "" },
+      { ...read, engine: "x".repeat(MRZ_REPORT_LIMITS.maxEngineLength + 1) },
+      { ...read, engine: "tesseract js" },
+      { ...read, engine: "<script>" },
+      { ...read, engine: 7 },
+      without(read, "corrections"),
+      { ...read, corrections: -1 },
+      { ...read, corrections: MRZ_REPORT_LIMITS.maxCorrections + 1 },
+      { ...read, corrections: 0.5 },
+      without(read, "ms"),
+      { ...read, ms: -1 },
+      { ...read, ms: MRZ_REPORT_LIMITS.maxMs + 1 },
+      { ...read, ms: 12.5 },
+      { ...read, ms: null },
+      without(read, "lines"),
+      { ...read, lines: TD1.join("\n") },
+      { ...read, lines: [TD1[0], null, TD1[2]] },
+      { ...read, lines: [1, 2, 3] },
+      { ...read, lines: { 0: TD1[0], 1: TD1[1], 2: TD1[2], length: 3 } },
+      without(unreadable, "reason"),
+      { ...unreadable, reason: "blurry" },
+      { ...unreadable, reason: null },
+      // Malformed and of the wrong shape: the malformed field is reported first.
+      { ...read, lines: TD3, corrections: -1 },
+    ];
+    for (const body of cases) {
+      const res = await h.call("/mrz", token, { body });
+      expect(res.status, JSON.stringify(body)).toBe(400);
+      expect((await readJson(res)).error).toMatchObject({ code: "bad_request" });
+    }
+    expect(lookup).not.toHaveBeenCalled();
+    expect(h.repo.mrzRecords).toHaveLength(0);
+  });
+
+  it("refuses lines that are not an MRZ of the expected format -> 422 invalid_mrz", async () => {
+    const h = setup();
+    const cni = await photographed(h, "cni_biometric");
+    const shapes: string[][] = [
+      TD3,
+      TD1.slice(0, 2),
+      [...TD1, TD1[2]],
+      [],
+      [TD1[0].toLowerCase(), TD1[1], TD1[2]],
+      [TD1[0].slice(1), TD1[1], TD1[2]],
+      [TD1[0] + "<", TD1[1], TD1[2]],
+      [TD1[0], TD1[1], TD1[2].replace("ANNA<", "ANNA ")],
+      [TD1[0], TD1[1], `${TD1[2].slice(1)}\n`],
+      [TD1[0].replace("I", "\uff29"), TD1[1], TD1[2]],
+    ];
+    for (const lines of shapes) {
+      const res = await h.call("/mrz", cni.token, { body: readReport(cni.back!, lines) });
+      expect(res.status, JSON.stringify(lines)).toBe(422);
+      const body = await readJson(res) as { error: { code: string; message: string } };
+      expect(body.error.code).toBe("invalid_mrz");
+      for (const line of lines) if (line) expect(body.error.message).not.toContain(line);
+    }
+    const passport = await photographed(h, "passport");
+    await expectError(await h.call("/mrz", passport.token, { body: readReport(passport.front, TD1) }), 422, "invalid_mrz");
+    expect(h.repo.mrzRecords).toHaveLength(0);
+  });
+
+  it("refuses a photo of the side without code lines -> 422 invalid_mrz", async () => {
+    const h = setup();
+    const { token, front } = await photographed(h, "cni_biometric");
+    await expectError(await h.call("/mrz", token, { body: readReport(front, TD1) }), 422, "invalid_mrz");
+    await expectError(await h.call("/mrz", token, { body: unreadableReport(front) }), 422, "invalid_mrz");
+    expect(h.repo.mrzRecords).toHaveLength(0);
+  });
+
+  it("unknown, erased or another session's capture -> 404 not_found", async () => {
+    const h = setup();
+    const mine = await photographed(h, "cni_biometric");
+    const other = await photographed(h, "cni_biometric");
+    await expectError(await h.call("/mrz", mine.token, { body: readReport(crypto.randomUUID(), TD1) }), 404, "not_found");
+    await expectError(await h.call("/mrz", mine.token, { body: readReport(other.back!, TD1) }), 404, "not_found");
+    h.repo.captures.find((c) => c.id === mine.back)!.deletedAt = NOW.toISOString();
+    await expectError(await h.call("/mrz", mine.token, { body: readReport(mine.back!, TD1) }), 404, "not_found");
+    expect(h.repo.mrzRecords).toHaveLength(0);
+  });
+
+  it("a capture erased before the write -> 404 not_found", async () => {
+    const h = setup();
+    const { token, back } = await photographed(h, "cni_biometric");
+    h.repo.recordMrzOverride = "not_found";
+    await expectError(await h.call("/mrz", token, { body: readReport(back!, TD1) }), 404, "not_found");
+  });
+
+  it("keeps everything read from the document out of check details and the audit log", async () => {
+    const h = setup();
+    const cni = await photographed(h, "cni_biometric");
+    const passport = await photographed(h, "passport");
+    await h.call("/mrz", cni.token, { body: readReport(cni.back!, TD1) });
+    await h.call("/mrz", passport.token, { body: readReport(passport.front, edit(TD3, 1, 43, "1")) });
+    expect(h.repo.mrzRecords).toHaveLength(2);
+    const stored = JSON.stringify([h.repo.mrzRecords.map((r) => r.details), h.repo.audits]);
+    for (const value of READ_VALUES) expect(stored).not.toContain(value);
+  });
+
+  it("never logs the lines when the database fails -> 500 server_error", async () => {
+    const h = setup();
+    const { token, back } = await photographed(h, "cni_biometric");
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const quiet = createFlowHandler({ repo: h.repo, storage: h.storage, allowedOrigins: new Set([ALLOWED_ORIGIN]), now: () => NOW });
+    h.repo.failOn = "recordMrz";
+    const res = await quiet(makeRequest("https://ref.supabase.co/flow/mrz", {
+      headers: { "x-session-token": token },
+      body: readReport(back!, TD1),
+    }));
+    await expectError(res, 500, "server_error");
+    expect(spy).toHaveBeenCalled();
+    const logged = spy.mock.calls.flat().join(" ");
+    for (const value of [...READ_VALUES, ...TD1]) expect(logged).not.toContain(value);
+    expect(logged).not.toContain("relation failed");
+  });
+});
+
+describe("assessMrzReport", () => {
+  const captureId = "11111111-1111-4111-8111-111111111111";
+  const base = { captureId, result: "read", attempts: 1, corrections: 0, engine: ENGINE, ms: 1 } as const;
+  const passport = { side: "document_front", format: "TD3", required: true } as const;
+
+  it("reads the dates relative to `today`: 29 Feb 00 is real in 2000, not in 1900", () => {
+    const lines = td3WithBirthDate("000229");
+    expect(assessMrzReport({ ...base, lines }, passport, NOW)).toMatchObject({ outcome: "pass", details: { datesValid: true } });
+    // Before that day, the birth date can only be 1900, which had no 29 February.
+    expect(assessMrzReport({ ...base, lines }, passport, new Date("1999-06-01T00:00:00Z")))
+      .toMatchObject({ outcome: "flag", details: { datesValid: false, checks: { birthDate: true, composite: true } } });
+  });
+
+  it("flags lines whose format is not the expected one", () => {
+    const cni = { side: "document_back", format: "TD1", required: true } as const;
+    const result = assessMrzReport({ ...base, lines: TD3 }, cni, NOW);
+    expect(result.outcome).toBe("flag");
+    expect(result.details).toMatchObject({ expectedFormat: "TD1", format: "TD3", documentCodeFits: false });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // End to end through the handler
 // ---------------------------------------------------------------------------
 describe("rider flow", () => {
@@ -879,7 +1408,7 @@ describe("rider flow", () => {
 
   it("answers preflight requests for every route", async () => {
     const { handler } = setup();
-    for (const path of ["/session", "/consent", "/document-type", "/upload-url", "/captures", "/submit"]) {
+    for (const path of ["/session", "/consent", "/document-type", "/upload-url", "/captures", "/mrz", "/submit"]) {
       const res = await handler(makeRequest(`https://ref.supabase.co/flow${path}`, { method: "OPTIONS" }));
       expect(res.status, path).toBe(204);
       expect(res.headers.get("access-control-allow-headers")).toContain("x-session-token");

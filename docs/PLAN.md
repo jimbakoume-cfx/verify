@@ -23,7 +23,7 @@ This is the approved plan. Open questions are tracked in section 1.
 | Q4 | **Duplicate detection.** Should we flag the same ID number or the same face on two rider accounts? This catches a lot of fraud, but means storing a one-way fingerprint of the ID number and a face template. It is a privacy trade-off for the lawyer. | M8 |
 | Q5 | **Foreign riders.** Do we accept only Cameroonian residence permits, or also foreign passports? Passports are cheap to add because they follow one international standard. | M3 |
 | Q6 | **Voter card and driving licence.** Both have weak security features and no machine-readable zone. I suggest accepting them, but always sending them to manual review at first. | M3 |
-| Q7 | Specimen images of each document version (old and new CNI, fronts and backs) | M3 |
+| Q7 | Specimen images of each document version (old and new CNI, fronts and backs). M2 assumes the new CNI (2025) carries 3 code lines on its back: please confirm with a real card. | M3 |
 | Q8 | **Where the "AI worker" runs** (see section 2). I recommend a small container host at about €5–20 per month. | M3 |
 | Q9 | **Supabase region and plan.** I suggest Paris (`eu-west-3`) on the Pro plan (about $25/month). The free plan pauses after a week without activity and has no backups. **The lawyer must confirm that EU storage is acceptable before real riders use it.** | M0 (region), M14 (lawyer) |
 | Q10 | Do you have a security engineer (staff or contractor) for the reviews in section 6? | M9 |
@@ -66,7 +66,7 @@ Confiance ride app/backend ──(API key)──► Supabase Edge Function "sess
 
 ### Trade-offs to know about
 1. **Data location.** In the test phase, real ID images will sit in Supabase's EU region. That is fine for consenting volunteers, but the lawyer must approve it before launch (Q9).
-2. **Encryption.** Supabase encrypts all stored data on disk. I will *also* encrypt the most sensitive database columns (ID number, name, date of birth) inside the database. Per-image encryption with our own keys is extra work; I propose deciding on it with the security engineer before launch.
+2. **Encryption.** Supabase encrypts all stored data on disk. I will *also* encrypt the most sensitive database columns (ID number, name, date of birth) inside the database; since M2 this covers the MRZ lines read on the phone (see `THREAT_MODEL.md`). Per-image encryption with our own keys is extra work; I propose deciding on it with the security engineer before launch.
 3. **Web flow vs native app.** A browser camera gives slightly less control than a native app. My mitigation: auto-capture, plus a server-side quality re-check that asks the rider to retake bad photos.
 
 ### Stack and licences (all allow commercial use)
@@ -76,7 +76,7 @@ Confiance ride app/backend ──(API key)──► Supabase Edge Function "sess
 | Hosting of web pages | Netlify (a hosting service, not a library) | Commercial service; terms checked for production |
 | Web pages | React, TypeScript, Vite, i18next, supabase-js | MIT, Apache-2.0, MIT, MIT, MIT |
 | MRZ parsing and check digits | **Written by us** in TypeScript, following ICAO 9303. The same code runs on the phone (instant feedback) and on the server (the authoritative check). | Ours. The popular `mrz` library is GPL, so we avoid it |
-| MRZ reading on the phone (M2 only, before the worker exists) | tesseract.js with an OCR-B font model | Apache-2.0 (I will check the OCR-B model's licence before use) |
+| MRZ reading on the phone (M2, before the worker exists) | tesseract.js 7 with DoubangoTelecom's MRZ model; our own model replaces it in M3 | Apache-2.0 (engine); BSD-3-Clause (model, checked 2026-10-13; trained by its authors on images collected from the web, see `LICENSES.md`) |
 | AI worker | Python 3.12, OpenCV, NumPy, Pillow, ONNX Runtime | PSF, Apache-2.0, BSD-3, HPND, MIT |
 | OCR, printed text FR/EN | RapidOCR with PP-OCR models | Apache-2.0 (code and models) |
 | Face detection | OpenCV YuNet | MIT |
@@ -95,6 +95,7 @@ Confiance ride app/backend ──(API key)──► Supabase Edge Function "sess
 ### How each check works (first version)
 - **Classification.** First version uses rules: the MRZ document code (`P`, `ID`, `I<`), OCR keywords ("RÉPUBLIQUE DU CAMEROUN", "CARTE NATIONALE D'IDENTITÉ", "PASSEPORT"…) and layout templates. A small classifier trained on our own data comes later.
 - **Consistency.** MRZ vs printed fields, date logic (birth < issue < expiry, age ≥ 18), ID-number format, and expiry date.
+- **Signed QR code on the new CNI (idea for M3/M4).** The new CNI (2025) also carries a signed QR code. If we can get the issuer's public key and the signature format, checking that signature would prove the card's data was issued by the State, which check digits cannot (anyone can compute them). To investigate in M3 or M4.
 - **Tampering and replay.** Screen moiré patterns, photocopy signals, editing traces and metadata, checks on the portrait area, and the same image re-used across attempts (file hash).
 - **Liveness.** The server picks a random 2–3 action challenge bound to a one-time code. **The worker re-checks the actions on the uploaded frames and never trusts the phone.** Passive anti-spoofing is an extra signal.
 - **Face match.** Compare the best liveness frame with the ID portrait, producing a similarity score.
@@ -111,8 +112,8 @@ Confiance ride app/backend ──(API key)──► Supabase Edge Function "sess
 - `consent_record`: consent text version, language, time, device.
 - `capture`: front/back/liveness, storage path, quality metrics, sha256.
 - `liveness_challenge`: actions, one-time code, expiry.
-- `check_result`: check name and version, score, pass/flag/fail, details.
-- `extracted_document_data`: sensitive fields encrypted; records whether each field came from MRZ or OCR.
+- `check_result`: check name and version, score, pass/flag/fail, details (outcomes and counts only, never personal data). Since M2, tied to the photo it ran on.
+- `extracted_document_data`: sensitive fields encrypted; records whether each field came from MRZ or OCR. Since M2: the MRZ lines read on the phone (`source` = `mrz_phone`), encrypted inside the database with a key kept in Supabase Vault.
 - `review_task`: priority, assignee, status, timing.
 - `decision`: system or reviewer, outcome, reason code, note.
 - `reason_code`: FR/EN text shown to riders.
@@ -136,11 +137,13 @@ The exact routes, request and response types, limits and error codes of the impl
 
 ### API 2: Rider web flow → Verify (single-use session token)
 - Since M1: `GET /flow/session` · `POST /flow/consent` · `POST /flow/document-type` · `POST /flow/upload-url` (a one-time upload link to private storage) · `POST /flow/captures {path, kind, quality}` (the server checks the uploaded image) · `POST /flow/submit`.
+- Since M2: `POST /flow/mrz` (what the phone read from the code lines; the server recomputes every check digit).
 - Planned: `POST /flow/liveness/challenge` (M5) · `GET /flow/status` (result, reason, retries left; M10) · `POST /flow/appeal` (M10). The server's own quality verdict on each capture arrives with the AI worker (M3).
 
 ### API 3: Ops dashboard → Verify (Supabase Auth with 2FA required; enforced by role)
 - Queue and case details: read directly via database rules. Each role sees only what it is allowed.
 - Since M1: `POST /admin/enroll {email, code, password}` (staff account set-up by one-time invite code) · `POST /admin/test-sessions` (test rider links, until M10) · `POST /admin/captures/view {captureId}` (audited, 60-second link).
+- Since M2: `POST /admin/document-data {verificationId}` (the code lines read on the phone, decrypted; audited before decryption; never for admins).
 - Planned: `POST /admin/verifications/{id}/decision`
 - Search: supervisors and above.
 - Thresholds: admins only.
@@ -160,7 +163,7 @@ Each milestone ends with a Netlify link and short test steps. The flow has a "de
 |---|---|---|
 | **M0** | Repo and CI (tests, licence check, secret scan). Supabase **test project** created (Q9 region) with tables, security rules and private storage. Two Netlify sites (rider flow, dashboard) with automatic preview links. FR/EN hello page. | Open the link on your phone and switch the language |
 | **M1** | **ID capture.** Live camera with a card frame, blur/glare/framing hints, auto-capture, crop and compression (target under 300 KB). Upload straight to private Supabase storage. Front and back. | Capture your ID in good and bad light; bad photos are refused with a clear hint. The image appears in the (temporary) admin debug page. |
-| **M2** | **MRZ reading.** Read the MRZ on the phone, parse passport (TD3) and biometric CNI (TD1), validate check digits on the phone and again on the server | Scan your passport: fields shown with ✅/❌ for each check digit |
+| **M2** | **MRZ reading.** Read the MRZ on the phone, parse passport (TD3) and the new CNI (2025, TD1), validate check digits on the phone and again on the server. The old CNI has no MRZ. | Scan your passport or new CNI with the debug link: fields shown with ✅/❌ for each check digit; the dashboard shows the server's own check and "Show data read" |
 | M3 | **AI worker goes live (Q8).** Server re-reads the MRZ from the image itself, plus classification and printed-text OCR for each document type | Scan each document type: correct type and fields |
 | M4 | Consistency checks and first risk flags | Try an expired ID, and a test card whose printed data does not match its MRZ |
 | M5 | Active liveness capture: random challenge, frames uploaded | A new challenge appears each time |
@@ -173,6 +176,14 @@ Each milestone ends with a Netlify link and short test steps. The flow has a "de
 | M12 | Metrics page and Phase 2 calibration report (automatic vs human agreement, per check) | Charts on your phone |
 | M13 | Automatic deletion (scheduled database job), data-subject requests, hardening, load test, security fixes | Deletion appears in the audit log after a short test retention period |
 | M14 | **Phase 1 pilot**: every case human-confirmed. Requires the lawyer's approval of hosting and consent wording. | Live metrics |
+
+### Decisions for M2 (2026-10-13)
+1. **The CNI becomes two choices.** "New CNI (2025)" has code lines (MRZ) and is read. "Old CNI" (2017 model) has none, so nothing is read for it. The rider picks one; the document list says which card has "3 lines of <<< on the back".
+2. **Unreadable code lines: retry, then continue.** The rider gets tips and retakes the photo. After 3 failed tries, a "Continue anyway" button appears and the case is flagged for staff. A phone that cannot run the reader never blocks the rider.
+3. **The rider sees only "Code lines read ✓".** The fields and the ✅/❌ for each check digit appear only in the debug view (`?debug=1`, offered as a "Debug link" QR code for test sessions) and on the dashboard.
+4. **Reading model: Doubango now, our own in M3.** DoubangoTelecom's `mrz.traineddata` (BSD-3-Clause). Its caveat is recorded in `LICENSES.md`: its authors trained it on images collected from the web. We replace it with our own model in M3.
+
+Details: `docs/M2_SPEC.md`.
 
 **Supabase setup.** I can create the Supabase project and apply database changes directly through the connected Supabase tools. **I will ask before creating anything that costs money.** Netlify sites deploy automatically from GitHub.
 

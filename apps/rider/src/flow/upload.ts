@@ -1,8 +1,19 @@
 // Sends the accepted photos: for each side, POST /upload-url, upload straight to the private bucket,
-// then POST /captures; finally POST /submit. Each step is retried automatically with backoff, and a
-// retry resumes where the last attempt stopped (no new upload link, no second upload), which matters
-// on slow networks and keeps within the per-session upload-link limit.
-import type { CaptureSide, FlowSession, UploadUrlResponse } from "@verify/shared";
+// then POST /captures; for the side that carries the MRZ, POST /mrz with what the phone read;
+// finally POST /submit. Each step is retried automatically with backoff, and a retry resumes where
+// the last attempt stopped (no new upload link, no second upload), which matters on slow networks
+// and keeps within the per-session upload-link limit.
+//
+// The MRZ report is best effort: it never fails the upload or holds back the submit. Staff then see
+// "not received" for the code lines and check the photo themselves.
+import {
+  MRZ_REPORT_LIMITS,
+  type CaptureSide,
+  type FlowSession,
+  type MrzReportRequest,
+  type UploadUrlResponse,
+} from "@verify/shared";
+import { OCR_ASSETS, type MrzReadResult } from "../mrz/types";
 import type { FlowApi } from "./api";
 import { FlowError, type FlowErrorCode, isImageRejection, isTransient, toFlowError } from "./errors";
 import { type Shot, type UploadPhase, type UploadProgress, closedReason } from "./machine";
@@ -12,11 +23,13 @@ import { type RetryPolicy, UPLOAD_RETRY, withRetry } from "./retry";
 export type PutObject = (target: UploadUrlResponse, blob: Blob) => Promise<void>;
 
 export interface UploadDeps {
-  api: Pick<FlowApi, "uploadUrl" | "completeCapture" | "submit" | "getSession">;
+  api: Pick<FlowApi, "uploadUrl" | "completeCapture" | "reportMrz" | "submit" | "getSession">;
   putObject: PutObject;
   policy?: RetryPolicy;
   sleep?: (ms: number) => Promise<void>;
   random?: () => number;
+  /** Notes an MRZ report the server refused for good (its error code only). Default: console.warn. */
+  warn?: (message: string) => void;
 }
 
 export interface UploadListener {
@@ -33,18 +46,62 @@ interface Slot {
   target: UploadUrlResponse | null;
   stored: boolean;
   done: boolean;
+  /** From POST /captures: the MRZ report names it, also when it is sent on a later attempt. */
+  captureId: string | null;
+  /** The MRZ report is settled: recorded, or refused for good. Never sent again. */
+  mrzSent: boolean;
 }
 
+/** Upload link, upload, confirmation. */
 export const STEPS_PER_PHOTO = 3;
+/** The MRZ report: one more step for the photo that carries the MRZ. */
+export const MRZ_REPORT_STEPS = 1;
 
-function stepsDone(slot: Slot): number {
-  return (slot.target ? 1 : 0) + (slot.stored ? 1 : 0) + (slot.done ? 1 : 0);
+/** Steps of one photo. */
+export function photoSteps(shot: Shot): number {
+  return STEPS_PER_PHOTO + (shot.mrz ? MRZ_REPORT_STEPS : 0);
+}
+
+/** Steps of a whole run: every photo, then the submit. */
+export function uploadSteps(shots: readonly Shot[]): number {
+  return shots.reduce((sum, shot) => sum + photoSteps(shot), 0) + 1;
+}
+
+function stepsDone(shot: Shot, slot: Slot): number {
+  const mrz = shot.mrz && slot.mrzSent ? 1 : 0;
+  return (slot.target ? 1 : 0) + (slot.stored ? 1 : 0) + (slot.done ? 1 : 0) + mrz;
+}
+
+function clampInteger(value: number, min: number, max: number): number {
+  return Number.isFinite(value) ? Math.min(max, Math.max(min, Math.round(value))) : min;
+}
+
+/**
+ * The report for one read: the lines whenever a complete MRZ of the expected format was read (even
+ * with a wrong check digit, so staff can compare them with the photo), otherwise why nothing was.
+ * The phone's own verdict is not sent: the server recomputes every check digit.
+ */
+export function mrzReport(read: MrzReadResult, attempt: number, captureId: string): MrzReportRequest {
+  const { maxAttempts, maxCorrections, maxMs } = MRZ_REPORT_LIMITS;
+  const base = { captureId, attempts: clampInteger(attempt, 1, maxAttempts), engine: OCR_ASSETS.engine };
+  if (read.lines && (read.status === "valid" || read.status === "invalid")) {
+    return {
+      ...base,
+      result: "read",
+      lines: [...read.lines],
+      corrections: clampInteger(read.corrections, 0, maxCorrections),
+      ms: clampInteger(read.ms, 0, maxMs),
+    };
+  }
+  return { ...base, result: "unreadable", reason: read.status === "unavailable" ? "reader_unavailable" : "not_found" };
 }
 
 export class Uploader {
   readonly #deps: UploadDeps;
   // Keyed by the shot itself: a retaken photo is a new object and starts with a fresh slot.
   readonly #slots = new WeakMap<Shot, Slot>();
+  /** Photos whose MRZ report failed on a network or server error: tried again on the next run. */
+  readonly #unreported = new Set<Shot>();
   /** A submit was sent in an earlier run or attempt: its answer may have been lost on the way back. */
   #submitSent = false;
 
@@ -55,7 +112,7 @@ export class Uploader {
   #slot(shot: Shot): Slot {
     let slot = this.#slots.get(shot);
     if (!slot) {
-      slot = { target: null, stored: false, done: false };
+      slot = { target: null, stored: false, done: false, captureId: null, mrzSent: false };
       this.#slots.set(shot, slot);
     }
     return slot;
@@ -76,12 +133,17 @@ export class Uploader {
   async run(shots: readonly Shot[], listener: UploadListener): Promise<UploadOutcome> {
     const { api } = this.#deps;
     const photos = shots.length;
-    const total = photos * STEPS_PER_PHOTO + 1;
+    const total = uploadSteps(shots);
+    // Reports tried during this run: each gets one round of retries per run.
+    const tried = new Set<Shot>();
 
+    let before = 0;
     for (const [index, shot] of shots.entries()) {
       const slot = this.#slot(shot);
+      const first = before;
+      before += photoSteps(shot);
       const report = (phase: UploadPhase, attempt: number) =>
-        listener.progress({ done: index * STEPS_PER_PHOTO + stepsDone(slot), total, phase, photo: index + 1, photos, attempt });
+        listener.progress({ done: first + stepsDone(shot, slot), total, phase, photo: index + 1, photos, attempt });
       let attempt = 1;
       try {
         await this.#retry(
@@ -95,10 +157,23 @@ export class Uploader {
         return { ok: false, error: toFlowError(err).code, side: shot.side };
       }
       listener.sideDone(shot.side);
+      if (shot.mrz && !slot.mrzSent) {
+        tried.add(shot);
+        report("check", 1);
+        await this.#reportMrz(shot, slot, (n) => report("check", n));
+      }
     }
 
     const reportSubmit = (attempt: number) =>
       listener.progress({ done: total - 1, total, phase: "submit", photo: 0, photos, attempt });
+
+    // Reports that failed on an earlier run (the photo itself is already on the server).
+    for (const shot of [...this.#unreported]) {
+      if (tried.has(shot)) continue;
+      reportSubmit(1);
+      await this.#reportMrz(shot, this.#slot(shot), reportSubmit);
+    }
+
     try {
       const session = await this.#retry(async (attempt) => {
         reportSubmit(attempt);
@@ -116,6 +191,8 @@ export class Uploader {
           throw err;
         }
       }, reportSubmit);
+      // Submitted: a report still missing stays missing (staff see "not received").
+      this.#unreported.clear();
       return { ok: true, session };
     } catch (err) {
       return { ok: false, error: toFlowError(err).code, side: null };
@@ -143,7 +220,8 @@ export class Uploader {
     }
     report("check");
     try {
-      await api.completeCapture({ path: slot.target.path, kind: shot.side, quality: shot.quality });
+      const { captureId } = await api.completeCapture({ path: slot.target.path, kind: shot.side, quality: shot.quality });
+      slot.captureId = captureId;
     } catch (err) {
       const code = toFlowError(err).code;
       if (code === "upload_missing") slot.stored = false;
@@ -151,6 +229,30 @@ export class Uploader {
       throw err;
     }
     slot.done = true;
+  }
+
+  /**
+   * Sends the MRZ report of an uploaded photo. Never throws: a network or server error leaves it for
+   * the next run; a lasting refusal (4xx) is noted and dropped, since sending it again cannot help.
+   */
+  async #reportMrz(shot: Shot, slot: Slot, onRetry: (attempt: number) => void): Promise<void> {
+    if (!shot.mrz || slot.mrzSent || !slot.captureId) return;
+    const body = mrzReport(shot.mrz, shot.mrzAttempt ?? 1, slot.captureId);
+    try {
+      await this.#retry(() => this.#deps.api.reportMrz(body), onRetry);
+      slot.mrzSent = true;
+      this.#unreported.delete(shot);
+    } catch (err) {
+      const error = toFlowError(err);
+      if (isTransient(error)) {
+        this.#unreported.add(shot);
+        return;
+      }
+      slot.mrzSent = true;
+      this.#unreported.delete(shot);
+      // The code only: the lines themselves are never logged.
+      (this.#deps.warn ?? console.warn)(`MRZ report not recorded: ${error.code}`);
+    }
   }
 }
 

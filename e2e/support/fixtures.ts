@@ -1,4 +1,5 @@
-// Test fixtures: every test gets a fresh fake backend, a page wired to it, and a probe on the camera.
+// Test fixtures: every test gets a fresh fake backend, a page wired to it, a probe on the camera, a
+// log of the screens shown, and fails on any uncaught page error or Content Security Policy violation.
 import { type Page, test as base, expect } from "@playwright/test";
 import { FakeBackend } from "./backend";
 import { CAMERAS, type CameraName } from "./camera";
@@ -44,15 +45,55 @@ function installCameraProbe({ portrait }: { portrait: boolean }): void {
   };
 }
 
+/**
+ * Runs in the page before the app: reports every CSP violation in the document (the preview server
+ * sends the real headers) and logs each screen title (h1) as it appears, however briefly.
+ * Serialised into the page: it must not use anything from this module.
+ */
+function installPageProbes(): void {
+  const page = window as unknown as { __screens: string[]; __cspViolation?: (text: string) => void };
+  document.addEventListener("securitypolicyviolation", (event) => {
+    page.__cspViolation?.(`${event.effectiveDirective} blocked ${event.blockedURI || "inline code"}`);
+  });
+  const screens: string[] = [];
+  page.__screens = screens;
+  // A mutation observer runs before the browser paints: even a screen shown for one frame is seen.
+  new MutationObserver(() => {
+    const title = document.querySelector("h1")?.textContent ?? "";
+    if (title && screens[screens.length - 1] !== title) screens.push(title);
+  }).observe(document, { subtree: true, childList: true, characterData: true });
+}
+
 export const test = base.extend<Fixtures & TestOptions>({
   camera: [null, { option: true }],
 
   page: async ({ page, camera }, use) => {
-    await page.addInitScript(installCameraProbe, { portrait: camera ? CAMERAS[camera].portrait : false });
     const errors: string[] = [];
+    const violations: string[] = [];
+    await page.exposeFunction("__cspViolation", (text: string) => violations.push(text));
+    await page.addInitScript(installCameraProbe, { portrait: camera ? CAMERAS[camera].portrait : false });
+    await page.addInitScript(installPageProbes);
     page.on("pageerror", (error) => errors.push(error.message));
+    // A worker (the analyzer, the OCR engine) gets its own CSP from its response headers and reports
+    // violations only to its own global scope, which init scripts do not reach: listen there as soon
+    // as it starts, and pass them on through the console. A violation in a worker's very first
+    // instructions can come before the listener; the tests' checks on what the workers do (photos
+    // taken, code lines read) catch those.
+    page.on("worker", (worker) => {
+      worker
+        .evaluate(() =>
+          self.addEventListener("securitypolicyviolation", (event) =>
+            console.error(`Content Security Policy violation in a worker: ${event.effectiveDirective} blocked ${event.blockedURI}`),
+          ),
+        )
+        .catch(() => {}); // the worker already ended
+    });
+    page.on("console", (message) => {
+      if (message.type() === "error" && /Content Security Policy/i.test(message.text())) violations.push(message.text());
+    });
     await use(page);
     expect(errors, "uncaught errors in the page").toEqual([]);
+    expect(violations, "Content Security Policy violations").toEqual([]);
   },
 
   backend: async ({ page }, use) => {
