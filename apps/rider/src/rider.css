@@ -139,6 +139,7 @@ button.primary, button.secondary { min-height: 52px; font-size: 1rem; }
 }
 .reading-status { margin: 0; font-weight: 600; min-height: 3em; }
 .reading-status + .progress { margin-top: 12px; }
+.reading-percent { margin: 6px 0 0; color: var(--text-2); font-size: 0.9rem; text-align: right; font-variant-numeric: tabular-nums; }
 
 /* Upload */
 .progress { height: 12px; border-radius: 999px; background: var(--border); overflow: hidden; }

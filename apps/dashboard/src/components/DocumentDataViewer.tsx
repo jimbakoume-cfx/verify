@@ -16,8 +16,8 @@ export interface OpenDocumentData {
  * Shows the data read from the document (the MRZ lines and the fields parsed from them) and removes
  * it when its time is up, like PhotoViewer: the data lives only in the parent's state and in this
  * component, and leaves the page when the time is up, on Hide, and when the case page goes away
- * (another page, or sign-out). translate="no" keeps the browser's page translation, which sends the
- * text to an online service, away from it.
+ * (another page, or sign-out). translate="no" (and Google's "notranslate" class) keeps the browser's
+ * page translation, which sends the text to an online service, away from it.
  */
 export function DocumentDataViewer({
   data,
@@ -57,7 +57,7 @@ export function DocumentDataViewer({
   }
 
   return (
-    <div className="dash-mrz-data" translate="no">
+    <div className="dash-mrz-data notranslate" translate="no">
       {items.length === 0 ? (
         <p className="muted">{t("mrz.noData")}</p>
       ) : (

@@ -3,10 +3,12 @@ import { describe, expect, it } from "vitest";
 import {
   FIELD_TYPES,
   MAX_NUMBER_CANDIDATES,
+  OPTIONAL_DATA,
   cleanLine,
   correctMrz,
   repairDocumentNumber,
   restoreFillers,
+  restoreOptionalFillers,
   snapLength,
   swapByFieldType,
 } from "./correct";
@@ -106,6 +108,58 @@ describe("restoreFillers", () => {
     expect(restoreFillers("NGUEMA<<<X<<<<<<")).toEqual({ line: "NGUEMA<<<<<<<<<<", changed: 1 });
     // The optional data after the nationality on the second TD1 line.
     expect(restoreFillers("7408122F1204159UTO<<K<<<<<<<<6")).toEqual({ line: "7408122F1204159UTO<<<<<<<<<<<6", changed: 1 });
+  });
+
+  it("counts only real fillers around a K or X: the unspecified nationality XXX stays whole", () => {
+    // Its third X has two X before it, not two '<'.
+    expect(restoreFillers("7408122F1204159XXX<<<<<<<<<<<6")).toEqual({ line: "7408122F1204159XXX<<<<<<<<<<<6", changed: 0 });
+    expect(restoreFillers("ZE184226B<KX<<<10").changed).toBe(0);
+  });
+});
+
+describe("restoreOptionalFillers", () => {
+  it("covers the optional-data fields exactly, which the field types call X (letters or digits)", () => {
+    for (const format of ["TD1", "TD3"] as const) {
+      for (const [l, from, to] of OPTIONAL_DATA[format]) {
+        const types = FIELD_TYPES[format][l];
+        expect(types.slice(from, to)).toBe("X".repeat(to - from));
+        expect(types[from - 1]).not.toBe("X");
+        expect(types[to] ?? "end of line").not.toBe("X");
+      }
+    }
+  });
+
+  it("restores K and X anywhere in the run of fillers that ends the field, even at its very start", () => {
+    const empty = "<".repeat(14);
+    const passport = td3("L898902C3", empty);
+    for (const i of [28, 29, 40, 41]) {
+      for (const c of ["K", "X"]) {
+        const read = [passport[0], at(passport[1], i, c)];
+        expect(restoreOptionalFillers(read, "TD3"), `${c} at ${i}`).toEqual({ lines: passport, changed: 1 });
+      }
+    }
+    const card = td1("D23145890");
+    for (const [l, i] of [[0, 15], [0, 16], [0, 29], [1, 18], [1, 19], [1, 28]]) {
+      for (const c of ["K", "X"]) {
+        const read = [...card];
+        read[l] = at(read[l], i, c);
+        expect(restoreOptionalFillers(read, "TD1"), `${c} at ${l}:${i}`).toEqual({ lines: card, changed: 1 });
+      }
+    }
+    // After data, the run starts at the first '<'.
+    const data = td3("L898902C3", "ZE184226B<<<<<");
+    expect(restoreOptionalFillers([data[0], at(data[1], 38, "K")], "TD3")).toEqual({ lines: data, changed: 1 });
+  });
+
+  it("keeps a K or X written right after other data, a run that is mostly K and X, and the other fields", () => {
+    const tail = td3("L898902C3", "ZE184226BK<<<<");
+    expect(restoreOptionalFillers(tail, "TD3")).toEqual({ lines: tail, changed: 0 });
+    const mostly = td3("L898902C3", "ZE184226B<KXK<");
+    expect(restoreOptionalFillers(mostly, "TD3")).toEqual({ lines: mostly, changed: 0 });
+    const nationality = [TD1[0], TD1[1].replace("UTO", "XXX"), TD1[2]];
+    expect(restoreOptionalFillers(nationality, "TD1")).toEqual({ lines: nationality, changed: 0 });
+    // A long TD1 number fills the start of the optional data.
+    expect(restoreOptionalFillers(td1("D23145890734"), "TD1").changed).toBe(0);
   });
 });
 
@@ -272,6 +326,30 @@ describe("correctMrz", () => {
     const named = [passport[0].replace("ERIKSSON<<ANNA<MARIA", "ERIKSSON<<K<<<<<<<<<"), passport[1]];
     expect(named[0]).toBe("P<UTOERIKSSON<<K".padEnd(44, "<"));
     expect(correctMrz(text(named), "TD3")).toEqual({ lines: named, corrections: 0 });
+  });
+
+  it("keeps an unspecified nationality (XXX), which no check digit covers", () => {
+    const stateless = [TD1[0], TD1[1].replace("UTO", "XXX"), TD1[2]];
+    expect(parseMrz(stateless)?.nationality).toBe("XXX");
+    expect(correctMrz(text(stateless), "TD1")).toEqual({ lines: stateless, corrections: 0 });
+  });
+
+  it("restores a filler misread as K or X at the start of empty optional data, where K passes every check", () => {
+    const passport = td3("SP7654321", "<".repeat(14));
+    // K is worth 20: it changes no check digit, so left there it would pass as data.
+    expect(parseMrz([passport[0], at(passport[1], 28, "K")])?.valid).toBe(true);
+    for (const i of [28, 29, 40, 41]) {
+      for (const c of ["K", "X"]) {
+        expect(correctMrz(text([passport[0], at(passport[1], i, c)]), "TD3"), `${c} at ${i}`).toEqual({ lines: passport, corrections: 1 });
+      }
+    }
+    for (const [l, i] of [[0, 15], [0, 16], [1, 18], [1, 19]]) {
+      for (const c of ["K", "X"]) {
+        const read = [...TD1];
+        read[l] = at(read[l], i, c);
+        expect(correctMrz(text(read), "TD1"), `${c} at ${l}:${i}`).toEqual({ lines: TD1, corrections: 1 });
+      }
+    }
   });
 
   it("returns lines that fail their check digits as they are (status invalid)", () => {

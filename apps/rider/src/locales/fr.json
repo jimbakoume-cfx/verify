@@ -121,7 +121,8 @@
   "reading": {
     "title": "Lecture des lignes de code…",
     "body": "Nous lisons les lignes de code (les lignes avec des <<<). Cela prend quelques secondes.",
-    "download": "Préparation du lecteur ({{percent}} %). La première fois, cela peut prendre jusqu'à une minute.",
+    "download": "Préparation du lecteur. La première fois, cela peut prendre jusqu'à une minute.",
+    "percent": "{{percent}} %",
     "progressLabel": "Préparation du lecteur"
   },
   "review": {
@@ -143,7 +144,10 @@
     "unreadTitle": "Les lignes de code n'ont pas pu être lues",
     "retake": "Reprenez la photo en suivant ces conseils :",
     "retakeIfYouCan": "Reprenez la photo si possible, en suivant ces conseils :",
-    "tipLines": "Les {{lines}} lignes avec des <<< doivent être entières et nettes",
+    "tipLines": {
+      "TD1": "Les 3 lignes avec des <<< doivent être entières et nettes",
+      "TD3": "Les 2 lignes avec des <<< doivent être entières et nettes"
+    },
     "tipGlare": "Aucun reflet sur ces lignes : inclinez un peu la pièce",
     "tipSteady": "Rapprochez le téléphone et ne bougez plus pendant la photo",
     "continueNote": "Si vous n'y arrivez pas, vous pouvez continuer : la vérification prendra simplement un peu plus de temps.",

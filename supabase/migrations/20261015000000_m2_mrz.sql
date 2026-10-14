@@ -149,8 +149,8 @@ $$;
 -- Staff: read the decrypted data of a case (called by the `admin` Edge Function, service role)
 -- ---------------------------------------------------------------------------
 -- Writes the audit entry first, then returns the decrypted lines (latest first), in the same
--- transaction: if the entry cannot be written, nothing is decrypted or returned. A read of a case
--- with no data is audited too. The access rule of the admin function is checked again here, so a
+-- transaction: if the entry cannot be written, nothing is decrypted or returned. The entry counts
+-- exactly the rows returned. A read of a case with no data is audited too. The access rule of the admin function is checked again here, so a
 -- mistake there cannot reveal data: active staff whose role matches p_role, reviewer or supervisor
 -- (never admin), and a reviewer only while the case is assigned to them.
 create function public.staff_read_document_data(p_verification uuid, p_actor uuid, p_role text)
@@ -160,7 +160,7 @@ security definer
 set search_path = ''
 as $$
 declare
-  item_count integer;
+  items public.extracted_document_data[];
 begin
   if p_role is null or p_role not in ('reviewer', 'supervisor')
      or not exists (
@@ -172,29 +172,32 @@ begin
     raise exception 'staff_read_document_data: not allowed' using errcode = 'insufficient_privilege';
   end if;
 
+  -- The rows are read once, and the key check, the audit count and the decryption all use that one
+  -- set. Each statement of this function sees the rows committed before it starts, so reading the
+  -- table again could return a row that a rider's report (flow_record_mrz) committed after the
+  -- count, and the audit entry would understate what was revealed.
+  select coalesce(array_agg(edd), '{}') into items
+    from public.extracted_document_data edd where edd.verification_id = p_verification;
+
   -- Fail loudly rather than return empty lines when a row's key is gone.
   if exists (
-    select 1 from public.extracted_document_data edd
-    where edd.verification_id = p_verification
-      and not exists (select 1 from vault.decrypted_secrets ds where ds.name = edd.key_name and ds.decrypted_secret is not null)
+    select 1 from unnest(items) i
+    where not exists (select 1 from vault.decrypted_secrets ds where ds.name = i.key_name and ds.decrypted_secret is not null)
   ) then
     raise exception 'staff_read_document_data: a document data key is missing from Vault';
   end if;
 
-  select count(*) into item_count from public.extracted_document_data edd where edd.verification_id = p_verification;
-
   insert into public.audit_event (actor_type, actor_id, action, target_type, target_id, details)
   values ('staff', p_actor::text, 'document_data.view', 'verification', p_verification::text,
-          jsonb_build_object('role', p_role, 'items', item_count));
+          jsonb_build_object('role', p_role, 'items', cardinality(items)));
 
   return query
-    select edd.capture_id, edd.source, edd.format,
-           extensions.pgp_sym_decrypt(edd.ciphertext, ds.decrypted_secret),
-           edd.created_at
-    from public.extracted_document_data edd
-    join vault.decrypted_secrets ds on ds.name = edd.key_name
-    where edd.verification_id = p_verification
-    order by edd.created_at desc, edd.id desc;
+    select i.capture_id, i.source, i.format,
+           extensions.pgp_sym_decrypt(i.ciphertext, ds.decrypted_secret),
+           i.created_at
+    from unnest(items) i
+    join vault.decrypted_secrets ds on ds.name = i.key_name
+    order by i.created_at desc, i.id desc;
 end;
 $$;
 

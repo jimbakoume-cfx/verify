@@ -564,6 +564,37 @@ begin
 end $$;
 rollback;
 
+-- A rider's report that lands during a read: the audit entry counts exactly the rows returned.
+-- Each statement of the read sees the rows committed before it starts, so the read must not count
+-- one set of rows and decrypt another. A trigger on the read's own audit entry stands in for a
+-- report committed between the two (the window a concurrent flow_record_mrz can hit).
+begin;
+create function public.m2_test_report_during_view() returns trigger language plpgsql as $$
+begin
+  if new.action = 'document_data.view' then
+    insert into public.extracted_document_data (verification_id, capture_id, source, format, ciphertext, key_name)
+    select 'd3000000-0000-0000-0000-000000000001', 'd4000000-0000-0000-0000-000000000011', 'mrz_phone', 'TD1',
+           extensions.pgp_sym_encrypt(pg_temp.td1(), ds.decrypted_secret), ds.name
+    from vault.decrypted_secrets ds where ds.name = 'document_data_key_v1';
+  end if;
+  return new;
+end $$;
+create trigger m2_test_report_during_view after insert on public.audit_event
+  for each row execute function public.m2_test_report_during_view();
+set local role service_role;
+create temp table m2_racing_read as
+  select * from public.staff_read_document_data('d3000000-0000-0000-0000-000000000001', 'd1000000-0000-0000-0000-000000000002', 'supervisor');
+reset role;
+select pg_temp.assert_eq((select count(*) from public.extracted_document_data
+  where verification_id = 'd3000000-0000-0000-0000-000000000001'), 3,
+  'read during a report: the report landed while the read was under way');
+select pg_temp.assert_eq((select (details ->> 'items')::bigint from public.audit_event
+  where action = 'document_data.view' order by id desc limit 1), 2,
+  'read during a report: the audit entry counts the rows there when the read began');
+select pg_temp.assert_eq((select count(*) from m2_racing_read), 2,
+  'read during a report: the read returns exactly the rows its audit entry counts');
+rollback;
+
 -- A missing or replaced key fails loudly instead of returning empty or garbled lines.
 begin;
 delete from vault.secrets where name = 'document_data_key_v1';

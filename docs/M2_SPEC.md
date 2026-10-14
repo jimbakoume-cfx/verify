@@ -77,8 +77,9 @@ Two CNI entries: **Nouvelle CNI (2025)** with the hint "3 lignes de <<< au verso
    - page segmentation mode 6 ("one block of text").
 5. **Correct** (`src/mrz/correct.ts`):
    - clean the lines (spaces out, `«` to `<`);
-   - turn a K or X back into `<` inside runs of fillers, except one that may be a name: right after a word of letters, or after one or two `<` (an initial, `ANNA<K`, or a one-letter given name, `DOE<<K`). No check digit covers the names, so the correction must not drop a real letter there;
+   - turn a K or X back into `<` inside runs of fillers (at least two real `<` on each side, so the unspecified nationality `XXX<<<` stays whole), except one that may be a name: right after a word of letters, or after one or two `<` (an initial, `ANNA<K`, or a one-letter given name, `DOE<<K`). No check digit covers the names, so the correction must not drop a real letter there;
    - fix lines that are 1 or 2 characters too long or short at their longest filler run;
+   - then, with the fields known, turn every K or X in the run of fillers that ends an optional-data field (the TD3 personal number, the two TD1 optional-data fields) back into `<`, even at the very start of an empty field. No names live there. This matters most for K: it counts 0 in every check digit, like `<`, so a K left there would pass as data that is not on the document. A K or X written right after other data (`ZE184226BK<<<`) is left alone;
    - swap look-alike characters only where the field type decides: dates and check digits are digits, names and country codes are letters (O/0, I/1, B/8, S/5, Z/2, G/6, D/0, Q/0);
    - repair the document number only with evidence (see "Changes from the approved plan").
 
@@ -103,7 +104,7 @@ Result (`MrzReadResult` in `src/mrz/types.ts`):
 Speed measured in desktop Chromium against the built site: the first read takes 1.2–1.9 s including the engine start, later passes about 0.4 s each. Phones are slower.
 
 ### Screens and rules (`src/flow/machine.ts`)
-- **Reading screen** (`{name: "reading", side}`). It comes after the photo of the side that carries the code lines and says "Reading the code lines…". While the engine's first start-up on the page is still running, it shows "Getting the reader ready (n %)" instead, with "the first time, this can take up to a minute" (the first time it downloads the files; later visits read them from the cache). tesseract.js reports only the start and end of each download, so between those the bar moves on with time, slowing down, and never completes a stage by itself. A restart after a cancelled or timed-out read shows no progress: its files are cached. Its Retake button, like the phone's Back button, stops reading and reopens the camera.
+- **Reading screen** (`{name: "reading", side}`). It comes after the photo of the side that carries the code lines and says "Reading the code lines…". While the engine's first start-up on the page is still running, it shows "Getting the reader ready" instead, with "the first time, this can take up to a minute" (the first time it downloads the files; later visits read them from the cache), a progress bar and its percent. The text is a polite live region, so screen readers announce it once; the percent, which changes several times a second, is only in the progress bar (`aria-valuenow`) and in a figure beside it hidden from screen readers (`Reading.test.ts`). tesseract.js reports only the start and end of each download, so between those the bar moves on with time, slowing down, and never completes a stage by itself. A restart after a cancelled or timed-out read shows no progress: its files are cached. Its Retake button, like the phone's Back button, stops reading and reopens the camera.
 - **Stale results are ignored.** Each result is tied to its photo, so a result for a photo that was retaken or abandoned in the meantime changes nothing.
 - **Review screen:**
   - Valid: **Code lines read ✓**. That is all the rider learns.
@@ -122,7 +123,7 @@ For the side with code lines it shows:
 - the parsed fields;
 - the corrected lines and the raw OCR text, in monospace.
 
-Nothing from it is uploaded or logged.
+Nothing from it is uploaded or logged. The panel is marked `translate="no"` (and `notranslate`), so the browser's page translation never sends it to an online service: a test session made from a French dashboard and opened on an English phone would otherwise invite Chrome to translate the page.
 
 ### Report to the server (`src/flow/upload.ts`)
 - After the photo of that side is confirmed (`POST /flow/captures` returns its `captureId`), the phone sends `POST /flow/mrz` once:
@@ -246,7 +247,7 @@ Same access rules as `POST /admin/captures/view`:
 ## Where MRZ data may appear (privacy rules)
 | Place | MRZ lines or fields? |
 |---|---|
-| Rider's phone | In memory during the visit. The fields only in `?debug=1`. Never in Web Storage, never logged. |
+| Rider's phone | In memory during the visit. The fields only in `?debug=1`, marked `translate="no"`. Never in Web Storage, never logged. |
 | `POST /flow/mrz` request | Yes (HTTPS), on its way to the database |
 | `flow` and `admin` Edge Function logs | Never: errors carry codes only |
 | Database statement logs | Never: the project does not log query parameters (`log_statement=ddl`, `log_min_duration_statement=-1`, `log_parameter_max_length_on_error=0`, checked 2026-10-13) |
@@ -278,18 +279,19 @@ Same access rules as `POST /admin/captures/view`:
   - repeated, foreign, erased and unreadable reports, and a missing key;
   - nobody but the service role can read the table or call the functions;
   - staff refusals, and no data when the audit entry fails;
+  - a report landing during a read: the audit entry counts exactly the rows returned (the read takes its rows once, for the count and the decryption);
   - audit order, deletions cascading, and the audit hash chain intact.
 
   `20_m1_test.sql` now also pins both new functions and the `check_result` columns the dashboard uses.
 - **Pixel side** (`packages/capture/src/mrz/*.test.ts`): finding, preparing, thresholds and PGM on synthetic images, including tilt, shadows, blur, JPEG, dim light and faint ink.
 - **Rider:**
-  - correction, including a property test that a misread which is not a look-alike is never made valid;
-  - the engine's timeouts, restarts, start-up failures and start-up progress;
+  - correction, including a property test that a misread which is not a look-alike is never made valid, the unspecified nationality `XXX` kept whole, and K/X restored at every cell of empty optional data;
+  - the engine's timeouts, restarts, start-up failures and start-up progress, including a start-up that times out while the engine code is still downloading (it never starts a second engine afterwards);
   - the reader's passes, with a fake engine;
   - lazy loading, including a stalled download of the reader code and a read cancelled during it;
-  - the reading screen, tries, "Continue anyway" and stale results (`machine.test.ts`);
+  - the reading screen, tries, "Continue anyway" and stale results (`machine.test.ts`), and the reading screen's live text, which does not change with the percent (`Reading.test.ts`);
   - the report body, limits, retries and never blocking the submit (`upload.test.ts`);
-  - the model's checksum and licence notice (`model.test.ts`);
+  - the model's checksum, and the licence notices of every `/ocr/` file: every library of the licence register named in `NOTICE.txt`, the full Apache-2.0 text, the IJG sentence, and the worker's own licence file emitted next to it (`model.test.ts`);
   - the hosting rules (`hosting.test.ts`).
 - **Real reading in Node** (`src/mrz/reader.fixtures.test.ts`, part of `npm test`, about 5 s): the real tesseract.js and the committed model read the committed test images through the same path the phone uses. The clean and degraded passport and card images must read as valid, the smudged card must not, and an upside-down card must still read.
 - **Test images** (`scripts/make-mrz-fixtures.py`, dev only, needs Pillow):
@@ -297,7 +299,7 @@ Same access rules as `POST /admin/captures/view`:
   - 8 PGM images plus `manifest.json` in `e2e/fixtures/mrz` (2.2 MB). The script gives identical bytes every run.
 - **Browser tests** (Playwright, `e2e/`), as planned:
   - the M1 card scenarios move to the old CNI;
-  - new scenarios: new CNI (reading, ✓, `/flow/mrz` with valid lines); passport with every check digit ✅ in the debug panel; old CNI without a reading step; a smudged MRZ (tips, 3 retakes, Continue anyway, then `unreadable`); the engine file blocked (the rider goes on and `reader_unavailable` is sent).
+  - new scenarios: new CNI (reading, ✓, `/flow/mrz` with valid lines); passport with every check digit ✅ in the debug panel; old CNI without a reading step; a smudged MRZ (tips, 3 failed tries, then Continue anyway; the report, `unreadable` or lines failing their check digits, is flagged); the engine file blocked (the rider goes on and `reader_unavailable` is sent).
 
   The fake camera pastes the test images' code lines onto the fake card and passport. `e2e/README.md` lists the exact scenarios.
 
@@ -336,6 +338,7 @@ Same access rules as `POST /admin/captures/view`:
    - the `/ocr/*` cache header and content types;
    - that the engine file is served compressed (otherwise the first download is about 5.3 MB instead of 2.8 MB);
    - a 404 for a missing `/ocr/` file, and whether the host also sends the year-long cache header on that 404;
+   - that the notices are served: `/ocr/NOTICE.txt` and the worker's `/ocr/7.0.0/worker.min.js.LICENSE.txt`;
    - that reading works in a real browser.
 
 ## Out of scope for M2

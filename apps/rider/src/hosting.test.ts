@@ -60,6 +60,7 @@ const PATHS = [
   "/favicon.svg",
   "/assets/index-abc123.js",
   OCR_ASSETS.workerPath,
+  `${OCR_ASSETS.workerPath}.LICENSE.txt`,
   `${OCR_ASSETS.corePath}/tesseract-core-simd-lstm.wasm.js`,
   `${OCR_ASSETS.langPath}/${OCR_ASSETS.language}.traineddata.gz`,
   "/ocr/NOTICE.txt",

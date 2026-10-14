@@ -1,5 +1,7 @@
 // ?debug=1 only: everything the phone read from the MRZ, to calibrate the reader on real documents.
 // The rider never sees this (they only get "Code lines read ✓"); nothing here is logged or sent.
+// translate="no" (and Google's "notranslate" class) keeps the browser's page translation, which
+// sends the page text to an online service, away from it, like the dashboard's data viewer.
 import { useTranslation } from "react-i18next";
 import { type MrzChecks, type MrzDate, documentCodeFits } from "@verify/shared";
 import type { MrzReadResult } from "../mrz/types";
@@ -43,7 +45,7 @@ export function MrzDebug({ read, attempt }: { read: MrzReadResult; attempt: numb
     : [];
 
   return (
-    <section className="mrz-debug" aria-label={t("debug.mrz.title")}>
+    <section className="mrz-debug notranslate" translate="no" aria-label={t("debug.mrz.title")}>
       <h2>{t("debug.mrz.title")}</h2>
       <dl>
         {rows.map(([k, v]) => (

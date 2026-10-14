@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CAPTURE_SIDES, DECLARED_DOCUMENTS } from "@verify/shared";
+import { CAPTURE_SIDES, DECLARED_DOCUMENTS, MRZ_LAYOUT, type MrzFormat } from "@verify/shared";
 import en from "./en.json";
 import fr from "./fr.json";
 
@@ -45,6 +45,16 @@ describe("FR/EN locales", () => {
     }
     for (const side of CAPTURE_SIDES) {
       expect(frKeys.has(`sides.${side}`), side).toBe(true);
+    }
+  });
+
+  it("give the code-lines tip for each MRZ format, naming its number of lines", () => {
+    // Its own text per format: a count filled into one sentence gave "All 2 lines" (passport).
+    const count: Record<number, RegExp> = { 2: /^(Both|Les 2) /, 3: /^(All|Les) 3 / };
+    for (const format of Object.keys(MRZ_LAYOUT) as MrzFormat[]) {
+      for (const [lang, keys] of [["fr", frKeys], ["en", enKeys]] as const) {
+        expect(keys.get(`mrz.tipLines.${format}`), `${lang} ${format}`).toMatch(count[MRZ_LAYOUT[format].lines]);
+      }
     }
   });
 

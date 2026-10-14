@@ -15,8 +15,11 @@ test("passport: only the photo page is taken, its code lines are read (every che
   await expect(page.getByText(`${rider.t("sides.passportPage")} · ${rider.t("documents.passport")}`)).toBeVisible();
   await expect(rider.mrzRead).toHaveText(rider.t("mrz.read"));
 
-  // The debug panel: what the phone read, and each check digit it recomputed.
-  const checks = ["documentNumber", "birthDate", "expiryDate", "personalNumber", "composite"];
+  // The debug panel: what the phone read, and each check digit it recomputed. The browser's page
+  // translation (an online service) must never get it.
+  await expect(rider.mrzDebug).toHaveAttribute("translate", "no");
+  await expect(rider.mrzDebug).toContainClass("notranslate");
+  const checks =["documentNumber", "birthDate", "expiryDate", "personalNumber", "composite"];
   await expect(rider.mrzDebug.locator("ul.mrz-checks li")).toHaveText(checks.map((key) => `✅ ${rider.t(`debug.mrz.check.${key}`)}`));
   const values = await rider.debugValues("still");
   expect(values[rider.t("debug.mrz.status")]).toBe("valid");

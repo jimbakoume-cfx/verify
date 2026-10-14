@@ -121,7 +121,8 @@
   "reading": {
     "title": "Reading the code lines…",
     "body": "We're reading the code lines (the lines with <<<). This takes a few seconds.",
-    "download": "Getting the reader ready ({{percent}}%). The first time, this can take up to a minute.",
+    "download": "Getting the reader ready. The first time, this can take up to a minute.",
+    "percent": "{{percent}}%",
     "progressLabel": "Getting the reader ready"
   },
   "review": {
@@ -143,7 +144,10 @@
     "unreadTitle": "The code lines could not be read",
     "retake": "Please take the photo again, following these tips:",
     "retakeIfYouCan": "Take the photo again if you can, following these tips:",
-    "tipLines": "All {{lines}} lines with <<< must be whole and sharp",
+    "tipLines": {
+      "TD1": "All 3 lines with <<< must be whole and sharp",
+      "TD3": "Both lines with <<< must be whole and sharp"
+    },
     "tipGlare": "No glare on those lines: tilt the document slightly",
     "tipSteady": "Move the phone closer and hold still for the photo",
     "continueNote": "If it still doesn't work, you can continue: the check will just take a little longer.",

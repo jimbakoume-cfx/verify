@@ -298,6 +298,39 @@ describe("createOcrEngine", () => {
     expect(fake.module.createWorker).toHaveBeenCalledTimes(2);
   });
 
+  it("times out a start still importing tesseract.js, and never starts its worker once the import ends", async () => {
+    vi.useFakeTimers();
+    const fake = fakeTesseract();
+    // The first import stalls past the time limit (a flaky connection), then completes while the
+    // next start-up is running; in a browser both imports wait for the same download.
+    const stalled = deferred<TesseractModule>();
+    const loadModule = vi.fn<() => Promise<TesseractModule>>().mockReturnValueOnce(stalled.promise).mockImplementation(fake.loadModule);
+    const engine = createOcrEngine({ loadModule, isSupported: () => true, loadTimeoutMs: 60_000 });
+    const ready = engine.ready();
+    const check = expect(ready).rejects.toMatchObject({ reason: "load_timeout" });
+    await vi.advanceTimersByTimeAsync(60_000);
+    await check;
+    const read = engine.recognize(image);
+    stalled.resolve(fake.module);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await read).toBe("TEXT");
+    // One engine only: the abandoned start-up started none.
+    expect(fake.module.createWorker).toHaveBeenCalledTimes(1);
+    engine.dispose();
+    for (const worker of fake.workers) expect(worker.terminate).toHaveBeenCalled();
+  });
+
+  it("does not start a worker for a start-up disposed of while tesseract.js is still importing", async () => {
+    const fake = fakeTesseract();
+    const stalled = deferred<TesseractModule>();
+    const engine = createOcrEngine({ loadModule: () => stalled.promise, isSupported: () => true });
+    const ready = engine.ready();
+    engine.dispose();
+    stalled.resolve(fake.module);
+    await expect(ready).rejects.toMatchObject({ reason: "aborted" });
+    expect(fake.module.createWorker).not.toHaveBeenCalled();
+  });
+
   it("does not stop the start-up when a wait for it is cancelled", async () => {
     const gate = deferred<void>();
     const fake = fakeTesseract({ start: () => gate.promise });

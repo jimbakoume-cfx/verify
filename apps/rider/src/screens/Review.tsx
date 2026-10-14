@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { MRZ_LAYOUT, type DeclaredDocument, type MrzFormat } from "@verify/shared";
+import type { DeclaredDocument, MrzFormat } from "@verify/shared";
 import { type MrzReview, type Shot, refusalHints } from "../flow/machine";
 import { sideLabelKey } from "../labels";
 import { CheckIcon, Page, ScreenTitle, useObjectUrl } from "../ui";
@@ -28,7 +28,8 @@ function MrzUnreadNotice({ format, canContinue }: { format: MrzFormat; canContin
       <strong>{t("mrz.unreadTitle")}</strong>
       <p>{canContinue ? t("mrz.retakeIfYouCan") : t("mrz.retake")}</p>
       <ul className="tips">
-        <li>{t("mrz.tipLines", { lines: MRZ_LAYOUT[format].lines })}</li>
+        {/* One text per format: "Both lines" (TD3) reads better than "All 2 lines". */}
+        <li>{t(`mrz.tipLines.${format}`)}</li>
         <li>{t("mrz.tipGlare")}</li>
         <li>{t("mrz.tipSteady")}</li>
       </ul>

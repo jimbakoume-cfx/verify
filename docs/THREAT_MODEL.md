@@ -61,7 +61,7 @@ M2 reads the MRZ ("code lines") on the rider's phone and checks it on the server
   - `check_result.details` holds outcomes and counts only: true/false per check digit, format, tries, corrections, timing, engine and parser version. Supervisors and admins can read that table directly. The server copies these values field by field, so nothing read from the document can slip in.
   - The audit entries hold `{captureId, outcome, result}` (`mrz.record`) and `{role, items}` (`document_data.view`, where `items` is a count).
   - Our functions never log the lines, and their error messages never repeat a value sent.
-  - On the phone the lines stay in memory. The raw OCR text appears only in debug mode, and the full-resolution grayscale copy of the photo is dropped as soon as it has been read.
+  - On the phone the lines stay in memory. The fields and the raw OCR text appear only in debug mode, in a panel marked `translate="no"` so the browser's page translation never sends them to an online service. The full-resolution grayscale copy of the photo is dropped as soon as it has been read.
 - **Showing the data on the dashboard** works like photos:
   - it is held in the page's memory only, and removed after 60 seconds, on Hide, when leaving the case and on sign-out;
   - the response is `no-store`;

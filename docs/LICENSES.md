@@ -43,15 +43,34 @@ The full list of every indirect npm package and its licence is in `package-lock.
 ## MRZ reading (M2): engine, model and test material
 
 ### Inside the OCR engine files
-The rider site serves these files under `/ocr/`. Their notices are collected in `apps/rider/public/ocr/NOTICE.txt`, which is served at `/ocr/NOTICE.txt`.
+The rider site serves these files under `/ocr/`, so every rider's phone receives the libraries below. `apps/rider/public/ocr/NOTICE.txt`, served at `/ocr/NOTICE.txt`, reproduces what their licences ask us to pass on: each copyright notice, the licence texts (MIT, BSD, Apache-2.0, libpng, libtiff, zlib, Leptonica, openlibm) and the sentence the IJG licence requires ("this software is based in part on the work of the Independent JPEG Group"). The copyright banners of the minified `worker.min.js` are also served next to it, as `worker.min.js.LICENSE.txt` (emitted by `apps/rider/vite.config.ts`). `apps/rider/src/mrz/model.test.ts` checks that every library in this table is in the notice, that the notice carries the full Apache-2.0 text, and that the licence file the worker points to is served.
 
-| Part | Licence |
-|---|---|
-| Tesseract OCR (C++ engine, compiled into tesseract.js-core) | Apache-2.0 |
-| C libraries compiled into tesseract.js-core | Leptonica: BSD-2-Clause-style Leptonica licence. libjpeg: IJG licence. libpng: libpng licence. libtiff: libtiff licence. libwebp: BSD-3-Clause. giflib: MIT. zlib: Zlib. openlibm: MIT / BSD. |
-| Libraries bundled into tesseract.js's `worker.min.js` | buffer: MIT. ieee754: BSD-3-Clause. regenerator-runtime: MIT. zlib.js: MIT. idb-keyval 6.3.0 (keeps the model in the browser's IndexedDB): Apache-2.0. wasm-feature-detect 1.9.0 (picks the engine variant the browser supports): Apache-2.0. |
+The C libraries' versions are those tesseract.js-core 7.0.0 builds (its `third_party` git submodules), read from their sources at those commits.
 
-Other indirect npm dependencies of tesseract.js, from the lockfile: bmp-js 0.1.0, is-url 1.2.4, node-fetch 2.7.0 (with whatwg-url 5.0.0, tr46 0.0.3 and webidl-conversions 3.0.1), zlibjs 0.3.1, regenerator-runtime 0.13.11 and opencollective-postinstall 2.0.3. All are MIT, except webidl-conversions (BSD-2-Clause). Most are used only in Node. **opencollective-postinstall** is tesseract.js's install script: it runs once during `npm ci` and only prints a message.
+| Library | Version | Licence | Inside |
+|---|---|---|---|
+| tesseract.js | 7.0.0 | Apache-2.0 | `worker.min.js` |
+| buffer | 6 | MIT | `worker.min.js` (Node's Buffer for the browser) |
+| base64-js | 1 | MIT | `worker.min.js` (used by buffer) |
+| ieee754 | 1.2 | BSD-3-Clause | `worker.min.js` (used by buffer) |
+| regenerator-runtime | 0.13.11 | MIT | `worker.min.js` |
+| zlib.js | 0.3.1 (npm package zlibjs) | MIT | `worker.min.js` (unzips the model) |
+| bmp-js | 0.1.0 | MIT | `worker.min.js` |
+| is-url | 1.2.4 | MIT | `worker.min.js` |
+| idb-keyval | 6.3.0 | Apache-2.0 | `worker.min.js` (keeps the model in the browser's IndexedDB) |
+| wasm-feature-detect | 1.9.0 | Apache-2.0 | `worker.min.js` (picks the engine build the browser supports) |
+| tesseract.js-core | 7.0.0 | Apache-2.0 | `tesseract-core*-lstm.wasm.js` |
+| Tesseract OCR | 5 (tesseract.js-core's fork, commit 2a9c1c4) | Apache-2.0 | `tesseract-core*-lstm.wasm.js` |
+| Leptonica | 1.83 | BSD-2-Clause-style Leptonica licence | `tesseract-core*-lstm.wasm.js` |
+| libjpeg | 9a | IJG licence | `tesseract-core*-lstm.wasm.js` |
+| libpng | 1.6.38 | libpng licence (PNG Reference Library License) | `tesseract-core*-lstm.wasm.js` |
+| libtiff | 4.3.0 | libtiff licence | `tesseract-core*-lstm.wasm.js` |
+| libwebp | 1.2.2 | BSD-3-Clause | `tesseract-core*-lstm.wasm.js` |
+| giflib | 5.1.4 | MIT | `tesseract-core*-lstm.wasm.js` |
+| zlib | 1.2.12 | Zlib | `tesseract-core*-lstm.wasm.js` |
+| openlibm | commit ae2d916 | MIT, ISC, BSD-2-Clause and the FDLIBM notice (its LGPL test files are not built) | `tesseract-core*-lstm.wasm.js` |
+
+Other indirect npm dependencies of tesseract.js, from the lockfile, used only in Node: node-fetch 2.7.0 (with whatwg-url 5.0.0, tr46 0.0.3 and webidl-conversions 3.0.1) and opencollective-postinstall 2.0.3. All are MIT, except webidl-conversions (BSD-2-Clause). **opencollective-postinstall** is tesseract.js's install script: it runs once during `npm ci` and only prints a message.
 
 ### The reading model
 | | |

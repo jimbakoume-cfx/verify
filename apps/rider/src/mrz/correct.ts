@@ -5,17 +5,19 @@
 //      never one that may be a name ("DOE<<K", "ANNA<X");
 //   3. snap lines that are 1-2 characters off by adding or removing a filler in their longest run
 //      of fillers;
-//   4. swap look-alike characters where the field decides between a letter and a digit: dates and
+//   4. now that the fields are known, turn K or X back into '<' anywhere in the run of fillers that
+//      ends an optional-data field (no names there; step 2 leaves the start of such a run alone);
+//   5. swap look-alike characters where the field decides between a letter and a digit: dates and
 //      check digits are digits, names and country codes are letters (O/0, I/1, B/8, S/5, Z/2,
 //      G/6, D/0, Q/0);
-//   5. when the document number's check digit fails and another OCR pass of the same band read a
+//   6. when the document number's check digit fails and another OCR pass of the same band read a
 //      look-alike at some position of the number (O where this one read 0...), try those swaps one
 //      at a time, and keep a swap only if it is the single one that makes both the number's own
 //      check digit and the composite check digit right.
 // Every window of consecutive candidate lines is tried, and the best-checking one is kept.
 //
-// The correction stays narrow on purpose: it must never make wrong data look valid. Steps 2-4
-// only fix characters whose field type leaves a single sensible reading. Step 5 needs evidence
+// The correction stays narrow on purpose: it must never make wrong data look valid. Steps 2-5
+// only fix characters whose field type leaves a single sensible reading. Step 6 needs evidence
 // beyond the check digit, because the check digit alone is weak: one digit modulo 10 lets about 1
 // wrong candidate in 10 through, and the composite adds nothing here (it starts with the document
 // number, so the number's characters weigh the same in both sums and a swap that fixes one fixes
@@ -84,14 +86,17 @@ export function cleanLine(raw: string): string {
 }
 
 /**
- * K, X and '«' read inside a run of fillers become '<' again: a K or X with at least two filler
- * characters on each side (or two before it at the end of the line), in a run where '<' is the
- * majority. A K or X that may be a name is left alone: one that follows a word of letters directly
- * or after one or two '<', such as an initial between names ("ANNA<K<<<") or a one-letter given
- * name after the surname ("DOE<<K<<<"). A K or X kept this way counts as such a word for the next
- * one ("DOE<<K<X<<<"). No check digit covers the names, so turning a real letter there into '<'
- * would change the data unseen. After a word with digits (a number, the dates), the run is
- * optional data, which check digits cover.
+ * K, X and '«' read inside a run of fillers become '<' again: a K or X with at least two '<' on each
+ * side within the run (or two before it at the end of the line), in a run where '<' is the
+ * majority. Only real '<' count: the third X of the unspecified nationality "XXX<<<<" has two X
+ * before it, not two fillers, and stays. A K or X that may be a name is left alone: one that
+ * follows a word of letters directly or after one or two '<', such as an initial between names
+ * ("ANNA<K<<<") or a one-letter given name after the surname ("DOE<<K<<<"). A K or X kept this way
+ * counts as such a word for the next one ("DOE<<K<X<<<"). No check digit covers the names, so
+ * turning a real letter there into '<' would change the data unseen. After a word with digits (a
+ * number, the dates), the run is optional data, which check digits cover. This step does not know
+ * the fields yet (the line may be a character or two off); restoreOptionalFillers finishes the
+ * optional data once it does.
  */
 export function restoreFillers(line: string): { line: string; changed: number } {
   const chars = line.split("");
@@ -115,8 +120,8 @@ export function restoreFillers(line: string): { line: string; changed: number } 
           sinceName = 0;
           continue;
         }
-        const before = k;
-        const after = run.length - 1 - k;
+        const before = chars.slice(i, i + k).filter((c) => c === "<").length;
+        const after = chars.slice(i + k + 1, end).filter((c) => c === "<").length;
         if (run[k] !== "<" && before >= 2 && (after >= 2 || end === chars.length)) {
           chars[i + k] = "<";
           changed++;
@@ -134,6 +139,46 @@ function followsName(chars: readonly string[], index: number): boolean {
   let start = index;
   while (start > 0 && chars[start - 1] !== "<") start--;
   return start < index && chars.slice(start, index).every((c) => c >= "A" && c <= "Z");
+}
+
+/**
+ * The optional-data fields, [line, from, to): letters, digits and fillers that check digits cover
+ * (the TD3 personal number has its own; the TD1 fields are in the composite). No names live there.
+ */
+export const OPTIONAL_DATA: Record<MrzFormat, [number, number, number][]> = {
+  TD1: [
+    [0, 15, 30],
+    [1, 18, 29],
+  ],
+  TD3: [[1, 28, 42]],
+};
+
+/**
+ * Finishes restoreFillers in the optional-data fields, now that the lines are the right size and
+ * the fields known: K and X in the run of fillers that ends such a field become '<', wherever they
+ * stand in it, when '<' is the majority of the run. restoreFillers leaves two kinds alone: those at
+ * the start of the run (right after a check digit or the nationality), which it cannot tell from
+ * the last letter of a word, and those just before the field's check digit, with fewer than two
+ * fillers after them. The run starts at the beginning of the field or at a '<': a K or X written
+ * right after other data ("ZE184226BK<<<") may belong to it and stays.
+ * K counts 0 in every check digit, like '<', so no check digit could catch a K left there: it would
+ * pass as data that is not on the document. An X left there fails the check digits instead.
+ */
+export function restoreOptionalFillers(lines: string[], format: MrzFormat): { lines: string[]; changed: number } {
+  let changed = 0;
+  const out = [...lines];
+  for (const [l, from, to] of OPTIONAL_DATA[format]) {
+    const field = out[l].slice(from, to);
+    let start = field.length;
+    while (start > 0 && "<KX".includes(field[start - 1])) start--;
+    if (start > 0) while (start < field.length && field[start] !== "<") start++;
+    const run = field.slice(start);
+    const fillers = run.split("").filter((c) => c === "<").length;
+    if (fillers === run.length || fillers * 2 <= run.length) continue;
+    changed += run.length - fillers;
+    out[l] = out[l].slice(0, from + start) + "<".repeat(run.length) + out[l].slice(from + field.length);
+  }
+  return { lines: out, changed };
 }
 
 /**
@@ -236,7 +281,7 @@ interface Candidate {
 /**
  * Corrects raw OCR text into the lines of a `format` MRZ; see the file comment. `otherReadings`
  * are raw texts of other OCR passes over the same band: they only serve as evidence for the
- * document-number repair (step 5).
+ * document-number repair (step 6).
  */
 export function correctMrz(rawText: string, format: MrzFormat, otherReadings: readonly string[] = []): CorrectedMrz {
   const evidence = otherReadings
@@ -260,14 +305,15 @@ function assemble(rawText: string, format: MrzFormat, evidence: readonly string[
   let best: Candidate | null = null;
   for (let i = 0; i + count <= prepared.length; i++) {
     const window = prepared.slice(i, i + count);
-    const swapped = swapByFieldType(
+    const optional = restoreOptionalFillers(
       window.map((w) => w.line),
       format,
     );
+    const swapped = swapByFieldType(optional.lines, format);
     const repaired = repairDocumentNumber(swapped.lines, format, evidence);
     const parsed = parseMrz(repaired.lines);
     if (!parsed) continue;
-    const corrections = window.reduce((s, w) => s + w.changed, 0) + swapped.changed + repaired.changed;
+    const corrections = window.reduce((s, w) => s + w.changed, 0) + optional.changed + swapped.changed + repaired.changed;
     const candidate = { lines: repaired.lines, corrections, parsed, index: i };
     if (!plausible(candidate, format)) continue;
     if (!best || better(candidate, best, format)) best = candidate;

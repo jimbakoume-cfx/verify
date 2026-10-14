@@ -15,8 +15,10 @@ const publicDir = path.join(root, "public");
  * picks the one the browser supports; engine mode 1 never loads the other three). They come from
  * node_modules, so an upgrade cannot be forgotten here. The folder is named after the version,
  * so the files can be cached forever: an upgrade must change OCR_ASSETS (and the model's cache key).
+ * The worker's licence file goes with it: the minified worker points to it for the copyright
+ * banners taken out of it (public/ocr/NOTICE.txt has the rest). Exported for model.test.ts.
  */
-function ocrFiles(): Record<string, string> {
+export function ocrFiles(): Record<string, string> {
   const require = createRequire(import.meta.url);
   const tesseract = path.dirname(require.resolve("tesseract.js/package.json"));
   const core = path.dirname(require.resolve("tesseract.js-core/package.json"));
@@ -28,7 +30,10 @@ function ocrFiles(): Record<string, string> {
     }
   }
   if (OCR_ASSETS.workerPath !== `/${folder}/worker.min.js`) throw new Error("OCR_ASSETS.workerPath must sit in corePath");
-  const files: Record<string, string> = { [`${folder}/worker.min.js`]: path.join(tesseract, "dist", "worker.min.js") };
+  const files: Record<string, string> = {
+    [`${folder}/worker.min.js`]: path.join(tesseract, "dist", "worker.min.js"),
+    [`${folder}/worker.min.js.LICENSE.txt`]: path.join(tesseract, "dist", "worker.min.js.LICENSE.txt"),
+  };
   for (const variant of ["lstm", "simd-lstm", "relaxedsimd-lstm"]) {
     files[`${folder}/tesseract-core-${variant}.wasm.js`] = path.join(core, `tesseract-core-${variant}.wasm.js`);
   }
@@ -82,7 +87,7 @@ function ocrAssets(): Plugin {
         const pathname = (req.url ?? "").split("?")[0].replace(/^\//, "");
         const file = files[pathname];
         if (!file) return next();
-        res.setHeader("Content-Type", "text/javascript; charset=utf-8");
+        res.setHeader("Content-Type", `${pathname.endsWith(".js") ? "text/javascript" : "text/plain"}; charset=utf-8`);
         res.end(readFileSync(file));
       });
     },

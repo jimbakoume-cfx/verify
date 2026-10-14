@@ -22,7 +22,7 @@ test("smudged code lines: tips and Retake, then 'Continue anyway' after 3 tries,
     await rider.autoCapture("cni_biometric", "document_back");
     await expect(rider.mrzWarning).toBeVisible();
     await expect(rider.mrzWarning.getByRole("listitem")).toHaveText([
-      rider.t("mrz.tipLines", { lines: 3 }),
+      rider.t("mrz.tipLines.TD1"),
       rider.t("mrz.tipGlare"),
       rider.t("mrz.tipSteady"),
     ]);

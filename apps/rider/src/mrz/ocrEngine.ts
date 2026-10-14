@@ -178,6 +178,9 @@ export function createOcrEngine(overrides: Partial<OcrEngineOptions> = {}): OcrE
     progress = 0;
     let created: Promise<TesseractWorker> | null = null;
     let started = false;
+    // Set when this start-up has timed out or failed: if tesseract.js is still being imported then,
+    // the attempt must not go on to start a worker that nothing would ever terminate.
+    let gaveUp = false;
     // The stage under way, for the estimate between tesseract.js's reports (see ESTIMATE).
     let stage = { status: "loading tesseract core", since: Date.now() };
     const estimate = () => {
@@ -196,6 +199,9 @@ export function createOcrEngine(overrides: Partial<OcrEngineOptions> = {}): OcrE
     };
     const attempt = (async () => {
       const tesseract = await opts.loadModule();
+      // Given up while importing (or disposed): starting the worker now would only download the
+      // engine again beside a newer start-up and keep a second engine in the phone's memory.
+      if (gaveUp || gen !== generation) throw new OcrError("aborted");
       // tesseract.js reports a failed start (for example the model download) only through
       // errorHandler; its own promise then never settles.
       let fail: (error: unknown) => void = () => {};
@@ -246,7 +252,9 @@ export function createOcrEngine(overrides: Partial<OcrEngineOptions> = {}): OcrE
       },
       (error: unknown) => {
         settle();
-        // A worker that finishes starting after we gave up is not needed any more.
+        gaveUp = true;
+        // A worker that finishes starting after we gave up is not needed any more. One whose
+        // import is still running is never started (see attempt).
         void (created as Promise<TesseractWorker> | null)?.then((w) => w.terminate()).catch(() => {});
         if (gen === generation) {
           loading = null;

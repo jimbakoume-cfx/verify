@@ -20,7 +20,9 @@ export function ReadingScreen({ shot, document, progress, onBack }: Props) {
   const side = t(sideLabelKey(document, shot.side));
   // The reader reports progress only while it first gets ready on this page, which downloads its
   // files the first time but is quick once they are cached: the text says so, without claiming
-  // which case this is. Then it just reads.
+  // which case this is. Then it just reads. The live text names the step only: screen readers
+  // announce it when it changes, and the percent, which changes several times a second, is left to
+  // the progress bar (aria-valuenow) and shown beside it, hidden from them.
   const percent = progress !== null && progress < 1 ? Math.round(progress * 100) : null;
 
   return (
@@ -38,19 +40,24 @@ export function ReadingScreen({ shot, document, progress, onBack }: Props) {
 
       <section className="card">
         <p className="reading-status" role="status">
-          {percent === null ? t("reading.body") : t("reading.download", { percent })}
+          {percent === null ? t("reading.body") : t("reading.download")}
         </p>
         {percent !== null && (
-          <div
-            className="progress"
-            role="progressbar"
-            aria-label={t("reading.progressLabel")}
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={percent}
-          >
-            <div className="progress-bar" style={{ width: `${percent}%` }} />
-          </div>
+          <>
+            <div
+              className="progress"
+              role="progressbar"
+              aria-label={t("reading.progressLabel")}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={percent}
+            >
+              <div className="progress-bar" style={{ width: `${percent}%` }} />
+            </div>
+            <p className="reading-percent" aria-hidden="true">
+              {t("reading.percent", { percent })}
+            </p>
+          </>
         )}
       </section>
 
