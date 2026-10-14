@@ -123,7 +123,7 @@ To publish: build the app with `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABL
 
 The rider build also writes the reading engine's files into `dist/ocr/7.0.0/`, next to the model in `dist/ocr/mrz-1/`. These paths are cached by phones for a year, so a new engine or model version must get a new folder name (see `apps/rider/src/mrz/types.ts`).
 
-Apply a milestone's database migration before publishing its dashboard: since M2 the case page reads `check_result.capture_id`, and since M3 `capture.superseded_by` and the server checks.
+Apply a milestone's database migration before publishing its dashboard: since M2 the case page reads `check_result.capture_id`, and since M3 `capture.superseded_by` and the server checks. For M3, deploy the three Edge Functions straight after the migration, in the same sitting: its trigger marks a replaced photo erased, but only the M3 `flow` function removes the file (order and checks: `docs/M3_SPEC.md`, "Deploy notes").
 
 The sites themselves hold no data: riders need a session link from staff, and the dashboard needs a staff sign-in.
 
@@ -133,7 +133,7 @@ The sites themselves hold no data: riders need a session link from staff, and th
 - `WORKER_KEY_ID`;
 - `WORKER_SIGNING_KEY`: **secret**, marked sensitive. Its public half goes into the database table `worker_key`.
 
-Vercel's firewall allows only `POST /api/process` and rate-limits it. Deploy steps, and the SQL to add or revoke a key, turn on real sessions or change the daily cap: `docs/M3_SPEC.md` ("Deploy notes", "Operating the worker"). **Real sessions stay off** (`worker_settings.enabled_for_real_sessions = false`) until Vercel Pro and its DPA are in place.
+Vercel's firewall allows only `POST /api/process` and rate-limits it (per IP address, at least 30 requests a minute, so that our own rings never meet the limit). Deploy steps, and the SQL to add or revoke a key, turn on real sessions or change the daily cap: `docs/M3_SPEC.md` ("Deploy notes", "Operating the worker"). **Real sessions stay off** (`worker_settings.enabled_for_real_sessions = false`) until Vercel Pro and its DPA are in place.
 
 ### Edge Function settings (Supabase secrets)
 All three functions (`flow`, `admin`, `worker`) are deployed with `verify_jwt = false` (`supabase/config.toml`): they check the rider's session token, the staff member's sign-in or the worker's signature themselves. Supabase provides `SUPABASE_URL` and the service key.

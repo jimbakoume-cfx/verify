@@ -22,7 +22,7 @@ version = "3.9.2"
 metadata = "Apache-2.0"
 license = "Apache-2.0"
 group = "runtime"
-note = "The wheel ships no LICENSE text; Apache-2.0 per its metadata and repository (RapidAI/RapidOCR). Attribution in the NOTICE."
+note = "The wheel ships no LICENSE text (nor its models'); Apache-2.0 per its metadata and repository (RapidAI/RapidOCR). Licence text and attribution in worker/NOTICE."
 
 [packages.onnxruntime]
 version = "1.30.0"
@@ -93,7 +93,7 @@ version = "4.9.3"
 metadata = "BSD"
 license = "BSD-3-Clause"
 group = "runtime"
-note = "Built from the source archive at install (setuptools 84.0.0, MIT, build time only); ANTLR is BSD 3-Clause."
+note = "Built from the source archive at install (setuptools 84.0.0, MIT, build time only); ANTLR is BSD 3-Clause. No licence file installed: its copyright and licence text are in worker/NOTICE."
 
 [packages.PyYAML]
 version = "6.0.3"
@@ -112,6 +112,7 @@ version = "25.12.19"
 metadata = "Apache Software License"
 license = "Apache-2.0"
 group = "runtime"
+note = "The wheel ships no LICENSE text; Apache-2.0 per its metadata and file headers (Google). Licence text and attribution in worker/NOTICE."
 
 [packages.colorlog]
 version = "6.12.0"

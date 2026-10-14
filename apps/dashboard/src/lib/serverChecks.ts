@@ -7,8 +7,6 @@ import {
   type ClassificationDetails,
   type DeclaredDocument,
   type DocumentPolicyDetails,
-  KEYWORD_GROUPS,
-  type KeywordGroup,
   MRZ_EXPECTATION,
   type MrzFormat,
   type MrzServerDetails,
@@ -128,14 +126,6 @@ export const VERDICT_TONE: Record<QualityServerDetails["verdict"], Tone> = {
 export function declaredMatch(details: Pick<ClassificationDetails, "matchesDeclared">): "yes" | "no" | "unknown" {
   if (details.matchesDeclared === null) return "unknown";
   return details.matchesDeclared ? "yes" : "no";
-}
-
-/** Keyword-group hits (counts only), in the contract's order, without the groups that had none. */
-export function keywordHitList(hits: Readonly<Record<string, number>>): { group: KeywordGroup; count: number }[] {
-  return KEYWORD_GROUPS.flatMap((group) => {
-    const count = hits[group] ?? 0;
-    return count > 0 ? [{ group, count }] : [];
-  });
 }
 
 /**

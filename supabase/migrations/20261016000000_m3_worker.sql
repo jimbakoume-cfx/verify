@@ -318,6 +318,9 @@ $$;
 
 -- Writes the case-level checks decided by the Edge Function: {version, classification: {outcome,
 -- score, details} or null, reasons: [...]}. Null: no photo of the case has a server result any more.
+-- The classification's details may hold only the keys of ClassificationDetails (contract.ts
+-- CLASSIFICATION_DETAIL_KEYS): supervisors and admins read check_result, and anything more, such as
+-- the keyword counts that tell a Cameroonian passport from a foreign one, stays in worker_job.evidence.
 -- The caller holds the case lock.
 create function private.worker_apply_case(p_verification uuid, p_case jsonb)
 returns void
@@ -327,6 +330,12 @@ as $$
 declare
   cls jsonb := p_case -> 'classification';
 begin
+  if cls is not null and jsonb_typeof(cls) <> 'null' and (
+       jsonb_typeof(cls -> 'details') is distinct from 'object'
+       or exists (select 1 from jsonb_object_keys(cls -> 'details') k
+                  where k not in ('detected', 'basis', 'provisional', 'matchesDeclared', 'confidence', 'qrPresent'))) then
+    raise exception 'worker_apply_case: unexpected classification details' using errcode = 'invalid_parameter_value';
+  end if;
   if cls is null or jsonb_typeof(cls) = 'null' then
     delete from public.check_result cr
      where cr.verification_id = p_verification and cr.capture_id is null and cr.check_name = 'classification';
@@ -1004,8 +1013,31 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
+-- Operations: files of replaced photos still in the bucket
+-- ---------------------------------------------------------------------------
+-- A replaced photo's row says it is erased; its file is removed by the flow function as it records
+-- the newer photo. A file stays when that removal failed (logged), or when the photo was replaced
+-- while the M2 flow still served riders: from the moment this migration is applied (its trigger marks
+-- the older photo replaced) until the M3 flow is deployed (the M2 flow never removes the file). Run by
+-- an administrator after the deploy (docs/M3_SPEC.md, "Deploy notes"): expected empty. What it lists is
+-- removed through the Storage API (never by SQL on storage.objects), then it is run again.
+create function private.superseded_files_left()
+returns table (capture_id uuid, storage_path text, replaced_at timestamptz)
+language sql
+stable
+set search_path = ''
+as $$
+  select c.id, c.storage_path, c.deleted_at
+  from public.capture c
+  join storage.objects o on o.bucket_id = 'id-captures' and o.name = c.storage_path
+  where c.superseded_by is not null
+  order by c.deleted_at, c.id
+$$;
+
+-- ---------------------------------------------------------------------------
 -- Privileges: the RPCs are for the service role only; the private helpers for nobody but their owner
 -- ---------------------------------------------------------------------------
+revoke execute on function private.superseded_files_left() from public;
 revoke execute on function private.worker_case_key(uuid) from public;
 revoke execute on function private.worker_lock_case(uuid) from public;
 revoke execute on function private.worker_newest_captures(uuid) from public;

@@ -4,7 +4,7 @@ The server side of the photo checks. For each photo a rider uploads, the worker:
 
 1. **re-checks the photo's quality**, with the same maths as the rider's phone (`packages/capture`, ported to numpy);
 2. **re-reads the code lines (MRZ)** from the image, and sends the candidate lines to Supabase, where the same corrector and parser as on the phone check them;
-3. **gathers evidence of the document type**: which way up the photo reads, keyword counts, whether a QR code is visible;
+3. **gathers evidence of the document type**: which way up the photo reads, keyword counts (kept with the job, never shown to staff: on a passport they would tell a Cameroonian one from a foreign one), whether a QR code is visible;
 4. **reads a few printed fields**: names and the issue date on documents with code lines; also the number and the birth and expiry dates on documents without them.
 
 The worker decides nothing: the Supabase Edge Function `worker` takes every decision from this evidence. The worker never stores anything. Photos stay in memory, and raw OCR text never leaves the process.
@@ -18,7 +18,7 @@ Vercel worker ── POST /claim  (signed) ──► Supabase worker function �
               ── POST /result (signed) ──►                          ── recorded / already_done
 ```
 
-- **A ring carries no authority and no data.** Anyone may ring. The worker then asks for work with requests signed by its own Ed25519 key, so nothing on the Vercel side can be replayed against Supabase. Vercel's firewall rate-limits rings.
+- **A ring carries no authority and no data.** Anyone may ring. The worker then asks for work with requests signed by its own Ed25519 key, so nothing on the Vercel side can be replayed against Supabase. Vercel's firewall rate-limits rings (sized in `docs/M3_SPEC.md`, "Deploy notes"). A ring the firewall refuses (429) is not taken as reached: the `flow` function tries it once more after a short pause, then reports the photo unchecked.
 - **The loop.** Each ring claims and processes jobs until there are none left (204) or about 50 s have passed, then answers `{"ok": true}`. It answers `{"ok": false}` with status 500 when the worker is misconfigured or something unexpected failed. Nothing else is ever in a response. The models load only after the first successful claim, so a ring with no work costs almost nothing. A job whose bytes are not the uploaded JPEG, or whose claim is malformed (for example a photo over 1,600 px), is skipped, not the whole ring: its lease runs out, the sweep retries it, and after the last attempt staff see it unchecked.
 - **Signatures** (`verify_worker/signing.py`): Ed25519 over
   `v1|confiance-verify/worker|<kid>|POST|<path>|<unix seconds>|<32 hex nonce>|<sha256 hex of the body>`.
@@ -38,9 +38,10 @@ Vercel worker ── POST /claim  (signed) ──► Supabase worker function �
 | `verify_worker/quality.py` | Port of `packages/capture`: card detection and confidence, the noise-free focus score (reported as `sharpness`, the value the phone compares with 5), glare, brightness. `tests/test_quality_parity.py` checks it gives exactly the TypeScript's numbers. |
 | `verify_worker/ocr.py` | RapidOCR with the PP-OCRv6 models from the rapidocr wheel (paths set, SHA-256 checked). It maps Greek and Cyrillic look-alike letters back to Latin. |
 | `verify_worker/classify.py` | Keyword groups, QR presence (detection only, never decoded), and the choice of rotation. |
-| `verify_worker/mrz.py` | Picks the candidate code lines. It does not correct them: the Edge Function does. Candidates leave the worker, so a printed row in capitals (a parent's name, a bilingual title) must not pass as one. |
+| `verify_worker/mrz.py` | Picks the candidate code lines. It does not correct them: the Edge Function does. Candidates leave the worker, so a printed row in capitals (a parent's name, a bilingual title, even with a letter misread as a digit) must not pass as one: a row needs fillers, the birth/expiry pattern, or the start of line 1 with a filler or the number's right check digit, or with a digit while sitting directly above line 2. |
 | `verify_worker/fields.py` | Reads the allowed printed fields, finding each value next to its French/English label. It parses dates in several formats and returns values in ASCII. |
 | `verify_worker/contract.py` | The constants of `supabase/functions/_shared/contract.ts` the worker uses (a test keeps them in sync). |
+| `NOTICE` | Licences and attributions of the packages whose wheels ship no licence text (rapidocr and its models, flatbuffers, antlr4). Deployed with the function; `tests/test_deploy_config.py` fails when a runtime package without licence text is missing from it. |
 
 ## Configuration (environment)
 

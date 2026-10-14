@@ -403,6 +403,10 @@ export interface WorkerQuality {
  * foreigner card together (carte de séjour, carte de résident, refugee card), so a count never reveals
  * which card it is. republic, field_labels and specimen are supporting evidence; the others each point
  * to one document family. The server refuses any other key.
+ *
+ * The counts stay in the job's evidence (worker_job.evidence, never readable by staff) and never reach
+ * check_result: on a passport, the "republic" header (RÉPUBLIQUE DU CAMEROUN) and how many labels or
+ * titles are printed tell a Cameroonian passport from a foreign one, which is the holder's nationality.
  */
 export const KEYWORD_GROUPS = [
   "republic",
@@ -542,16 +546,31 @@ export interface ClassificationDetails {
   /** 0..1 */
   confidence: number;
   qrPresent: boolean | null;
-  /** Keyword-group hit counts summed over the sides (no text). */
-  keywordHits: Record<string, number>;
+  // No keyword counts: they would tell a Cameroonian passport from a foreign one (see KEYWORD_GROUPS).
+  // The database refuses any other key (private.worker_apply_case).
 }
 
-/** Generic reasons a person must decide. No reason reveals the card sub-type or nationality. */
+/** The only keys of ClassificationDetails, in order (the database and the dashboard keep to them). */
+export const CLASSIFICATION_DETAIL_KEYS = [
+  "detected",
+  "basis",
+  "provisional",
+  "matchesDeclared",
+  "confidence",
+  "qrPresent",
+] as const satisfies readonly (keyof ClassificationDetails)[];
+
+/**
+ * Generic reasons a person must decide, in the order the dashboard lists them. No reason reveals the
+ * card sub-type or nationality.
+ */
 export const POLICY_REASONS = [
   "manual_review_document",
   "unsupported_document",
+  "unrecognised_document",
   "type_mismatch",
   "mrz_disagreement",
+  "mrz_invalid_server",
   "mrz_unreadable_server",
   "phone_report_missing",
   "provisional_classification",

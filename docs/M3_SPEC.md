@@ -105,8 +105,9 @@ Only the newest live photo of each side counts, everywhere: the rider's checks, 
 
 **Rings.**
 - The `flow` function rings when the rider chooses a document (a warm-up, so the worker starts while the rider frames the first photo; only for test sessions, or for every session once the switch is on), and after each accepted photo.
-- Rings run in the background after the answer is sent (`EdgeRuntime.waitUntil`), and stop listening after 30 seconds. A `429` (the firewall's rate limit, while a worker is already running) or a timeout counts as "worker reached".
-- A ring that fails marks the job, and `GET /flow/checks` then says `unchecked` at once instead of keeping the rider waiting.
+- Rings run in the background after the answer is sent (`EdgeRuntime.waitUntil`), and stop listening after 30 seconds. A timeout counts as "worker reached" (the worker answers only when its run ends).
+- A `429` comes from Vercel's firewall (its rate limit), before the worker: it does **not** mean a worker is running, because a run stops as soon as no job is left while the firewall keeps counting. The ring is tried once more after 5 seconds (or after the firewall's `Retry-After`, when it is 10 seconds or less); refused again, it has failed. The firewall rule is sized so that our own rings never reach it (see "Deploy notes").
+- A ring that fails marks the job, and `GET /flow/checks` then says `unchecked` at once instead of keeping the rider waiting. A job a worker has already claimed is never marked.
 - The ring URL is `WORKER_RING_URL` (HTTPS only). The test environment defaults to the worker's production address.
 
 **Claiming** (`worker_claim`), oldest job first:
@@ -158,6 +159,7 @@ From the newest live photo of each side:
 - **Firm, from code lines.** A passport-format line with a code starting `P`: **passport**, from any country. A card-format line issued by Cameroon (`CMR`): the **new CNI** when the holder is Cameroonian, otherwise **residence permit or refugee card**. A card issued by another state: **not accepted**. Confidence 1 when every check digit is right, 0.8 otherwise.
 - **Provisional, from printed words.** Without code lines, keyword groups decide: national ID, passport, residence (every foreigner card counted together), driving licence, voter card. Ties give "not recognised". A "national ID" with an upright front or a QR code counts as the new CNI, otherwise the old one. Confidence at most 0.5.
 - The outcome is `pass` only when it is firm and matches the declared document.
+- **No keyword counts are stored with it.** They stay in the job's evidence (`worker_job.evidence`, never readable by staff): on a passport, the "RÉPUBLIQUE DU CAMEROUN" header and the number of printed labels tell a Cameroonian passport from a foreign one, which is the holder's nationality. The database refuses classification details with any key outside the contract's list (`CLASSIFICATION_DETAIL_KEYS`).
 
 **Reasons for a person to decide (`document_policy`), generic codes only:**
 
@@ -165,14 +167,16 @@ From the newest live photo of each side:
 |---|---|---|
 | `manual_review_document` | function | the old CNI, a driving licence, a voter card, or **any** residence permit or refugee card (declared or detected) |
 | `unsupported_document` | function | code lines of an ID card issued by another state |
+| `unrecognised_document` | function | nothing recognised: no code lines, and no printed title of an accepted document (or two titles tied) |
 | `type_mismatch` | function | firm classification that differs from the declared document |
+| `mrz_invalid_server` | function | the server read code lines of the expected format on the side that carries them, but its `mrz_server` check failed: a check digit, a date or the document code is wrong (a damaged or altered document), even when the phone read the same lines |
 | `provisional_classification` | function | the type comes from printed words only |
 | `mrz_unreadable_server` | function | required code lines (passport, new CNI) not read by the server |
 | `server_unchecked` | database | the newest photo of a side could not be checked (job failed: budget, ineligible, 3 attempts, or an hour waiting) |
 | `phone_report_missing` | database | the server has checked the side that carries the code lines, and the phone's report for that photo is not there (it clears when a late report arrives) |
 | `mrz_disagreement` | database | the server read code lines and they are not the phone's |
 
-The reasons are stored sorted. Every residence permit goes to a person, including the new cards whose code lines check out, so that the reason never tells a refugee card from the others.
+The reasons are stored sorted. Every residence permit goes to a person, including the new cards whose code lines check out, so that the reason never tells a refugee card from the others. A `poor` photo (provisional limits) is shown under the photo and never becomes a reason on its own, and its explanation says so.
 
 **Two photos finishing at once.** The function decides the case-level checks from a snapshot of the case, and the database writes them only if the case's fingerprint has not changed since. Otherwise it answers `stale` and the function decides again from a fresh snapshot (up to 5 rounds). Every writer of a case's checks first takes one lock per case, then touches rows, so writers wait in line instead of blocking each other. The same refresh runs when a photo is replaced.
 
@@ -212,7 +216,7 @@ Full details: `apps/rider/README.md`, section "Server checks (M3)".
 The case page now reads, top to bottom: summary, **Server checks**, **Code lines (MRZ)** (the phone's reading, as in M2), **Data read from the document**, Photos.
 
 - **Server checks** (`CaseServer.tsx`, rules in `lib/serverChecks.ts`):
-  - **Document recognised:** the type found against the type declared, with ✅/❌/— for the match; what it is based on ("the code lines (firm)" or "printed words (provisional)"); confidence; QR code seen; counts per keyword group; the outcome and the check version.
+  - **Document recognised:** the type found against the type declared, with ✅/❌/— for the match; what it is based on ("the code lines (firm)" or "printed words (provisional)"); confidence; QR code seen; the outcome and the check version. **No keyword counts** (see "Per case"): a row that still carried them is read without them.
   - **For a person to decide:** each reason with a French/English label, an explanation and its generic code.
   - **Per side, the newest live photo only:**
     - the photo check: Usable / Poor quality / No document found / No readable text, a Provisional badge, an explanation when it is not "Usable", and the measures (text lines, document found and confidence, the focus score labelled with its threshold of 5, never "Sharpness" like the phone's raw Laplacian variance in Photos, glare, brightness, long side, processing time and whether the models had to load first, engine and version);
@@ -279,9 +283,11 @@ The migration needs PostgreSQL 16 or later (it uses `IS JSON OBJECT`).
   | `flow_check_state` | what `GET /flow/checks` needs |
 
   `flow_record_mrz` now also compares the phone's lines with the server's when the server was first. `staff_read_document_data` returns `lines` or `fields`, from live photos only, and still writes its audit entry before decrypting.
+
+  `private.superseded_files_left()` (administrators only, in the SQL editor) lists the replaced photos whose file is still in the bucket; it is run after the deploy (see "Deploy notes") and should be empty.
 - **Locking:** every writer of a case's server checks takes the same per-case advisory lock first, so writers queue instead of deadlocking.
 - **pg_net and pg_cron** are enabled inside guarded blocks, so the migration still applies on plain PostgreSQL (CI). The migration stores the ring URL in Vault (`worker_ring_url`, the worker's production address; public) and schedules the job `worker-sweep` every minute when pg_cron is present.
-- **CI stub** (`supabase/tests/00_supabase_stub.sql`): stand-ins for `net.http_post` (it records calls, so the sweep's ring is tested) and `cron.schedule`.
+- **CI stub** (`supabase/tests/00_supabase_stub.sql`): stand-ins for `net.http_post` (it records calls, so the sweep's ring is tested), `cron.schedule` and `storage.objects` (so the deploy check on replaced photos' files is tested).
 
 ### Operating the worker (SQL, run by an administrator)
 ```sql
@@ -304,7 +310,7 @@ Python 3.12, one Vercel function (`api/process.py`, project `confiance-verify-wo
 | Quality | `quality.py` | the phone's maths, ported (identical numbers on 13 reference images) |
 | OCR | `ocr.py` | RapidOCR 3.9.2 with PP-OCRv6 detection and recognition ("small" models, from the rapidocr wheel; SHA-256 checked at load; explicit paths, so nothing is ever downloaded); the line-orientation classifier is off; Greek and Cyrillic look-alike letters mapped back to Latin |
 | Rotation and type evidence | `classify.py` | tries the likely rotation first (the new cards' upright front arrives sideways), another only when the first reads too little; keyword-group counts; QR code **detected, never decoded** |
-| Code lines | `mrz.py` | picks the candidate lines; no correction (the Edge Function does that). A row in capitals is never a candidate on its look alone: it needs fillers, the birth/expiry pattern, or a TD1/TD3 header with a filler or the number's check digit, so parents' names and titles never leave the worker |
+| Code lines | `mrz.py` | picks the candidate lines; no correction (the Edge Function does that). A row in capitals is never a candidate on its look alone: it needs fillers, the birth/expiry pattern, or a TD1/TD3 header with a filler or the document number's check digit in place and right (exact arithmetic on the characters as read), or a header with a digit in the number while sitting directly above line 2 at code-line spacing. So parents' names and titles do not leave the worker, even with a letter misread as a digit (every single misread of the test names stays out; a name would need a digit exactly at the check digit's place, and the right one). On the server, candidates exist only inside the corrector: only the expected lines are kept (encrypted), the others are discarded unlogged |
 | Fields | `fields.py` | documents with code lines: full names and issue date only. Others: names, document number, birth, expiry and issue dates. **Never** parents' names, address, height, place of birth, occupation, distinguishing marks, the 17-digit unique identifier or the passport's card access number. Values sent upper case without accents (HÉLÈNE → HELENE) |
 | Logs | `log.py` | event codes, exception class names and numbers only; third-party loggers at ERROR |
 
@@ -327,8 +333,8 @@ Python 3.12, one Vercel function (`api/process.py`, project `confiance-verify-wo
 | `POST /worker/result` | Candidate code lines and the selected fields only (HTTPS), on their way to the database |
 | `worker` and `flow` Edge Function logs | Never: codes only |
 | `extracted_document_data` | Encrypted only: phone lines, server lines, printed fields and the card sub-type |
-| `check_result.details` | Never: outcomes, generic codes, counts, measures, and field **names**. Never the card sub-type or a nationality. |
-| `worker_job.evidence` | Never: generic family codes, counts, flags; not readable by staff |
+| `check_result.details` | Never: outcomes, generic codes, measures (with the number of text lines), and field **names**. Never the card sub-type, a nationality, or keyword counts (which would tell a Cameroonian passport from a foreign one); the database refuses any other key in the classification. |
+| `worker_job.evidence` | Never: generic family codes, keyword-group counts, flags; not readable by staff |
 | `audit_event` | Never: `worker.image` `{jobId, attempt, verificationId, byteSize}`, `worker.result` `{jobId, captureId, attempt, checks: outcome per check}`, `worker.job_failed` `{jobId, captureId, code, attempts}`, `capture.create` adds `replaced` |
 | `GET /flow/checks` | Never: states and generic reasons |
 | pg_net's response table | Never: `{"ok":true}`, kept 6 hours |
@@ -368,7 +374,7 @@ The recognised family says whether the card is a new CNI (Cameroonian holder) or
   - the decision tables (quality, code lines, classification, reasons);
   - the stale-and-retry path;
   - `GET /flow/checks` states and retake rules;
-  - rings (429, timeout, failure);
+  - rings (timeout; a 429 tried once more, then a failure; failure);
   - replaced photos;
   - a fixed message for every new error code.
 - **Signatures:** fixed vectors (RFC 8032 test key), produced identically by Node's WebCrypto and the worker's Python `cryptography`.
@@ -378,7 +384,7 @@ The recognised family says whether the card is a new CNI (Cameroonian holder) or
   - supersession;
   - first result wins, and stale refusals;
   - erased photos;
-  - nothing personal in `details`;
+  - nothing personal in `details`, and no key outside the contract's in the classification (keyword counts refused);
   - the phone comparison in both orders;
   - the sweep (requeue, give up, ring through the pg_net stand-in);
   - audit order and the hash chain;
@@ -388,12 +394,13 @@ The recognised family says whether the card is a new CNI (Cameroonian holder) or
   - byte checks;
   - quality parity with the TypeScript;
   - text normalisation;
-  - code-line candidates, including that parents' names and bilingual titles in capitals are never candidates;
+  - code-line candidates, including that parents' names and bilingual titles in capitals are never candidates, even with any one letter misread as a digit;
   - classification;
   - fields, including that a never-read field's value never comes out, neither as a field nor as a candidate;
   - the ring loop against a fake API;
   - the HTTP handler;
-  - log hygiene.
+  - log hygiene;
+  - the deploy settings, and that every runtime package without licence text is in `worker/NOTICE`.
 
   The real-OCR run reads all 27 test photos. An integration test runs the server's own corrector and parser (in Deno) on the worker's candidates: on every readable test document they give exactly the printed lines, with every check digit right.
 - **Rider:** the reducer (retakes, limits, overrides, both sides, the code-lines side), polling, timeouts, the split uploader. The hook that wires them (`useFlow.ts`) needs the browser tests.
@@ -426,7 +433,7 @@ The recognised family says whether the card is a new CNI (Cameroonian holder) or
 | Show data read | The server's code lines identical to the phone's; names and issue date right (accents dropped). Each view appears in the audit log. |
 | Privacy | Nothing read from the document appears anywhere but "Show data read". |
 
-**Measured, not passed or failed** (provisional, to be tuned with your photos): the type of the old CNI, driving licence and voter card (expect "Type recognised provisionally" and "Always checked by a person"), and which printed fields were found and right on those documents. Please report, per document: the type shown, which fields were wrong or missing, the processing time shown per side ("models loaded first" marks a cold start), and screenshots of the "Server checks" section. The screenshots show no values.
+**Measured, not passed or failed** (provisional, to be tuned with your photos): the type of the old CNI, driving licence and voter card (expect "Type recognised provisionally", or "Document not recognised" when the printed title was missed, and "Always checked by a person"), and which printed fields were found and right on those documents. Please report, per document: the type shown, which fields were wrong or missing, the processing time shown per side ("models loaded first" marks a cold start), and screenshots of the "Server checks" section. The screenshots show no values.
 
 **Specimen photos (next step, tuning).** With the lawyer's consent form, volunteers' own documents only, front and back, sharp and without glare, on 2–3 phones (Tecno, Itel, Samsung A) in good and dim light:
 - the new CNI (at least 8 people);
@@ -451,7 +458,9 @@ Staff type the true values in the test project only. The same photos serve G4 fo
 - **Case-level checks are written only if the case has not changed since the snapshot** they were decided from (two photos finishing at the same moment). The database itself maintains `server_unchecked`, `phone_report_missing` and `mrz_disagreement`.
 - **`KEYWORD_GROUPS`** was added to the contract (additive), so the server can refuse any other key.
 - **`WorkerQuality.sharpness` is the phone's noise-free focus score**, the value the phone compares with 5, not the raw Laplacian variance.
-- **A ring answered `429`, or still running after 30 s, counts as reached.**
+- **A ring still running after 30 s counts as reached; a ring answered `429` is tried once more, then fails.** The firewall's rate limit is sized so that our own rings never meet it.
+- **Two more generic reasons:** `mrz_invalid_server` (the server read the expected code lines and they fail their checks) and `unrecognised_document` (nothing recognised; `provisional_classification` now means "recognised from printed words" only).
+- **No keyword counts on the dashboard or in `check_result`:** they stay in the job's evidence (see "Per case").
 - **`GET /flow/checks` also answers `409 missing_sides`** when a required side has no live photo.
 - **Staff read each job's status** (`capture_id`, `verification_id`, `status` of `worker_job`, nothing else), so the dashboard decides "waiting" or "not checked" per photo instead of from the case-wide `server_unchecked` reason, and shows photos taken before M3 as never sent.
 - **The rider also skips a retake after an override** ("Use it anyway", "Continue anyway"); the server alone could not know about overrides.
@@ -475,7 +484,7 @@ Staff type the true values in the test project only. The same photos serve G4 fo
   - pg_net and pg_cron, tested only against stand-ins;
   - the "skip a busy case" paths of the claim and the sweep (a single-session SQL test cannot exercise them).
 - **Best effort after a replaced photo:**
-  - if removing the old file fails, the file stays, with its row marked erased (logged); a later retention job must find such files by listing the bucket;
+  - if removing the old file fails, the file stays, with its row marked erased (logged). `private.superseded_files_left()` lists such files; nothing removes them automatically yet: the retention job (M13) must (open item in `THREAT_MODEL.md`);
   - if re-deciding the case fails, it is logged, and the next result for that case corrects it.
 - **A late result from an earlier attempt is accepted** while the job is pending, claimed or failed (the first result wins). A job given up as `ineligible` after one attempt can therefore still record that attempt's result.
 - **The QR code on the new cards is only detected**, never read; its signature cannot be checked without the issuer's certificate.
@@ -483,27 +492,28 @@ Staff type the true values in the test project only. The same photos serve G4 fo
 - **The dashboard has no browser tests** (as in M2): its logic is unit-tested, its layout was checked by screenshots.
 
 ## Deploy notes
-1. **Apply the migration before publishing the new dashboard**, which reads `capture.superseded_by` and the new check names.
-   - The migration enables pg_net and pg_cron, stores `worker_ring_url` in Vault and schedules `worker-sweep`.
-   - Check on the live project: `net.http_post` has the expected signature, and `select jobname, schedule from cron.job;` lists the sweep.
-   - The security advisor will report "RLS enabled, no policy" (INFO) for the four new tables. This is intended.
-2. **Worker key pair**, generated with `umask 077` and never printed:
+The order matters. From the moment the migration is applied, its trigger marks the older photo of a side as erased and replaced whenever a newer one arrives, but only the M3 `flow` function removes the replaced photo's file. The M2 `flow` never does: every photo a rider replaced while it still served would keep its file for good, with its row saying it is erased. So the migration and the three Edge Functions go out together, before anything else. The M3 functions do not need the worker to be ready: until Vercel answers, every ring fails, so each photo is reported "unchecked" at once and riders are never held up.
+
+1. **Database and Edge Functions, in one sitting:**
+   - apply the migration. It enables pg_net and pg_cron, stores `worker_ring_url` in Vault and schedules `worker-sweep`;
+   - **straight away**, deploy `flow`, `admin` and `worker` (with its `[functions.worker]` settings), and set `WORKER_RING_URL` for `flow` explicitly in production (the test environment defaults to the Vercel address);
+   - check on the live project: `net.http_post` has the expected signature, and `select jobname, schedule from cron.job;` lists the sweep. The security advisor will report "RLS enabled, no policy" (INFO) for the four new tables. This is intended;
+   - **check that no replaced photo kept its file:** `select * from private.superseded_files_left();` (SQL editor, as an administrator) must return no row. If it lists any (photos replaced in the minutes between the migration and the functions), remove those files from the `id-captures` bucket through the Storage API or the dashboard's Storage page, never by SQL on `storage.objects`, then run it again.
+2. **Publish the dashboard and the rider app.** The dashboard reads `capture.superseded_by` and the new check names; the rider app shows "Checking your photos…" and is needed for the live runs.
+3. **Worker key pair**, generated with `umask 077` and never printed:
    - the private seed goes to Vercel as a sensitive production variable, then the file is shredded;
    - the public key goes into `worker_key` (SQL above).
-3. **Vercel project `confiance-verify-worker`:**
+4. **Vercel project `confiance-verify-worker`:**
    - root `worker/`, region `cdg1`, no Git deployments;
-   - set the four variables (above), deploy to production, and use the production address;
-   - **check that everything was bundled:** the build log must not say "Bundle size … exceeds the standard size; optimizing dependencies" (the install-on-cold-start mode), and the function's files must not contain `_uv/_runtime_config.json`. Record the bundle size and the result. If Vercel refuses the bundle on Hobby, keep the flag and do the slim OpenCV build first;
-   - **firewall:** allow only `POST /api/process`, and rate-limit it.
-4. **Edge Functions:**
-   - set `WORKER_RING_URL` for `flow` explicitly in production (the test environment defaults to the Vercel address);
-   - deploy `worker` (with its `[functions.worker]` settings), `flow` and `admin`;
-   - run the Ed25519 smoke test.
-5. **Live runs** in headless Chromium with the test photos: passport, new CNI, old CNI, driving licence, and the blank card (`unreadable`, one retake).
+   - set the four variables (above), deploy to production, and use the production address (it must be the `WORKER_RING_URL` set in step 1 and the `worker_ring_url` in Vault);
+   - **check that everything was bundled:** the build log must not say "Bundle size … exceeds the standard size; optimizing dependencies" (the install-on-cold-start mode), and the function's files must not contain `_uv/_runtime_config.json`. They must contain `NOTICE` (the licences of the wheels that ship none). Record the bundle size and the result. If Vercel refuses the bundle on Hobby, keep the flag and do the slim OpenCV build first;
+   - **firewall:** allow only `POST /api/process`, and rate-limit it **per IP address, at no fewer than 30 requests per 60 seconds**. Our own rings come from a few Supabase addresses that every rider shares: one session sends at most five rings in a minute or two (the warm-up, two photos, two retakes) and the sweep one a minute while a job waits, so 30 leaves room for several testers at once. A stranger's address is held to 30 wake-ups a minute, each of which finds no job and stops (the models load only after a claim). Record the rule (key, threshold, window). A ring refused anyway (429) is tried once more after a short pause, then the photo is reported unchecked and the sweep rings again within a minute.
+5. **Ed25519 smoke test** on the Edge Runtime: a ring with a job waiting must end with the job `done` (the `worker` function verified the worker's signatures).
+6. **Live runs** in headless Chromium with the test photos: passport, new CNI, old CNI, driving licence, and the blank card (`unreadable`, one retake).
    - Each run is checked for: the checks screen, `check_result`, encrypted rows with no plaintext, and the audit chain.
    - Cold and warm times (median and 95th percentile) and the CPU used are measured.
-   - Also checked: unsigned, replayed and wrong-audience requests are refused; the sweep rings a stuck job; a real session is not processed.
-6. Then the PM test above.
+   - Also checked: unsigned, replayed and wrong-audience requests are refused; the sweep rings a stuck job; a real session is not processed; `private.superseded_files_left()` is still empty after the retake run.
+7. Then the PM test above.
 
 ## Out of scope for M3
 - Expiry, age, and code lines compared with printed text: M4.

@@ -180,23 +180,11 @@
       },
       "confidence": "Confiance",
       "qr": "Code QR vu",
-      "keywords": "Mots trouvés sur les photos (nombre)",
-      "noKeywords": "Aucun",
       "match": {
         "yes": "Correspond au document déclaré",
         "no": "Ne correspond pas au document déclaré",
         "unknown": "Impossible de dire s'il correspond au document déclaré"
       }
-    },
-    "keywordGroups": {
-      "republic": "République",
-      "national_id": "Carte nationale d'identité",
-      "passport": "Passeport",
-      "residence": "Séjour ou réfugié",
-      "driving_licence": "Permis de conduire",
-      "voter_card": "Carte d'électeur",
-      "field_labels": "Libellés des champs",
-      "specimen": "Spécimen"
     },
     "reasons": {
       "title": "À décider par une personne",
@@ -206,8 +194,10 @@
       "label": {
         "manual_review_document": "Toujours vérifié par une personne",
         "unsupported_document": "Document non accepté",
+        "unrecognised_document": "Document non reconnu",
         "type_mismatch": "Pas le document déclaré",
         "mrz_disagreement": "Lignes de code différentes",
+        "mrz_invalid_server": "Lignes de code non conformes",
         "mrz_unreadable_server": "Lignes de code non lues par le serveur",
         "phone_report_missing": "Rapport du téléphone manquant",
         "provisional_classification": "Type reconnu à titre provisoire",
@@ -216,8 +206,10 @@
       "body": {
         "manual_review_document": "Ce type de document est toujours examiné par une personne : il n'a pas de lignes de code que le serveur peut contrôler (ancienne CNI, permis de conduire, carte d'électeur), ou c'est un titre de séjour ou une carte de réfugié.",
         "unsupported_document": "Les lignes de code indiquent une carte d'identité délivrée par un autre État, qui n'est pas acceptée.",
+        "unrecognised_document": "Le serveur n'a trouvé sur les photos ni lignes de code ni le titre imprimé d'un document accepté : il n'a pas pu dire de quel document il s'agit.",
         "type_mismatch": "Les lignes de code indiquent un autre type de document que celui déclaré par le passager.",
         "mrz_disagreement": "Les lignes de code lues par le serveur sur la photo ne sont pas celles lues sur le téléphone.",
+        "mrz_invalid_server": "Le serveur a lu sur la photo des lignes de code au format attendu, mais un chiffre de contrôle, une date ou le code du document est faux : le document est peut-être abîmé ou modifié. C'est vrai même si le téléphone a lu les mêmes lignes.",
         "mrz_unreadable_server": "Le serveur n'a pas pu lire sur la photo des lignes de code au format attendu.",
         "phone_report_missing": "La lecture des lignes de code par le téléphone n'a pas été reçue : la lecture du serveur n'a donc pas pu lui être comparée.",
         "provisional_classification": "Le type de document a été reconnu d'après les mots imprimés seulement, pas d'après des lignes de code. C'est provisoire tant que les réglages n'ont pas été faits sur de vrais documents.",
@@ -231,7 +223,7 @@
       "unreadable": "Aucun texte lisible"
     },
     "verdictBody": {
-      "poor": "Une mesure sort des valeurs habituelles. La photo a été gardée et elle est signalée pour une personne.",
+      "poor": "Une mesure sort des valeurs habituelles (limites provisoires, pas encore réglées sur de vrais documents). La photo a été gardée et ce n'est pas à lui seul un motif : comparez-la avec les mesures ci-dessous.",
       "no_document": "Le serveur n'a trouvé aucun document sur cette photo. Le passager est invité à la reprendre une fois au plus ; c'est la photo gardée.",
       "unreadable": "Le serveur n'a trouvé presque aucun texte sur cette photo. Le passager est invité à la reprendre une fois au plus ; c'est la photo gardée."
     },

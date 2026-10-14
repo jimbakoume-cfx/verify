@@ -57,13 +57,18 @@ The full list of every indirect npm package and its licence is in `package-lock.
 
 ## AI worker (M3): Python packages, native parts and models
 
-The worker (`worker/`) runs as our own service on Vercel; its code is never given to anyone else. Licence notices are still recorded here, as for anything we ship. **The rapidocr 3.9.2 wheel contains no licence file at all:** Apache-2.0 asks for a copy of the licence with the software, so the Apache-2.0 text and the RapidOCR attribution must be kept in a notice file with the worker (to add: `worker/NOTICE`).
+The worker (`worker/`) runs as our own service on Vercel; its code is never given to anyone else. Licence notices are still recorded here, and shipped with the code, as for anything we ship. Most wheels carry their licence and notice files in their `.dist-info` or package folders, and those are deployed with them. **Three runtime wheels contain no licence file at all:**
+- **rapidocr 3.9.2** (Apache-2.0), including the three PP-OCR models inside it (Apache-2.0, PaddlePaddle Authors / Baidu); the wheel has no `MODEL_LICENSES.md` either;
+- **flatbuffers 25.12.19** (Apache-2.0, Google): its files only point to the licence's URL;
+- **antlr4-python3-runtime 4.9.3** (BSD-3-Clause, The ANTLR Project): its files refer to a `LICENSE.txt` that is not installed.
+
+Apache-2.0 asks for a copy of the licence with the software, and BSD-3-Clause for the copyright notice and licence text with a binary. **`worker/NOTICE`** therefore holds the attributions (RapidAI/RapidOCR with the PaddlePaddle and PytorchOCR notices in its code, the PP-OCR models, Google FlatBuffers), the full Apache-2.0 text, and ANTLR's copyright and BSD-3-Clause text, checked against ANTLR's own `LICENSE.txt` at tag 4.9.3. It is deployed with the function (neither `.vercelignore` nor `excludeFiles` drops it). `worker/tests/test_deploy_config.py` fails when a runtime package installs no licence file and is not named, with its version, in `worker/NOTICE`.
 
 ### Python packages (`worker/uv.lock`, exact versions, nothing published after 2026-10-01)
 
 | Package | Version | Licence | Why it is there |
 |---|---|---|---|
-| **rapidocr** | 3.9.2 | Apache-2.0 (the wheel ships no licence text; see above) | OCR pipeline; its wheel carries the PP-OCR models we load |
+| **rapidocr** | 3.9.2 | Apache-2.0 (the wheel ships no licence text: in `worker/NOTICE`) | OCR pipeline; its wheel carries the PP-OCR models we load |
 | **onnxruntime** | 1.30.0 | MIT (its `ThirdPartyNotices.txt` lists the libraries compiled in, among them Eigen, MPL-2.0) | Runs the OCR models |
 | **opencv-python-headless** | 4.14.0.94 | Apache-2.0 (OpenCV) and MIT (the packaging scripts); **bundled parts below** | Image operations RapidOCR needs; QR code *detection* (never decoding) |
 | **numpy** | 2.5.3 | BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0; **bundled parts below** | Arrays; our quality maths |
@@ -74,10 +79,10 @@ The worker (`worker/`) runs as our own service on Vercel; its code is never give
 | shapely | 2.1.2 | BSD-3-Clause; **bundles GEOS (LGPL-2.1)**, below | RapidOCR's text-box geometry (one area/length call) |
 | pyclipper | 1.4.0 | MIT; compiles in Clipper 6.4.2 (BSL-1.0) | RapidOCR's text-box expansion |
 | omegaconf | 2.3.1 | BSD-3-Clause (its metadata says only "BSD License") | RapidOCR's configuration |
-| antlr4-python3-runtime | 4.9.3 | BSD-3-Clause (its metadata says only "BSD") | Dependency of omegaconf. Published as source only, so it is built at install time with **setuptools 84.0.0 (MIT)**, pinned by `build-constraint-dependencies`; that build dependency's hash is not in `uv.lock`. omegaconf 2.4.0 drops it (adoptable after 2026-10-23). |
+| antlr4-python3-runtime | 4.9.3 | BSD-3-Clause (its metadata says only "BSD"; no licence file installed: in `worker/NOTICE`) | Dependency of omegaconf. Published as source only, so it is built at install time with **setuptools 84.0.0 (MIT)**, pinned by `build-constraint-dependencies`; that build dependency's hash is not in `uv.lock`. omegaconf 2.4.0 drops it (adoptable after 2026-10-23). |
 | PyYAML | 6.0.3 | MIT | Dependency of omegaconf |
 | protobuf | 7.36.2 | BSD-3-Clause | Dependency of onnxruntime |
-| flatbuffers | 25.12.19 | Apache-2.0 | Dependency of onnxruntime |
+| flatbuffers | 25.12.19 | Apache-2.0 (the wheel ships no licence text: in `worker/NOTICE`) | Dependency of onnxruntime |
 | packaging | 26.3 | Apache-2.0 OR BSD-2-Clause | Dependency of onnxruntime |
 | colorlog | 6.12.0 | MIT | RapidOCR's logger (set to ERROR) |
 | tqdm | 4.70.1 | MPL-2.0 AND MIT | Dependency of RapidOCR (progress bars for downloads we never make) |
@@ -125,7 +130,7 @@ Taken from each wheel's `.libs` folder, its extension modules and its notices (c
 ### OCR models (inside the rapidocr 3.9.2 wheel)
 | File | SHA-256 | Licence | Use |
 |---|---|---|---|
-| `PP-OCRv6_det_small.onnx` (text detection) | `090f04abcd9d9a7498bc4ebf677e4cb9bdce1fe4197ddb7e529f1ef44e1ff94f` | Apache-2.0 (copyright Baidu / PaddleOCR; RapidOCR's `MODEL_LICENSES.md`) | Finds the text lines |
+| `PP-OCRv6_det_small.onnx` (text detection) | `090f04abcd9d9a7498bc4ebf677e4cb9bdce1fe4197ddb7e529f1ef44e1ff94f` | Apache-2.0 (copyright Baidu / PaddleOCR; RapidOCR's `MODEL_LICENSES.md`, which the wheel does not include: attribution in `worker/NOTICE`) | Finds the text lines |
 | `PP-OCRv6_rec_small.onnx` (text recognition, 50 languages, French accents) | `6f327246b50388f3c176ae304bd95767ea6dc0c9ae92153ef8cbe210b3c14884` | Apache-2.0 (same) | Reads them |
 | `ch_ppocr_mobile_v2.0_cls_mobile.onnx` (line orientation) | `e47acedf663230f8863ff1ab0e64dd2d82b838fceb5957146dab185a89d6215c` | Apache-2.0 (same) | Loaded by RapidOCR's constructor, **never run** (it flips code lines on degraded photos) |
 

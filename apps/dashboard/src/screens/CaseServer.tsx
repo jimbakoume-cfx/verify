@@ -12,7 +12,6 @@ import { formatMrzFormat, serverMrzCheckLines } from "../lib/mrz";
 import type { CaptureRecord, CheckRecord, ServerChecks, VerificationSummary } from "../lib/records";
 import {
   declaredMatch,
-  keywordHitList,
   type ServerOverview,
   type ServerSide,
   SERVER_FOCUS_LABEL,
@@ -145,14 +144,6 @@ function DocumentItem({
             <div>
               <dt>{t("mrz.parserVersion")}</dt>
               <dd>{classification?.checkVersion || "—"}</dd>
-            </div>
-            <div className="dash-facts-wide">
-              <dt>{t("serverChecks.document.keywords")}</dt>
-              <dd>
-                {keywordHitList(d.keywordHits)
-                  .map(({ group, count }) => `${t(`serverChecks.keywordGroups.${group}`)} ${formatNumber(count, lang)}`)
-                  .join(" · ") || t("serverChecks.document.noKeywords")}
-              </dd>
             </div>
           </dl>
         </>

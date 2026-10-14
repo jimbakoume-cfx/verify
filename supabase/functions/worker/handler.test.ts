@@ -585,13 +585,18 @@ describe("POST /result", () => {
   it("decides the case from both sides: the second result sees the first one's evidence", async () => {
     const h = await setup();
     const c = h.repo.addCase("cni_biometric", ["document_front", "document_back"], "claimed");
-    await h.send("/result", result(c.document_front!.jobId, { classification: { rotation: 90, keywordHits: { national_id: 2 }, qrPresent: false, orientation: "portrait" } }));
+    await h.send("/result", result(c.document_front!.jobId, { classification: { rotation: 90, keywordHits: { national_id: 2 }, qrPresent: true, orientation: "portrait" } }));
     expect(h.repo.caseChecks.get(c.verificationId)?.classification?.details).toMatchObject({ basis: "keywords", detected: "cni_biometric" });
-    await h.send("/result", result(c.document_back!.jobId, { mrzCandidates: td1Cmr(), classification: { rotation: 0, keywordHits: {}, qrPresent: true, orientation: null } }));
+    await h.send("/result", result(c.document_back!.jobId, { mrzCandidates: td1Cmr(), classification: { rotation: 0, keywordHits: {}, qrPresent: false, orientation: null } }));
+    // The QR code was seen on the front only: the back's decision used the front's evidence.
     expect(h.repo.caseChecks.get(c.verificationId)).toMatchObject({
-      classification: { details: { basis: "mrz", detected: "cni_biometric", keywordHits: { national_id: 2 }, qrPresent: true } },
+      classification: { details: { basis: "mrz", detected: "cni_biometric", qrPresent: true } },
       reasons: [],
     });
+    // The keyword counts stay in the jobs' evidence, never in the case's checks.
+    expect(Object.keys(h.repo.caseChecks.get(c.verificationId)!.classification!.details).sort())
+      .toEqual(["basis", "confidence", "detected", "matchesDeclared", "provisional", "qrPresent"]);
+    expect(h.repo.jobs.find((j) => j.id === c.document_front!.jobId)?.evidence).toMatchObject({ keywordHits: { national_id: 2 } });
   });
 
   it("decides again when the other side's result lands first (stale), and gives up after a few rounds", async () => {
@@ -601,7 +606,14 @@ describe("POST /result", () => {
     h.repo.beforeRecord = () => {
       const back = h.repo.jobs.find((j) => j.id === c.document_back!.jobId)!;
       back.status = "done";
-      back.evidence = { mrz: { family: "cni_biometric", valid: true }, expectedMrzFound: true, keywordHits: {}, qrPresent: true, orientation: null };
+      back.evidence = {
+        mrz: { family: "cni_biometric", valid: true },
+        expectedMrzFound: true,
+        expectedMrzValid: true,
+        keywordHits: {},
+        qrPresent: true,
+        orientation: null,
+      };
     };
     const res = await h.send("/result", result(c.document_front!.jobId));
     expect(await readJson(res)).toEqual({ status: "recorded" });

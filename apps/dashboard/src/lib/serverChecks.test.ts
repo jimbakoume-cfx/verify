@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { MrzServerDetails, OcrFieldsDetails, QualityServerDetails } from "@verify/shared";
 import type { CaptureRecord, CheckRecord, ServerChecks, ServerJobState } from "./records";
-import { declaredMatch, keywordHitList, mayHaveDocumentData, serverOverview, VERDICT_TONE } from "./serverChecks";
+import { declaredMatch, mayHaveDocumentData, serverOverview, VERDICT_TONE } from "./serverChecks";
 
 function capture(id: string, kind: string, createdAt: string, deleted = false): CaptureRecord {
   return { id, kind, createdAt, deleted, supersededBy: null } as CaptureRecord;
@@ -144,17 +144,6 @@ describe("declaredMatch", () => {
     expect(declaredMatch({ matchesDeclared: true })).toBe("yes");
     expect(declaredMatch({ matchesDeclared: false })).toBe("no");
     expect(declaredMatch({ matchesDeclared: null })).toBe("unknown");
-  });
-});
-
-describe("keywordHitList", () => {
-  it("lists the groups found, in the contract's order", () => {
-    expect(keywordHitList({ specimen: 1, field_labels: 4, republic: 2, passport: 0 })).toEqual([
-      { group: "republic", count: 2 },
-      { group: "field_labels", count: 4 },
-      { group: "specimen", count: 1 },
-    ]);
-    expect(keywordHitList({})).toEqual([]);
   });
 });
 

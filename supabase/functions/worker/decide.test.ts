@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  CLASSIFICATION_DETAIL_KEYS,
   type DeclaredDocument,
   type PolicyReason,
   type WorkerQuality,
@@ -245,6 +246,7 @@ describe("decideCapture", () => {
     expect(back.evidence).toEqual({
       mrz: { family: "cni_biometric", valid: true },
       expectedMrzFound: true,
+      expectedMrzValid: true,
       keywordHits: {},
       qrPresent: false,
       orientation: "landscape",
@@ -252,6 +254,7 @@ describe("decideCapture", () => {
     const front = decideCapture(result(), "document_front", "cni_biometric", TODAY);
     expect(front.checks.map((c) => c.name)).toEqual(["quality_server", "ocr_fields"]);
     expect(front.evidence.expectedMrzFound).toBeNull();
+    expect(front.evidence.expectedMrzValid).toBeNull();
     expect(front.mrzLines).toBeNull();
   });
 
@@ -306,7 +309,15 @@ describe("decideCapture", () => {
 // The case
 // ---------------------------------------------------------------------------
 function evidence(overrides: Partial<CaptureEvidence> = {}): CaptureEvidence {
-  return { mrz: null, expectedMrzFound: null, keywordHits: {}, qrPresent: false, orientation: null, ...overrides };
+  return {
+    mrz: null,
+    expectedMrzFound: null,
+    expectedMrzValid: null,
+    keywordHits: {},
+    qrPresent: false,
+    orientation: null,
+    ...overrides,
+  };
 }
 
 function side(kind: CaseSide["kind"], ev: CaptureEvidence | null): CaseSide {
@@ -320,7 +331,7 @@ describe("decideCase", () => {
   });
 
   type Row = [string, DeclaredDocument, CaseSide[], { detected: string; basis: string; outcome: string }, PolicyReason[]];
-  const firmCni = evidence({ mrz: { family: "cni_biometric", valid: true }, expectedMrzFound: true });
+  const firmCni = evidence({ mrz: { family: "cni_biometric", valid: true }, expectedMrzFound: true, expectedMrzValid: true });
   const rows: Row[] = [
     [
       "a new CNI, code lines on the back: firm and matching",
@@ -332,15 +343,39 @@ describe("decideCase", () => {
     [
       "a passport from another state",
       "passport",
-      [side("document_front", evidence({ mrz: { family: "passport", valid: true }, expectedMrzFound: true }))],
+      [side("document_front", evidence({ mrz: { family: "passport", valid: true }, expectedMrzFound: true, expectedMrzValid: true }))],
       { detected: "passport", basis: "mrz", outcome: "pass" },
       [],
     ],
     [
-      "a passport whose check digits fail: still firm, confidence lower",
+      "a passport whose check digits fail: still firm, confidence lower, and a person must look",
       "passport",
-      [side("document_front", evidence({ mrz: { family: "passport", valid: false }, expectedMrzFound: true }))],
+      [side("document_front", evidence({ mrz: { family: "passport", valid: false }, expectedMrzFound: true, expectedMrzValid: false }))],
       { detected: "passport", basis: "mrz", outcome: "pass" },
+      ["mrz_invalid_server"],
+    ],
+    [
+      "a new CNI whose code lines read with a wrong check digit (as the phone read them)",
+      "cni_biometric",
+      [
+        side("document_front", evidence({ orientation: "portrait" })),
+        side("document_back", evidence({ mrz: { family: "cni_biometric", valid: false }, expectedMrzFound: true, expectedMrzValid: false })),
+      ],
+      { detected: "cni_biometric", basis: "mrz", outcome: "pass" },
+      ["mrz_invalid_server"],
+    ],
+    [
+      "check digits right but a date or the document code wrong: invalid too",
+      "passport",
+      [side("document_front", evidence({ mrz: { family: "passport", valid: true }, expectedMrzFound: true, expectedMrzValid: false }))],
+      { detected: "passport", basis: "mrz", outcome: "pass" },
+      ["mrz_invalid_server"],
+    ],
+    [
+      "wrong check digits on the side that does not carry the code lines: no reason (they are not the expected ones)",
+      "cni_biometric",
+      [side("document_front", evidence({ mrz: { family: "cni_biometric", valid: false } })), side("document_back", firmCni)],
+      { detected: "cni_biometric", basis: "mrz", outcome: "pass" },
       [],
     ],
     [
@@ -353,14 +388,20 @@ describe("decideCase", () => {
     [
       "a foreigner's card (any sub-type gives the same answer)",
       "residence_permit",
-      [side("document_front", evidence()), side("document_back", evidence({ mrz: { family: "residence_permit", valid: true }, expectedMrzFound: true }))],
+      [
+        side("document_front", evidence()),
+        side("document_back", evidence({ mrz: { family: "residence_permit", valid: true }, expectedMrzFound: true, expectedMrzValid: true })),
+      ],
       { detected: "residence_permit", basis: "mrz", outcome: "pass" },
       ["manual_review_document"],
     ],
     [
       "a TD1 card issued by another state",
       "cni_biometric",
-      [side("document_front", evidence()), side("document_back", evidence({ mrz: { family: "foreign_card", valid: true }, expectedMrzFound: true }))],
+      [
+        side("document_front", evidence()),
+        side("document_back", evidence({ mrz: { family: "foreign_card", valid: true }, expectedMrzFound: true, expectedMrzValid: true })),
+      ],
       { detected: "unknown", basis: "mrz", outcome: "flag" },
       ["unsupported_document"],
     ],
@@ -403,18 +444,25 @@ describe("decideCase", () => {
       ["manual_review_document", "provisional_classification"],
     ],
     [
-      "tied keywords: unknown",
+      "tied keywords: not recognised (never called provisional)",
       "voter_card",
       [side("document_front", evidence({ keywordHits: { voter_card: 1, driving_licence: 1, specimen: 3 } }))],
       { detected: "unknown", basis: "none", outcome: "flag" },
-      ["manual_review_document", "provisional_classification"],
+      ["manual_review_document", "unrecognised_document"],
     ],
     [
       "supporting groups alone decide nothing",
       "voter_card",
       [side("document_front", evidence({ keywordHits: { republic: 2, field_labels: 5 } }))],
       { detected: "unknown", basis: "none", outcome: "flag" },
-      ["manual_review_document", "provisional_classification"],
+      ["manual_review_document", "unrecognised_document"],
+    ],
+    [
+      "a new CNI's front alone, nothing recognised yet: the only reason says so",
+      "cni_biometric",
+      [side("document_front", evidence({ orientation: "portrait" })), side("document_back", null)],
+      { detected: "unknown", basis: "none", outcome: "flag" },
+      ["unrecognised_document"],
     ],
   ];
 
@@ -437,7 +485,7 @@ describe("decideCase", () => {
     expect(decision.classification.details).toMatchObject({ detected: "cni_biometric", confidence: 0.8, matchesDeclared: true });
   });
 
-  it("sums keyword hits over the sides, reports a QR code on any side, and scores provisional reads lower", () => {
+  it("adds keyword hits over the sides, reports a QR code on any side, and scores provisional reads lower", () => {
     const decision = decideCase("cni_biometric", [
       side("document_front", evidence({ keywordHits: { national_id: 1, republic: 1 }, orientation: "landscape" })),
       side("document_back", evidence({ keywordHits: { national_id: 1, passport: 1 }, qrPresent: true })),
@@ -449,7 +497,6 @@ describe("decideCase", () => {
       matchesDeclared: true,
       confidence: 0.333,
       qrPresent: true,
-      keywordHits: { republic: 1, national_id: 2, passport: 1 },
     });
     expect(decision.classification.score).toBe(0.333);
   });
@@ -460,6 +507,54 @@ describe("decideCase", () => {
     ]);
     const text = JSON.stringify(decision);
     for (const word of ["refugee", "sejour", "resident\"", "XXB", "nationality"]) expect(text).not.toContain(word);
+  });
+
+  it("writes exactly the contract's classification keys, the ones the database accepts", async () => {
+    const decided = decideCase("passport", [side("document_front", evidence({ keywordHits: { republic: 2, passport: 2 } }))])!;
+    expect(Object.keys(decided.classification.details)).toEqual([...CLASSIFICATION_DETAIL_KEYS]);
+    // private.worker_apply_case refuses any other key: a key added here alone would refuse every result.
+    // node:fs through a variable, so that type checkers without Node's types (deno check) skip it.
+    const nodeFs = "node:fs";
+    const { readFileSync } = (await import(/* @vite-ignore */ nodeFs)) as { readFileSync(path: URL, encoding: "utf8"): string };
+    const migration = readFileSync(new URL("../../migrations/20261016000000_m3_worker.sql", import.meta.url), "utf8");
+    const accepted = /where k not in \(([^)]*)\)/.exec(migration)?.[1] ?? "";
+    expect([...accepted.matchAll(/'([^']+)'/g)].map((m) => m[1])).toEqual([...CLASSIFICATION_DETAIL_KEYS]);
+  });
+
+  it("gives a Cameroonian passport and a foreign one the very same check results (admins read them)", () => {
+    // The counts the real pipeline gives on the two specimen passports: only the Cameroonian page prints
+    // "RÉPUBLIQUE DU CAMEROUN", and the two print different numbers of labels.
+    const passport = (issuing: string, keywordHits: WorkerResultRequest["classification"]["keywordHits"]) =>
+      result({
+        mrzCandidates: td3({ issuing, nationality: issuing }),
+        classification: { rotation: 0, keywordHits, qrPresent: false, orientation: "landscape" },
+        fields: { surname: "SPECIMEN", givenNames: "TESTA", issueDate: "2025-03-01" },
+      });
+    const cmr = passport("CMR", { republic: 2, passport: 2, field_labels: 11, specimen: 1 });
+    const foreign = passport("UTO", { republic: 0, passport: 2, field_labels: 7, specimen: 1 });
+    // Everything that becomes a check_result row: the photo's checks and the case's two checks.
+    const stored = (request: WorkerResultRequest) => {
+      const photo = decideCapture(request, "document_front", "passport", TODAY);
+      const decided = decideCase("passport", [side("document_front", photo.evidence)])!;
+      return { photo: photo.checks, classification: decided.classification, reasons: decided.reasons };
+    };
+    expect(stored(cmr)).toEqual(stored(foreign));
+    expect(JSON.stringify(stored(cmr))).not.toMatch(/keyword|republic|field_labels|CMR|UTO/);
+    // The counts stay in the job's evidence, which staff cannot read.
+    expect(decideCapture(cmr, "document_front", "passport", TODAY).evidence.keywordHits).toMatchObject({ republic: 2 });
+  });
+
+  it("never turns a poor photo into a reason: quality is provisional and only shown", () => {
+    const poor = decideCapture(result({ quality: { ...GOOD, glareRatio: 0.05 }, mrzCandidates: td3() }), "document_front", "passport", TODAY);
+    expect(poor.verdict).toBe("poor");
+    expect(decideCase("passport", [side("document_front", poor.evidence)])!.reasons).toEqual([]);
+  });
+
+  it("turns lines the server read with a wrong check digit into a reason, end to end", () => {
+    const broken = decideCapture(result({ mrzCandidates: breakCheck(td3(), "TD3") }), "document_front", "passport", TODAY);
+    expect(broken.checks.find((c) => c.name === "mrz_server")?.outcome).toBe("flag");
+    expect(broken.evidence).toMatchObject({ expectedMrzFound: true, expectedMrzValid: false });
+    expect(decideCase("passport", [side("document_front", broken.evidence)])!.reasons).toEqual(["mrz_invalid_server"]);
   });
 });
 
@@ -479,6 +574,8 @@ describe("parseEvidence", () => {
     { ...evidence(), keywordHits: { refugee: 1 } },
     { ...evidence(), keywordHits: { passport: -1 } },
     { ...evidence(), expectedMrzFound: "no" },
+    { ...evidence(), expectedMrzValid: "no" },
+    (({ expectedMrzValid: _, ...rest }) => rest)(evidence()),
   ])("refuses %j", (value) => {
     expect(parseEvidence(value)).toBeNull();
   });

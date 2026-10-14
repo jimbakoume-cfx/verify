@@ -5,6 +5,8 @@
 // Privacy: check_result.details (built here) hold outcomes, generic codes, counts and metrics only.
 // Never a value read from the document, never the card sub-type, never a nationality: supervisors and
 // admins read check_result directly. Values go to the database only as the encrypted rows' plaintext.
+// The keyword counts stay in the job's evidence: on a passport, they tell a Cameroonian one (its
+// "RÉPUBLIQUE DU CAMEROUN" header) from a foreign one.
 import {
   type CaptureSide,
   type ClassificationDetails,
@@ -214,6 +216,12 @@ export interface CaptureEvidence {
   mrz: { family: MrzFamily; valid: boolean } | null;
   /** On the side that carries the code lines: whether the expected ones were read. Null elsewhere. */
   expectedMrzFound: boolean | null;
+  /**
+   * On the side that carries the code lines: whether its mrz_server check passed (expected lines read,
+   * every check digit right, real dates, a document code that fits). Null elsewhere.
+   */
+  expectedMrzValid: boolean | null;
+  /** Never copied into check_result (see the top of this file). */
   keywordHits: Partial<Record<KeywordGroup, number>>;
   qrPresent: boolean;
   orientation: "landscape" | "portrait" | null;
@@ -286,6 +294,7 @@ export function decideCapture(
     evidence: {
       mrz: mrz.family,
       expectedMrzFound: mrz.check ? mrz.lines !== null : null,
+      expectedMrzValid: mrz.check ? mrz.check.outcome === "pass" : null,
       keywordHits,
       qrPresent: result.classification.qrPresent,
       orientation: result.classification.orientation,
@@ -391,13 +400,9 @@ export function decideCase(declared: DeclaredDocument | null, sides: readonly Ca
     }
   }
 
-  const keywordHits: Partial<Record<KeywordGroup, number>> = {};
-  for (const group of KEYWORD_GROUPS) {
-    const sum = known.reduce((s, side) => s + (side.evidence!.keywordHits[group] ?? 0), 0);
-    if (sum > 0) keywordHits[group] = sum;
-  }
   const provisional = basis !== "mrz";
   const matchesDeclared = declared && detected !== "unknown" ? detected === declared : null;
+  // Field by field, and no keyword counts (see the top of this file): the database refuses any other key.
   const details: ClassificationDetails = {
     detected,
     basis,
@@ -405,7 +410,6 @@ export function decideCase(declared: DeclaredDocument | null, sides: readonly Ca
     matchesDeclared,
     confidence,
     qrPresent: known.some((s) => s.evidence!.qrPresent),
-    keywordHits,
   };
 
   const reasons = new Set<PolicyReason>();
@@ -414,11 +418,16 @@ export function decideCase(declared: DeclaredDocument | null, sides: readonly Ca
   }
   if (known.some((s) => s.evidence!.mrz?.family === "foreign_card")) reasons.add("unsupported_document");
   if (!provisional && matchesDeclared === false) reasons.add("type_mismatch");
-  if (provisional) reasons.add("provisional_classification");
-  if (expectation?.required) {
-    const mrzSide = known.find((s) => s.kind === expectation.side);
-    if (mrzSide && mrzSide.evidence!.expectedMrzFound === false) reasons.add("mrz_unreadable_server");
-  }
+  // Printed words only: provisional. Nothing at all (no code lines, no title, or tied titles): its own
+  // reason, so the page never says "recognised from printed words" about a document it did not recognise.
+  if (basis === "keywords") reasons.add("provisional_classification");
+  if (basis === "none") reasons.add("unrecognised_document");
+  // The side that carries the code lines, when it has a result (known sides all have evidence).
+  const mrzEvidence = expectation ? known.find((s) => s.kind === expectation.side)?.evidence ?? null : null;
+  if (expectation?.required && mrzEvidence?.expectedMrzFound === false) reasons.add("mrz_unreadable_server");
+  // The expected lines were read but fail a check digit, a date or the document code: the one firm sign
+  // of a damaged or altered document, even when the phone read the very same lines.
+  if (mrzEvidence?.expectedMrzFound === true && mrzEvidence.expectedMrzValid === false) reasons.add("mrz_invalid_server");
 
   return {
     classification: {
@@ -452,6 +461,7 @@ export function parseEvidence(value: unknown): CaptureEvidence | null {
     mrz = { family: m.family as MrzFamily, valid: m.valid };
   }
   if (v.expectedMrzFound !== null && typeof v.expectedMrzFound !== "boolean") return null;
+  if (v.expectedMrzValid !== null && typeof v.expectedMrzValid !== "boolean") return null;
   if (typeof v.qrPresent !== "boolean") return null;
   if (v.orientation !== null && v.orientation !== "landscape" && v.orientation !== "portrait") return null;
   const hits = v.keywordHits;
@@ -465,6 +475,7 @@ export function parseEvidence(value: unknown): CaptureEvidence | null {
   return {
     mrz,
     expectedMrzFound: v.expectedMrzFound as boolean | null,
+    expectedMrzValid: v.expectedMrzValid as boolean | null,
     keywordHits,
     qrPresent: v.qrPresent,
     orientation: v.orientation as CaptureEvidence["orientation"],

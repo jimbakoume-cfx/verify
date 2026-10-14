@@ -180,23 +180,11 @@
       },
       "confidence": "Confidence",
       "qr": "QR code seen",
-      "keywords": "Words found on the photos (counts)",
-      "noKeywords": "None",
       "match": {
         "yes": "Matches the declared document",
         "no": "Does not match the declared document",
         "unknown": "Cannot tell whether it matches the declared document"
       }
-    },
-    "keywordGroups": {
-      "republic": "Republic",
-      "national_id": "National ID",
-      "passport": "Passport",
-      "residence": "Residence or refugee",
-      "driving_licence": "Driving licence",
-      "voter_card": "Voter card",
-      "field_labels": "Field labels",
-      "specimen": "Specimen"
     },
     "reasons": {
       "title": "For a person to decide",
@@ -206,8 +194,10 @@
       "label": {
         "manual_review_document": "Always checked by a person",
         "unsupported_document": "Document not accepted",
+        "unrecognised_document": "Document not recognised",
         "type_mismatch": "Not the declared document",
         "mrz_disagreement": "Code lines differ",
+        "mrz_invalid_server": "Code lines fail their checks",
         "mrz_unreadable_server": "Code lines not read by the server",
         "phone_report_missing": "Phone report missing",
         "provisional_classification": "Type recognised provisionally",
@@ -216,8 +206,10 @@
       "body": {
         "manual_review_document": "This kind of document is always reviewed by a person: it has no code lines the server can check (old ID card, driving licence, voter card), or it is a residence permit or refugee card.",
         "unsupported_document": "The code lines show an ID card issued by another state, which is not accepted.",
+        "unrecognised_document": "The server found neither code lines nor the printed title of an accepted document on the photos, so it could not tell what the document is.",
         "type_mismatch": "The code lines show another kind of document than the one the rider declared.",
         "mrz_disagreement": "The code lines the server read from the photo are not those read on the phone.",
+        "mrz_invalid_server": "The server read code lines of the expected format on the photo, but a check digit, a date or the document code is wrong: the document may be damaged or altered. This holds even when the phone read the same lines.",
         "mrz_unreadable_server": "The server could not read code lines of the expected format on the photo.",
         "phone_report_missing": "The phone's reading of the code lines was not received, so the server's reading could not be compared with it.",
         "provisional_classification": "The document type was recognised from printed words only, not from code lines. This is provisional until tuned on real documents.",
@@ -231,7 +223,7 @@
       "unreadable": "No readable text"
     },
     "verdictBody": {
-      "poor": "A measure is outside the usual range. The photo was kept and is flagged for a person.",
+      "poor": "A measure is outside the usual range (provisional limits, not tuned on real documents yet). The photo was kept and is not a reason on its own: compare it with the measures below.",
       "no_document": "The server found no document on this photo. The rider is asked to retake a photo at most once; this is the photo kept.",
       "unreadable": "The server found almost no text on this photo. The rider is asked to retake a photo at most once; this is the photo kept."
     },

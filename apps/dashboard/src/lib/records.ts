@@ -7,7 +7,6 @@ import {
   DETECTED_DOCUMENT_TYPES,
   type DocumentPolicyDetails,
   type FlowStatus,
-  KEYWORD_GROUPS,
   MRZ_CHECK_NAME,
   MRZ_FORMATS,
   type MrzCheckDetails,
@@ -402,13 +401,8 @@ export function toClassificationDetails(value: unknown): ClassificationDetails |
   ) {
     return null;
   }
-  // Counts of the generic keyword groups only (never text); groups this page cannot name are left out.
-  const hits = asRow(d.keywordHits) ?? {};
-  const keywordHits: Record<string, number> = {};
-  for (const group of KEYWORD_GROUPS) {
-    const count = num(hits[group]);
-    if (count !== null && Number.isInteger(count) && count > 0) keywordHits[group] = count;
-  }
+  // Field by field. Never keyword counts, should a row still carry them: on a passport they tell a
+  // Cameroonian one from a foreign one, which the server keeps out of check_result.
   return {
     detected: d.detected,
     basis: d.basis,
@@ -416,7 +410,6 @@ export function toClassificationDetails(value: unknown): ClassificationDetails |
     matchesDeclared: bool(d.matchesDeclared),
     confidence,
     qrPresent: bool(d.qrPresent),
-    keywordHits,
   };
 }
 

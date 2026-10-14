@@ -26,6 +26,13 @@ create table storage.buckets (
   id text primary key, name text not null, public boolean default false,
   file_size_limit bigint, allowed_mime_types text[]
 );
+-- One row per stored file, as in Supabase Storage (reduced to what the migrations read).
+create table storage.objects (
+  id uuid primary key default gen_random_uuid(),
+  bucket_id text references storage.buckets (id),
+  name text not null,
+  unique (bucket_id, name)
+);
 
 -- Supabase installs extensions in their own schema. pgcrypto ships with PostgreSQL (contrib).
 -- Extensions belong to one database, and scripts/test-db.sh creates a new one each run.

@@ -92,12 +92,12 @@ language sql immutable as $$
     'version', 'server-checks-v1',
     'classification', jsonb_build_object('outcome', 'pass', 'score', 1, 'details', jsonb_build_object(
       'detected', detected, 'basis', 'mrz', 'provisional', false, 'matchesDeclared', true, 'confidence', 1,
-      'qrPresent', true, 'keywordHits', jsonb_build_object('national_id', 1))),
+      'qrPresent', true)),
     'reasons', to_jsonb(reasons))
 $$;
 
 create function pg_temp.evidence() returns jsonb language sql immutable as $$
-  select '{"mrz": {"family": "cni_biometric", "valid": true}, "expectedMrzFound": true, "keywordHits": {"national_id": 1}, "qrPresent": true, "orientation": null}'::jsonb
+  select '{"mrz": {"family": "cni_biometric", "valid": true}, "expectedMrzFound": true, "expectedMrzValid": true, "keywordHits": {"national_id": 1}, "qrPresent": true, "orientation": null}'::jsonb
 $$;
 
 create function pg_temp.job_of(capture uuid) returns uuid language sql stable as $$
@@ -504,7 +504,7 @@ select pg_temp.assert_text((select extensions.pgp_sym_decrypt(edd.ciphertext, ds
 begin;
 set local role service_role;
 select pg_temp.assert_text(public.worker_record_result('m3-signer', pg_temp.job_of('e4000000-0000-0000-0000-000000000011'), 1,
-    (select fp from m3_front_fp), pg_temp.capture_checks(false), '{"mrz": null, "expectedMrzFound": null, "keywordHits": {}, "qrPresent": false, "orientation": "portrait"}'::jsonb,
+    (select fp from m3_front_fp), pg_temp.capture_checks(false), '{"mrz": null, "expectedMrzFound": null, "expectedMrzValid": null, "keywordHits": {}, "qrPresent": false, "orientation": "portrait"}'::jsonb,
     pg_temp.case_checks(array['provisional_classification']), null, null, pg_temp.fields()),
   'stale', 'result: decided before the other side''s result landed -> stale');
 select pg_temp.assert_eq((select count(*) from public.check_result where capture_id = 'e4000000-0000-0000-0000-000000000011')
@@ -514,7 +514,7 @@ select pg_temp.assert_text((select status from public.worker_job where capture_i
   'claimed', 'result: a stale write leaves the job claimed');
 select pg_temp.assert_text(public.worker_record_result('m3-signer', pg_temp.job_of('e4000000-0000-0000-0000-000000000011'), 1,
     pg_temp.fp(pg_temp.job_of('e4000000-0000-0000-0000-000000000011')), pg_temp.capture_checks(false),
-    '{"mrz": null, "expectedMrzFound": null, "keywordHits": {}, "qrPresent": false, "orientation": "portrait"}'::jsonb,
+    '{"mrz": null, "expectedMrzFound": null, "expectedMrzValid": null, "keywordHits": {}, "qrPresent": false, "orientation": "portrait"}'::jsonb,
     pg_temp.case_checks(array['provisional_classification', 'phone_report_missing', 'server_unchecked']), null, null,
     '{"surname":"ERIKSSON","issueDate":"2025-03-01"}'),
   'recorded', 'result: decided again from a fresh snapshot -> recorded');
@@ -589,6 +589,38 @@ do $$ begin
     pg_temp.evidence(), pg_temp.case_checks(array[]::text[], 'passport'), null, null, pg_temp.fields());
   raise exception 'FAIL: an unknown per-photo check was stored';
 exception when invalid_parameter_value then raise notice 'ok: result: an unknown per-photo check is refused';
+end $$;
+-- Supervisors and admins read check_result: keyword counts (a "republic" header tells a Cameroonian
+-- passport from a foreign one) or any other extra key never reach the classification's details.
+do $$
+declare
+  extra jsonb;
+begin
+  for extra in select * from jsonb_array_elements(
+    '[{"keywordHits": {"republic": 2, "passport": 2}}, {"nationality": "UTO"}, {"subtype": "refugee"}]'::jsonb) loop
+    begin
+      perform public.worker_record_result('m3-signer', pg_temp.job_of('e4000000-0000-0000-0000-000000000031'), 1,
+        pg_temp.fp(pg_temp.job_of('e4000000-0000-0000-0000-000000000031')), pg_temp.capture_checks(false),
+        pg_temp.evidence(),
+        jsonb_set(pg_temp.case_checks(array[]::text[], 'passport'), '{classification,details}',
+                  (pg_temp.case_checks(array[]::text[], 'passport') #> '{classification,details}') || extra),
+        null, null, pg_temp.fields());
+      raise exception 'FAIL: classification details with % were stored', extra;
+    exception when invalid_parameter_value then
+      if position('UTO' in sqlerrm) > 0 or position('refugee' in sqlerrm) > 0 then
+        raise exception 'FAIL: the error repeats the value';
+      end if;
+    end;
+  end loop;
+  begin
+    perform public.worker_record_result('m3-signer', pg_temp.job_of('e4000000-0000-0000-0000-000000000031'), 1,
+      pg_temp.fp(pg_temp.job_of('e4000000-0000-0000-0000-000000000031')), pg_temp.capture_checks(false),
+      pg_temp.evidence(), jsonb_set(pg_temp.case_checks(array[]::text[], 'passport'), '{classification,details}', '"x"'),
+      null, null, pg_temp.fields());
+    raise exception 'FAIL: classification details that are not an object were stored';
+  exception when invalid_parameter_value then null;
+  end;
+  raise notice 'ok: result: classification details hold only the contract''s keys (no keyword counts, nothing else)';
 end $$;
 select pg_temp.assert_eq((select count(*) from public.check_result where capture_id = 'e4000000-0000-0000-0000-000000000031')
     + (select count(*) from public.extracted_document_data where capture_id = 'e4000000-0000-0000-0000-000000000031'), 0,
@@ -681,6 +713,16 @@ select pg_temp.assert_eq((select count(*) from public.check_result where capture
 select pg_temp.assert_eq((select count(*) from public.capture
     where id = 'e4000000-0000-0000-0000-000000000011' and deleted_at is null and superseded_by is null), 1,
   'replace: the other side is untouched');
+-- The trigger only marks the row: the file is removed by the M3 flow function. A photo replaced by a
+-- plain insert, as the M2 flow makes while it still serves riders after this migration, keeps its file;
+-- the deploy check lists it until it is removed through the Storage API.
+insert into storage.objects (bucket_id, name) values
+  ('id-captures', 'm3/1/front-1.jpg'), ('id-captures', 'm3/1/back-1.jpg'), ('id-captures', 'm3/1/back-2.jpg');
+select pg_temp.assert_true((select array_agg(f.storage_path) from private.superseded_files_left() f) = array['m3/1/back-1.jpg'],
+  'deploy check: the replaced photo whose file is still stored is listed, and only it');
+delete from storage.objects where bucket_id = 'id-captures' and name = 'm3/1/back-1.jpg';
+select pg_temp.assert_eq((select count(*) from private.superseded_files_left()), 0,
+  'deploy check: empty once the file is removed');
 select pg_temp.assert_text((select status from public.worker_job where capture_id = 'e4000000-0000-0000-0000-000000000012'),
   'done', 'replace: a finished job keeps its state');
 select pg_temp.assert_text((select status from public.worker_job where capture_id = 'e4000000-0000-0000-0000-000000000013'),
@@ -692,7 +734,7 @@ select pg_temp.assert_text((select l.result from public.worker_image_lookup(pg_t
   'gone', 'replace: the replaced photo''s image is gone');
 select pg_temp.assert_true((select s -> 'sides' = jsonb_build_array(
       jsonb_build_object('kind', 'document_front', 'captureId', 'e4000000-0000-0000-0000-000000000011',
-                         'evidence', '{"mrz": null, "expectedMrzFound": null, "keywordHits": {}, "qrPresent": false, "orientation": "portrait"}'::jsonb),
+                         'evidence', '{"mrz": null, "expectedMrzFound": null, "expectedMrzValid": null, "keywordHits": {}, "qrPresent": false, "orientation": "portrait"}'::jsonb),
       jsonb_build_object('kind', 'document_back', 'captureId', 'e4000000-0000-0000-0000-000000000013', 'evidence', null))
     from public.worker_case_snapshot('e3000000-0000-0000-0000-000000000001') s),
   'replace: the case snapshot holds the newest photo of each side only');
@@ -701,6 +743,13 @@ select pg_temp.assert_text(public.worker_write_case('e3000000-0000-0000-0000-000
   'stale', 'write case: an old fingerprint -> stale');
 select pg_temp.assert_text(public.worker_write_case('e9999999-0000-0000-0000-000000000000', 'x', null),
   'not_found', 'write case: an unknown case -> not_found');
+do $$ begin
+  perform public.worker_write_case('e3000000-0000-0000-0000-000000000001', pg_temp.case_fp('e3000000-0000-0000-0000-000000000001'),
+    jsonb_set(pg_temp.case_checks(array['provisional_classification']), '{classification,details,keywordHits}',
+              '{"republic": 2}'::jsonb));
+  raise exception 'FAIL: write case stored keyword counts';
+exception when invalid_parameter_value then raise notice 'ok: write case: keyword counts never reach the classification''s details';
+end $$;
 select pg_temp.assert_text(public.worker_write_case('e3000000-0000-0000-0000-000000000001',
     pg_temp.case_fp('e3000000-0000-0000-0000-000000000001'), null), 'ok', 'write case: with no result left, the case checks are dropped');
 select pg_temp.assert_eq((select count(*) from public.check_result where verification_id = 'e3000000-0000-0000-0000-000000000001'
@@ -921,7 +970,8 @@ begin
   foreach fn in array array[
     'private.worker_sweep()', 'private.worker_fail_job(uuid, text)', 'private.worker_apply_case(uuid, jsonb)',
     'private.worker_refresh_policy(uuid, text[], text)', 'private.mrz_phone_agreement(uuid, text)',
-    'private.worker_case_inputs(uuid)', 'private.worker_status_reasons(uuid)', 'private.worker_lock_case(uuid)'] loop
+    'private.worker_case_inputs(uuid)', 'private.worker_status_reasons(uuid)', 'private.worker_lock_case(uuid)',
+    'private.superseded_files_left()'] loop
     foreach role_name in array array['anon', 'authenticated', 'service_role'] loop
       if has_function_privilege(role_name, fn, 'execute') then
         raise exception 'FAIL: % can execute %', role_name, fn;

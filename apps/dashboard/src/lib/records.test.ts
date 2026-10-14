@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { CLASSIFICATION_DETAIL_KEYS } from "@verify/shared";
 import {
   CAPTURE_COLUMNS,
   type CaptureRecord,
@@ -410,7 +411,6 @@ const CLASSIFICATION = {
   matchesDeclared: true,
   confidence: 1,
   qrPresent: false,
-  keywordHits: { passport: 2, field_labels: 5 },
 };
 const POLICY = { reasons: ["mrz_disagreement", "manual_review_document"] };
 
@@ -516,7 +516,7 @@ describe("server check details", () => {
       toQualityServerDetails({ ...QUALITY, ...extra, quality: { ...QUALITY.quality, ...extra } }),
       toMrzServerDetails({ ...MRZ_SERVER, ...extra, checks: { ...MRZ_SERVER.checks, ...extra } }),
       toOcrFieldsDetails({ ...FIELDS, ...extra }),
-      toClassificationDetails({ ...CLASSIFICATION, ...extra, keywordHits: { ...CLASSIFICATION.keywordHits, ERIKSSON: 1 } }),
+      toClassificationDetails({ ...CLASSIFICATION, ...extra, keywordHits: { passport: 2, ERIKSSON: 1 } }),
       toDocumentPolicyDetails({ ...POLICY, ...extra, reasons: [...POLICY.reasons, "ERIKSSON"] }),
     ];
     expect(JSON.stringify(parsed)).not.toMatch(/ERIKSSON|L898902C3/);
@@ -555,17 +555,18 @@ describe("server check details", () => {
     expect(toOcrFieldsDetails({ found: [] })).toBeNull();
   });
 
-  it("read the classification, keeping counts of known keyword groups only", () => {
+  it("read the classification, never keyword counts (they would tell a Cameroonian passport from a foreign one)", () => {
     expect(toClassificationDetails(CLASSIFICATION)).toEqual(CLASSIFICATION);
     expect(
       toClassificationDetails({
         ...CLASSIFICATION,
         matchesDeclared: "yes",
         qrPresent: null,
-        keywordHits: { passport: 2, republic: 0, residence: 1.5, voter_card: -1, unknown_group: 3 },
+        keywordHits: { passport: 2, republic: 2, field_labels: 11 },
       }),
-    ).toEqual({ ...CLASSIFICATION, matchesDeclared: null, qrPresent: null, keywordHits: { passport: 2 } });
-    expect(toClassificationDetails({ ...CLASSIFICATION, keywordHits: undefined })?.keywordHits).toEqual({});
+    ).toEqual({ ...CLASSIFICATION, matchesDeclared: null, qrPresent: null });
+    expect(Object.keys(toClassificationDetails({ ...CLASSIFICATION, keywordHits: { republic: 2 } })!).sort())
+      .toEqual([...CLASSIFICATION_DETAIL_KEYS].sort());
     expect(toClassificationDetails({ ...CLASSIFICATION, detected: "library_card" })).toBeNull();
     expect(toClassificationDetails({ ...CLASSIFICATION, basis: "guess" })).toBeNull();
     expect(toClassificationDetails({ ...CLASSIFICATION, confidence: "high" })).toBeNull();

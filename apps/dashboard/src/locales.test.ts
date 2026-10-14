@@ -3,7 +3,6 @@ import {
   CAPTURE_SIDES,
   DECLARED_DOCUMENTS,
   DETECTED_DOCUMENT_TYPES,
-  KEYWORD_GROUPS,
   type MrzServerDetails,
   parseMrz,
   POLICY_REASONS,
@@ -122,7 +121,6 @@ describe("FR/EN locales", () => {
       ...DETECTED_DOCUMENT_TYPES.map((type) => (type === "unknown" ? "serverChecks.document.unknown" : `documents.${type}`)),
       ...["mrz", "keywords", "none"].map((basis) => `serverChecks.document.basis.${basis}`),
       ...["yes", "no", "unknown"].map((match) => `serverChecks.document.match.${match}`),
-      ...KEYWORD_GROUPS.map((group) => `serverChecks.keywordGroups.${group}`),
       ...mrzLines,
       ...PRINTED_FIELDS.map((field) => `data.fields.${field}`),
       ...KNOWN_SUBTYPES.map((subtype) => `data.subtypes.${subtype}`),
@@ -153,6 +151,19 @@ describe("FR/EN locales", () => {
     for (const key of keys) {
       expect(FR.has(key), `fr: ${key}`).toBe(true);
       expect(EN.has(key), `en: ${key}`).toBe(true);
+    }
+  });
+
+  it("never say a poor photo is flagged for a person: only the reasons above are (a poor verdict adds none)", () => {
+    // Shown under the photo on the same page as "For a person to decide", which may say nothing was flagged.
+    expect(EN.get("serverChecks.verdictBody.poor")).not.toMatch(/flag|for a person/i);
+    expect(FR.get("serverChecks.verdictBody.poor")).not.toMatch(/signal|pour une personne/i);
+  });
+
+  it("never offer keyword counts: they would tell a Cameroonian passport from a foreign one", () => {
+    for (const messages of [FR, EN]) {
+      const countLabels = [...messages.keys()].filter((key) => /keywordGroups|^serverChecks\.document\.(no)?keywords$/i.test(key));
+      expect(countLabels).toEqual([]);
     }
   });
 
