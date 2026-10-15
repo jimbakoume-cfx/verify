@@ -4,13 +4,17 @@ import {
   MRZ_EXPECTATION,
   MRZ_TRIES_BEFORE_OVERRIDE,
   REQUIRED_SIDES,
+  RETAKE_REASONS,
+  SERVER_RETAKES_PER_SIDE,
   type CaptureSide,
   type ClientQuality,
   type DeclaredDocument,
+  type FlowChecks,
   type FlowSession,
   type FlowStatus,
   type MrzExpectation,
   type MrzFormat,
+  type RetakeReason,
 } from "@verify/shared";
 import type { GrayImage, Hint } from "@verify/capture";
 import { unavailableRead } from "../mrz/lazyReader";
@@ -86,6 +90,8 @@ export type Screen =
   | { name: "reading"; side: CaptureSide }
   | { name: "review"; side: CaptureSide }
   | { name: "upload" }
+  /** "Checking your photos…": waiting for the server's check of the photos just sent (M3). */
+  | { name: "checking" }
   | { name: "done" }
   | { name: "sessionError"; reason: SessionErrorReason };
 
@@ -106,7 +112,18 @@ export interface UploadProgress {
 export interface UploadState {
   /** queued: waiting for useFlow to start it; failed: waiting for the rider's "Try again". */
   status: "idle" | "queued" | "running" | "failed";
+  /**
+   * sides: send the photos not yet on the server, then wait for its checks (the checking screen).
+   * submit: the checks are over (passed, timed out or unavailable): only the submit is left.
+   */
+  stage: "sides" | "submit";
   progress: UploadProgress | null;
+}
+
+/** A side the server asks the rider to photograph again (GET /flow/checks), and why. */
+export interface ServerRetake {
+  side: CaptureSide;
+  reason: RetakeReason;
 }
 
 export interface FlowState {
@@ -135,6 +152,13 @@ export interface FlowState {
   mrzFailures: Partial<Record<CaptureSide, number>>;
   /** First-use download progress of the reader (0..1) on the reading screen; null when not reported. */
   readProgress: number | null;
+  /**
+   * Retakes the server asked for, per side (at most SERVER_RETAKES_PER_SIDE). Kept for the whole
+   * session, even when the document changes: the server counts them per side for the whole case too.
+   */
+  serverRetakes: Partial<Record<CaptureSide, number>>;
+  /** Why the server asked for a new photo of a side: shown on the way to its camera until it is taken. */
+  retakeReasons: Partial<Record<CaptureSide, RetakeReason>>;
 }
 
 export type FlowAction =
@@ -159,14 +183,25 @@ export type FlowAction =
   | { type: "upload/started"; progress: UploadProgress }
   | { type: "upload/progress"; progress: UploadProgress }
   | { type: "upload/sideDone"; side: CaptureSide }
+  /** Every photo is on the server: wait for its checks before submitting. */
+  | { type: "upload/sent" }
   | { type: "upload/failed"; error: FlowErrorCode; side: CaptureSide | null }
   | { type: "upload/retry" }
   | { type: "upload/submitted"; session: FlowSession }
+  /** The server's checks are over and no photo is to be retaken (each side ok or unchecked): submit. */
+  | { type: "checks/ok" }
+  /**
+   * The server found these photos unusable. Only the sides it may still ask for are retaken
+   * (acceptsServerRetake); when none is left, this is the same as "checks/ok".
+   */
+  | { type: "checks/retake"; sides: readonly ServerRetake[] }
+  /** No answer within CHECKS_WAIT_MS, or the checks could not be read: submit, with no error shown. */
+  | { type: "checks/timeout" }
   | { type: "error/dismiss" }
   /** The phone's Back button or gesture (see useFlow). */
   | { type: "nav/back" };
 
-const IDLE_UPLOAD: UploadState = { status: "idle", progress: null };
+const IDLE_UPLOAD: UploadState = { status: "idle", stage: "sides", progress: null };
 
 export function initialFlowState(boot: { hasToken: boolean; invalidLink: boolean }): FlowState {
   return {
@@ -184,6 +219,8 @@ export function initialFlowState(boot: { hasToken: boolean; invalidLink: boolean
     mrzReads: {},
     mrzFailures: {},
     readProgress: null,
+    serverRetakes: {},
+    retakeReasons: {},
   };
 }
 
@@ -246,6 +283,42 @@ function recordRead(state: FlowState, shot: Shot, result: MrzReadResult): FlowSt
 /** The screen that captures `side`: the back is preceded by a "turn the card over" step. */
 function captureStep(side: CaptureSide, fromReview: boolean): Screen {
   return side === "document_back" && fromReview ? { name: "turnOver", side } : { name: "capture", side };
+}
+
+/** After the checking screen: only the submit is left, shown on the upload screen. */
+function queueSubmit(state: FlowState): FlowState {
+  return {
+    ...state,
+    error: null,
+    screen: { name: "upload" },
+    upload: { status: "queued", stage: "submit", progress: null },
+  };
+}
+
+/**
+ * Drops the photos the server asked for again (from the phone and from what counts as sent), counts
+ * the retakes, and opens the camera of the first of them, through "turn over" for the back. The
+ * other sides keep their photos, already on the server.
+ */
+function retakeSides(state: FlowState, retakes: readonly ServerRetake[]): FlowState {
+  let { shots, uploaded, serverRetakes, retakeReasons } = state;
+  for (const { side, reason } of retakes) {
+    shots = without(shots, side);
+    uploaded = without(uploaded, side);
+    serverRetakes = { ...serverRetakes, [side]: (serverRetakes[side] ?? 0) + 1 };
+    retakeReasons = { ...retakeReasons, [side]: reason };
+  }
+  const first = state.sides.find((side) => retakes.some((retake) => retake.side === side)) ?? retakes[0].side;
+  return {
+    ...state,
+    error: null,
+    shots,
+    uploaded,
+    serverRetakes,
+    retakeReasons,
+    upload: IDLE_UPLOAD,
+    screen: captureStep(first, true),
+  };
 }
 
 export function flowReducer(state: FlowState, action: FlowAction): FlowState {
@@ -312,6 +385,7 @@ export function flowReducer(state: FlowState, action: FlowAction): FlowState {
         mrzReads: {},
         mrzFailures: {},
         readProgress: null,
+        retakeReasons: {},
         upload: IDLE_UPLOAD,
         screen: { name: "capture", side: sides[0] },
       };
@@ -329,6 +403,8 @@ export function flowReducer(state: FlowState, action: FlowAction): FlowState {
         ...state,
         error: null,
         uploaded: without(state.uploaded, shot.side),
+        // A new photo of a side the server asked for: its reason has been seen.
+        retakeReasons: without(state.retakeReasons, shot.side),
         refusals: refused ? { ...state.refusals, [shot.side]: (state.refusals[shot.side] ?? 0) + 1 } : state.refusals,
         readProgress: null,
       };
@@ -367,7 +443,12 @@ export function flowReducer(state: FlowState, action: FlowAction): FlowState {
       if (!shot || !canUseShot(state, shot)) return state;
       const next = state.sides.find((side) => !state.shots[side]);
       if (next) return { ...state, error: null, screen: captureStep(next, true) };
-      return { ...state, error: null, screen: { name: "upload" }, upload: { status: "queued", progress: null } };
+      return {
+        ...state,
+        error: null,
+        screen: { name: "upload" },
+        upload: { status: "queued", stage: "sides", progress: null },
+      };
     }
 
     case "turnOver/ready":
@@ -376,7 +457,7 @@ export function flowReducer(state: FlowState, action: FlowAction): FlowState {
 
     case "upload/started":
       if (state.upload.status !== "queued") return state;
-      return { ...state, error: null, upload: { status: "running", progress: action.progress } };
+      return { ...state, error: null, upload: { ...state.upload, status: "running", progress: action.progress } };
 
     case "upload/progress":
       if (state.upload.status !== "running") return state;
@@ -384,6 +465,10 @@ export function flowReducer(state: FlowState, action: FlowAction): FlowState {
 
     case "upload/sideDone":
       return { ...state, uploaded: { ...state.uploaded, [action.side]: true } };
+
+    case "upload/sent":
+      if (state.upload.status !== "running" || state.upload.stage !== "sides") return state;
+      return { ...state, error: null, upload: IDLE_UPLOAD, screen: { name: "checking" } };
 
     case "upload/failed": {
       const { error, side } = action;
@@ -401,17 +486,41 @@ export function flowReducer(state: FlowState, action: FlowAction): FlowState {
       if (error === "missing_sides") {
         const first = state.sides[0];
         if (!first) return fail(state, error);
-        return { ...state, error, shots: {}, uploaded: {}, upload: IDLE_UPLOAD, screen: { name: "capture", side: first } };
+        return {
+          ...state,
+          error,
+          shots: {},
+          uploaded: {},
+          retakeReasons: {},
+          upload: IDLE_UPLOAD,
+          screen: { name: "capture", side: first },
+        };
       }
-      return fail({ ...state, upload: { status: "failed", progress: state.upload.progress } }, error);
+      return fail({ ...state, upload: { ...state.upload, status: "failed" } }, error);
     }
 
     case "upload/retry":
+      // The same stage again: photos still to send, or only the submit once the checks are over.
       if (state.upload.status !== "failed") return state;
-      return { ...state, error: null, upload: { status: "queued", progress: null } };
+      return { ...state, error: null, upload: { ...state.upload, status: "queued", progress: null } };
 
     case "upload/submitted":
       return { ...state, error: null, session: action.session, upload: IDLE_UPLOAD, screen: { name: "done" } };
+
+    case "checks/ok":
+    case "checks/timeout":
+      if (state.screen.name !== "checking") return state;
+      return queueSubmit(state);
+
+    case "checks/retake": {
+      if (state.screen.name !== "checking") return state;
+      const retakes = state.sides.flatMap((side) => {
+        const asked = action.sides.find((retake) => retake.side === side);
+        return asked && isRetakeReason(asked.reason) && acceptsServerRetake(state, side) ? [asked] : [];
+      });
+      // Nothing the rider may still be asked for: the photos go as they are (staff review them).
+      return retakes.length > 0 ? retakeSides(state, retakes) : queueSubmit(state);
+    }
 
     case "error/dismiss":
       return { ...state, error: null };
@@ -425,8 +534,9 @@ export function flowReducer(state: FlowState, action: FlowAction): FlowState {
  * One step back, as the phone's Back button should feel: from a photo's review (or its reading) to
  * its camera, from the back's camera to the "turn over" step, from there to the front's review, and
  * from the first camera to the document list. Consent and the document list are not stepped back
- * to from later screens by this (consent is already recorded); during an upload Back does nothing.
- * Other screens return the same state: the browser may leave the page.
+ * to from later screens by this (consent is already recorded); during an upload and while the
+ * server checks the photos, Back does nothing. Other screens return the same state: the browser
+ * may leave the page.
  */
 function back(state: FlowState): FlowState {
   const { screen } = state;
@@ -470,7 +580,8 @@ export function handlesBack(screen: Screen): boolean {
     screen.name === "turnOver" ||
     screen.name === "reading" ||
     screen.name === "review" ||
-    screen.name === "upload"
+    screen.name === "upload" ||
+    screen.name === "checking"
   );
 }
 
@@ -519,4 +630,57 @@ export function pendingShots(state: Pick<FlowState, "sides" | "shots" | "uploade
     const shot = state.shots[side];
     return shot && !state.uploaded[side] ? [shot] : [];
   });
+}
+
+/** The photo of each side, in capture order (the sides photographed so far). */
+export function sideShots(state: Pick<FlowState, "sides" | "shots">): Shot[] {
+  return state.sides.flatMap((side) => {
+    const shot = state.shots[side];
+    return shot ? [shot] : [];
+  });
+}
+
+function isRetakeReason(value: unknown): value is RetakeReason {
+  return (RETAKE_REASONS as readonly unknown[]).includes(value);
+}
+
+/**
+ * The rider kept this photo despite a warning on the phone: "Use it anyway" on a blurry or glary
+ * photo, or "Continue anyway" when the code lines could not be read. (Only such a photo can carry
+ * these warnings once accepted.)
+ */
+export function usedOverride(state: Pick<FlowState, "document" | "mrzFailures">, shot: Shot): boolean {
+  return refusalHints(shot).length > 0 || mrzReview(state, shot)?.status === "unread";
+}
+
+/**
+ * Whether the server may still have the rider retake the photo sent for `side`: at most
+ * SERVER_RETAKES_PER_SIDE times per side, never after the rider overrode a warning on that photo
+ * (asking again would loop: the phone already tried), and never when the phone read its code lines
+ * with every check digit right (the photo is readable, whatever the server's reader made of it).
+ */
+export function acceptsServerRetake(state: FlowState, side: CaptureSide): boolean {
+  const shot = state.shots[side];
+  if (!shot || !state.uploaded[side]) return false;
+  if ((state.serverRetakes[side] ?? 0) >= SERVER_RETAKES_PER_SIDE) return false;
+  return !usedOverride(state, shot) && shot.mrz?.status !== "valid";
+}
+
+/** What an answer of GET /flow/checks leads to; see checksDecision. */
+export type ChecksDecision = Extract<FlowAction, { type: "checks/ok" | "checks/retake" }>;
+
+/**
+ * What an answer of GET /flow/checks means on the checking screen: retake the sides the server found
+ * unusable that the rider may still be asked for, at once, even while other sides are pending (that
+ * photo must be taken again anyway, and the others are checked meanwhile); submit once no side is
+ * pending; otherwise null, to ask again. A "retake" the rider may not be asked for counts as ok.
+ */
+export function checksDecision(state: FlowState, checks: FlowChecks): ChecksDecision | null {
+  const sides = state.sides.flatMap((side): ServerRetake[] => {
+    const check = checks.sides.find((s) => s.kind === side);
+    if (check?.state !== "retake" || !isRetakeReason(check.reason) || !acceptsServerRetake(state, side)) return [];
+    return [{ side, reason: check.reason }];
+  });
+  if (sides.length > 0) return { type: "checks/retake", sides };
+  return checks.done ? { type: "checks/ok" } : null;
 }

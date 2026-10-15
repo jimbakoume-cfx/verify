@@ -14,11 +14,15 @@ import {
 import { randomToken, sha256Hex } from "../_shared/crypto.ts";
 import { checkDigit, MRZ_PARSER_VERSION } from "../_shared/mrz.ts";
 import { ALLOWED_ORIGIN, buildJpeg, type CallOptions, makeRequest, readJson } from "../_shared/test-helpers.ts";
+import type { CaseChecksPayload, CaseSnapshot, CaseStore, JobStatus } from "../worker/case.ts";
+import type { CheckStateRow } from "./checks.ts";
 import {
   assessMrzReport,
+  type CaptureFollowUp,
   type CaptureStorage,
   checkImage,
   createFlowHandler,
+  type FlowDeps,
   type FlowRepo,
   type FlowVerification,
   type MrzRecord,
@@ -27,10 +31,12 @@ import {
   type StoredCapture,
   type SubmitResult,
 } from "./handler.ts";
+import type { RingReason } from "./ring.ts";
 
 // ---------------------------------------------------------------------------
 // In-memory fakes. submit() and claimUploadSlot() mirror the SQL functions in the M1 migration,
-// recordMrz() mirrors flow_record_mrz in the M2 migration.
+// recordMrz() mirrors flow_record_mrz in the M2 migration, insertCapture() mirrors the M3 trigger
+// capture_worker_job (a newer photo of a side replaces the older one; one worker job per photo).
 // ---------------------------------------------------------------------------
 interface VerificationRecord extends FlowVerification {
   tokenHash: string;
@@ -42,6 +48,13 @@ interface CaptureRecord extends NewCapture {
   id: string;
   createdAt: string;
   deletedAt: string | null;
+  supersededBy: string | null;
+}
+
+interface JobRecord {
+  status: JobStatus;
+  errorCode: string | null;
+  ringFailed: boolean;
 }
 
 class MemoryFlowRepo implements FlowRepo {
@@ -56,6 +69,12 @@ class MemoryFlowRepo implements FlowRepo {
   submitOverride: SubmitResult | null = null;
   /** Simulates a capture erased between the handler's lookup and the RPC. */
   recordMrzOverride: MrzRecordResult | null = null;
+  /** M3: worker jobs by capture id, the switch, the server's quality verdicts by capture id. */
+  jobs = new Map<string, JobRecord>();
+  workerEnabled = false;
+  qualityVerdicts = new Map<string, string>();
+  /** Captures whose read data the replacement deleted (extracted_document_data). */
+  erasedData: string[] = [];
   private clock = Date.parse("2026-10-13T09:00:00Z");
 
   private maybeFail(method: keyof FlowRepo, detail: string) {
@@ -138,7 +157,19 @@ class MemoryFlowRepo implements FlowRepo {
     this.maybeFail("insertCapture", capture.storagePath);
     const id = crypto.randomUUID();
     this.clock += 1000;
-    this.captures.push({ ...capture, id, createdAt: new Date(this.clock).toISOString(), deletedAt: null });
+    const createdAt = new Date(this.clock).toISOString();
+    for (const older of this.captures) {
+      if (older.verificationId === capture.verificationId && older.kind === capture.kind && older.deletedAt === null) {
+        older.deletedAt = createdAt;
+        older.supersededBy = id;
+        this.erasedData.push(older.id);
+        const job = this.jobs.get(older.id);
+        if (job && (job.status === "pending" || job.status === "claimed")) job.status = "superseded";
+      }
+    }
+    this.captures.push({ ...capture, id, createdAt, deletedAt: null, supersededBy: null });
+    const eligible = this.get(capture.verificationId).isTest || this.workerEnabled;
+    this.jobs.set(id, { status: eligible ? "pending" : "failed", errorCode: eligible ? null : "ineligible", ringFailed: false });
     return id;
   }
 
@@ -191,6 +222,79 @@ class MemoryFlowRepo implements FlowRepo {
     this.maybeFail("audit", entry.action);
     this.audits.push(entry);
   }
+
+  async captureFollowUp(captureId: string): Promise<CaptureFollowUp> {
+    this.maybeFail("captureFollowUp", captureId);
+    return {
+      supersededPaths: this.captures.filter((c) => c.supersededBy === captureId).map((c) => c.storagePath),
+      jobPending: this.jobs.get(captureId)?.status === "pending",
+    };
+  }
+
+  async markRingFailed(captureId: string) {
+    const job = this.jobs.get(captureId);
+    if (job?.status === "pending") job.ringFailed = true;
+  }
+
+  async checkState(verificationId: string): Promise<CheckStateRow[]> {
+    return this.captures.filter((c) => c.verificationId === verificationId).map((c) => {
+      const job = this.jobs.get(c.id);
+      const phone = this.mrzRecords.find((r) => r.captureId === c.id);
+      return {
+        captureId: c.id,
+        kind: c.kind,
+        live: c.deletedAt === null,
+        createdAt: c.createdAt,
+        jobStatus: job?.status ?? null,
+        jobError: job?.errorCode ?? null,
+        ringFailed: job?.ringFailed ?? false,
+        qualityVerdict: this.qualityVerdicts.get(c.id) ?? null,
+        phoneMrzPass: phone ? phone.outcome === "pass" : null,
+      };
+    });
+  }
+
+  async workerEnabledForRealSessions() {
+    return this.workerEnabled;
+  }
+
+  /** What the worker function does when the server has checked a photo. */
+  finishJob(captureId: string, verdict: string) {
+    this.jobs.get(captureId)!.status = "done";
+    this.qualityVerdicts.set(captureId, verdict);
+  }
+}
+
+/** Records rings instead of sending them; `fail` makes the ring report a failure. */
+class MemoryRing {
+  rings: RingReason[] = [];
+  fail = false;
+  pending: Promise<void>[] = [];
+
+  readonly ring = (reason: RingReason, onFailure?: () => Promise<void>) => {
+    this.rings.push(reason);
+    if (this.fail && onFailure) this.pending.push(onFailure());
+  };
+
+  async settle() {
+    await Promise.all(this.pending);
+  }
+}
+
+/** Counts case refreshes; the decision itself is tested with the worker function. */
+class MemoryCases implements CaseStore {
+  writes: { verificationId: string; checks: CaseChecksPayload | null }[] = [];
+  fail = false;
+
+  async snapshot(verificationId: string): Promise<CaseSnapshot | null> {
+    if (this.fail) throw new Error("snapshot failed");
+    return { verificationId, declaredDocument: null, sides: [], fingerprint: "0".repeat(32), job: null };
+  }
+
+  async write(verificationId: string, _fingerprint: string, checks: CaseChecksPayload | null) {
+    this.writes.push({ verificationId, checks });
+    return "ok" as const;
+  }
 }
 
 class MemoryStorage implements CaptureStorage {
@@ -233,17 +337,22 @@ const QUALITY: ClientQuality = {
 };
 const GOOD_JPEG = buildJpeg({ width: 1600, height: 1009, padTo: 60_000 });
 
-function setup() {
+function setup(overrides: Partial<FlowDeps> = {}) {
   const repo = new MemoryFlowRepo();
   const storage = new MemoryStorage();
+  const ring = new MemoryRing();
+  const cases = new MemoryCases();
   const log = { error: vi.fn() };
   let clock = NOW;
   const handler = createFlowHandler({
     repo,
     storage,
     allowedOrigins: new Set([ALLOWED_ORIGIN]),
+    ring: ring.ring,
+    cases,
     now: () => clock,
     log,
+    ...overrides,
   });
 
   async function seed(
@@ -296,6 +405,8 @@ function setup() {
   return {
     repo,
     storage,
+    ring,
+    cases,
     log,
     handler,
     seed,
@@ -694,7 +805,7 @@ describe("POST /captures", () => {
       action: "capture.create",
       targetType: "capture",
       targetId: body.captureId,
-      details: { kind: "document_front", byteSize: GOOD_JPEG.byteLength, reusedElsewhere: false },
+      details: { kind: "document_front", byteSize: GOOD_JPEG.byteLength, reusedElsewhere: false, replaced: 0 },
     }]);
   });
 
@@ -777,6 +888,7 @@ describe("POST /captures", () => {
     return bytes;
   })();
   const lowRes = buildJpeg({ width: CAPTURE_LIMITS.minLongSide - 1, height: 500, padTo: 20_000 });
+  const overLongSide = buildJpeg({ width: 1200, height: CAPTURE_LIMITS.maxLongSide + 1, padTo: 20_000 });
 
   it.each([
     ["image_too_small", tooSmall],
@@ -784,6 +896,7 @@ describe("POST /captures", () => {
     ["invalid_image", png],
     ["invalid_image", noFrame],
     ["image_resolution_too_low", lowRes],
+    ["image_too_large", overLongSide],
   ])("rejects with 422 %s and deletes the object", async (code, image) => {
     const { call, ready, upload, storage, repo } = setup();
     const { token } = await ready();
@@ -825,6 +938,14 @@ describe("checkImage", () => {
     expect(checkImage(new Uint8Array(10))).toEqual({ ok: false, code: "image_too_small" });
     expect(checkImage(GOOD_JPEG)).toEqual({ ok: true, width: 1600, height: 1009 });
     expect(checkImage(buildJpeg({ width: 800, height: 10, padTo: CAPTURE_LIMITS.minBytes }))).toMatchObject({ ok: true });
+  });
+
+  it("refuses a long side over the app's maximum, which the AI worker would refuse", () => {
+    const at = (width: number, height: number) => checkImage(buildJpeg({ width, height, padTo: CAPTURE_LIMITS.minBytes }));
+    expect(at(CAPTURE_LIMITS.maxLongSide, 900)).toMatchObject({ ok: true });
+    expect(at(900, CAPTURE_LIMITS.maxLongSide)).toMatchObject({ ok: true });
+    expect(at(CAPTURE_LIMITS.maxLongSide + 1, 900)).toEqual({ ok: false, code: "image_too_large" });
+    expect(at(2400, 1800)).toEqual({ ok: false, code: "image_too_large" });
   });
 });
 
@@ -1370,6 +1491,265 @@ describe("assessMrzReport", () => {
 });
 
 // ---------------------------------------------------------------------------
+// M3: a newer photo of a side replaces the older one
+// ---------------------------------------------------------------------------
+describe("replaced photos (M3)", () => {
+  const SECOND = buildJpeg({ width: 1600, height: 1009, padTo: 61_000 });
+
+  it("erases the replaced photo from storage and counts it in the audit entry", async () => {
+    const { complete, ready, repo, storage } = setup();
+    const { token } = await ready();
+    const first = await readJson(await complete(token, "document_front"));
+    const firstPath = repo.captures[0].storagePath;
+    expect(storage.objects.has(firstPath)).toBe(true);
+    const second = await readJson(await complete(token, "document_front", SECOND));
+
+    expect(repo.captures.find((c) => c.id === first.captureId)).toMatchObject({
+      deletedAt: expect.any(String),
+      supersededBy: second.captureId,
+    });
+    expect(repo.erasedData).toEqual([first.captureId]);
+    expect(storage.removed).toEqual([firstPath]);
+    expect(storage.objects.has(firstPath)).toBe(false);
+    expect(repo.audits.filter((a) => a.action === "capture.create").map((a) => a.details?.replaced)).toEqual([0, 1]);
+  });
+
+  it("leaves the other side alone", async () => {
+    const { complete, ready, repo, storage } = setup();
+    const { token } = await ready();
+    await complete(token, "document_front");
+    await complete(token, "document_back", SECOND);
+    expect(repo.captures.every((c) => c.deletedAt === null)).toBe(true);
+    expect(storage.removed).toEqual([]);
+  });
+
+  it("still records the photo when the old object cannot be removed, and logs it", async () => {
+    const { complete, ready, storage, log } = setup();
+    const { token } = await ready();
+    await complete(token, "document_front");
+    storage.failRemove = true;
+    expect((await complete(token, "document_front", SECOND)).status).toBe(200);
+    expect(log.error).toHaveBeenCalledWith("flow.superseded_remove_failed", expect.any(Error));
+  });
+
+  it("decides the case's server checks again after a replacement, and only then", async () => {
+    const { complete, ready, cases } = setup();
+    const { id, token } = await ready();
+    await complete(token, "document_front");
+    await complete(token, "document_back", SECOND);
+    expect(cases.writes).toEqual([]);
+    await complete(token, "document_front", buildJpeg({ width: 1600, height: 1009, padTo: 62_000 }));
+    // The fake snapshot has no photo with a result: the case-level checks are dropped (null).
+    expect(cases.writes).toEqual([{ verificationId: id, checks: null }]);
+  });
+
+  it("logs a failed case refresh without failing the rider's request", async () => {
+    const { complete, ready, cases, log } = setup();
+    const { token } = await ready();
+    await complete(token, "document_front");
+    cases.fail = true;
+    expect((await complete(token, "document_front", SECOND)).status).toBe(200);
+    expect(log.error).toHaveBeenCalledWith("flow.case_refresh_failed", expect.any(Error));
+  });
+
+  it("finishes the follow-up on a retried request (the first may have stopped after the insert)", async () => {
+    const { call, complete, ready, upload, repo, storage, ring } = setup();
+    const { token } = await ready();
+    await complete(token, "document_front");
+    const firstPath = repo.captures[0].storagePath;
+    storage.failRemove = true;
+    const path = await upload(token, "document_front", SECOND);
+    const body = { path, kind: "document_front", quality: QUALITY };
+    expect((await call("/captures", token, { body })).status).toBe(200);
+    expect(storage.objects.has(firstPath)).toBe(true);
+    storage.failRemove = false;
+    expect((await call("/captures", token, { body })).status).toBe(200);
+    expect(storage.removed).toEqual([firstPath]);
+    expect(ring.rings).toEqual(["capture", "capture", "capture"]);
+    expect(repo.audits.filter((a) => a.action === "capture.create")).toHaveLength(2);
+  });
+
+  it("returns 500 when the follow-up cannot be read (the rider retries)", async () => {
+    const { complete, ready, repo } = setup();
+    const { token } = await ready();
+    repo.failOn = "captureFollowUp";
+    await expectError(await complete(token, "document_front"), 500, "server_error");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// M3: ringing the AI worker
+// ---------------------------------------------------------------------------
+describe("ringing the worker (M3)", () => {
+  it("rings after each accepted photo of a test session", async () => {
+    const { complete, ready, ring } = setup();
+    const { token } = await ready({ isTest: true });
+    await complete(token, "document_front");
+    await complete(token, "document_back", buildJpeg({ width: 1600, height: 1009, padTo: 61_000 }));
+    expect(ring.rings).toEqual(["capture", "capture"]);
+  });
+
+  it("never rings for a refused photo", async () => {
+    const { call, ready, upload, ring } = setup();
+    const { token } = await ready();
+    const path = await upload(token, "document_front", buildJpeg({ width: 700, height: 400, padTo: 20_000 }));
+    await expectError(await call("/captures", token, { body: { path, kind: "document_front", quality: QUALITY } }), 422, "image_resolution_too_low");
+    expect(ring.rings).toEqual([]);
+  });
+
+  it("does not ring for a real session while the switch is off; the photo is unchecked at once", async () => {
+    const { call, complete, ready, ring, repo } = setup();
+    const { token } = await ready({ isTest: false, declaredDocument: "passport" });
+    const res = await readJson(await complete(token, "document_front"));
+    expect(ring.rings).toEqual([]);
+    expect(repo.jobs.get(res.captureId as string)).toMatchObject({ status: "failed", errorCode: "ineligible" });
+    const checks = await readJson(await call("/checks", token, { method: "GET" }));
+    expect(checks).toEqual({ done: true, sides: [{ kind: "document_front", captureId: res.captureId, state: "unchecked", reason: null }] });
+  });
+
+  it("rings for a real session once the switch is on", async () => {
+    const { complete, ready, ring, repo } = setup();
+    repo.workerEnabled = true;
+    const { token } = await ready({ isTest: false });
+    await complete(token, "document_front");
+    expect(ring.rings).toEqual(["capture"]);
+  });
+
+  it("rings a warm-up when a test session declares its document", async () => {
+    const { call, seed, ring } = setup();
+    const { token } = await seed({ status: "in_progress", isTest: true }, { consent: true });
+    expect((await call("/document-type", token, { body: { declaredDocument: "passport" } })).status).toBe(200);
+    expect(ring.rings).toEqual(["warm_up"]);
+  });
+
+  it("rings no warm-up for a real session while the switch is off, one when it is on", async () => {
+    const { call, seed, ring, repo } = setup();
+    const { token } = await seed({ status: "in_progress", isTest: false }, { consent: true });
+    await call("/document-type", token, { body: { declaredDocument: "passport" } });
+    expect(ring.rings).toEqual([]);
+    repo.workerEnabled = true;
+    await call("/document-type", token, { body: { declaredDocument: "passport" } });
+    expect(ring.rings).toEqual(["warm_up"]);
+  });
+
+  it("marks the photo when the ring fails, so the rider is not kept waiting", async () => {
+    const { call, complete, ready, ring, repo } = setup();
+    const { token } = await ready({ declaredDocument: "passport" });
+    ring.fail = true;
+    const res = await readJson(await complete(token, "document_front"));
+    await ring.settle();
+    expect(repo.jobs.get(res.captureId as string)).toMatchObject({ status: "pending", ringFailed: true });
+    const checks = await readJson(await call("/checks", token, { method: "GET" }));
+    expect(checks).toMatchObject({ done: true, sides: [{ state: "unchecked" }] });
+  });
+
+  it("works without a ring configured", async () => {
+    const { complete, ready } = setup({ ring: undefined, cases: undefined });
+    const { token } = await ready();
+    expect((await complete(token, "document_front")).status).toBe(200);
+    expect((await complete(token, "document_front", buildJpeg({ width: 1600, height: 1009, padTo: 61_000 }))).status)
+      .toBe(200);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// M3: GET /checks
+// ---------------------------------------------------------------------------
+describe("GET /checks", () => {
+  const get = (h: ReturnType<typeof setup>, token: string) => h.call("/checks", token, { method: "GET" });
+
+  async function cni(h: ReturnType<typeof setup>, overrides: Partial<VerificationRecord> = {}) {
+    const session = await h.ready({ declaredDocument: "cni_biometric", ...overrides });
+    const front = (await readJson(await h.complete(session.token, "document_front"))).captureId as string;
+    const back = (await readJson(await h.complete(session.token, "document_back", buildJpeg({ width: 1600, height: 1009, padTo: 61_000 }))))
+      .captureId as string;
+    return { ...session, front, back };
+  }
+
+  it("needs a session, a declared document and every required side", async () => {
+    const h = setup();
+    await expectError(await h.call("/checks", null, { method: "GET" }), 401, "invalid_session");
+    const bare = await h.seed({ status: "in_progress" }, { consent: true });
+    await expectError(await get(h, bare.token), 409, "document_type_required");
+    const half = await h.ready({ declaredDocument: "cni_biometric" });
+    await h.complete(half.token, "document_front");
+    await expectError(await get(h, half.token), 409, "missing_sides");
+    const closed = await h.ready({ status: "submitted" });
+    await expectError(await get(h, closed.token), 409, "already_submitted");
+  });
+
+  it("reports each side pending until the server has checked it, then ok", async () => {
+    const h = setup();
+    const { token, front, back } = await cni(h);
+    const pending = await get(h, token);
+    expect(pending.status).toBe(200);
+    expect(pending.headers.get("cache-control")).toBe("no-store");
+    expect(await readJson(pending)).toEqual({
+      done: false,
+      sides: [
+        { kind: "document_front", captureId: front, state: "pending", reason: null },
+        { kind: "document_back", captureId: back, state: "pending", reason: null },
+      ],
+    });
+    h.repo.finishJob(front, "ok");
+    h.repo.jobs.get(back)!.status = "claimed";
+    expect(await readJson(await get(h, token))).toMatchObject({ done: false, sides: [{ state: "ok" }, { state: "pending" }] });
+    h.repo.finishJob(back, "poor");
+    expect(await readJson(await get(h, token))).toMatchObject({ done: true, sides: [{ state: "ok" }, { state: "ok" }] });
+  });
+
+  it("asks for one retake of an unusable photo, then follows the new photo", async () => {
+    const h = setup();
+    const { token, front } = await cni(h);
+    h.repo.finishJob(front, "no_document");
+    expect(await readJson(await get(h, token))).toMatchObject({
+      done: false,
+      sides: [{ kind: "document_front", captureId: front, state: "retake", reason: "no_document" }, { state: "pending" }],
+    });
+    const retake = (await readJson(await h.complete(token, "document_front", buildJpeg({ width: 1600, height: 1009, padTo: 62_000 }))))
+      .captureId as string;
+    expect(await readJson(await get(h, token))).toMatchObject({ sides: [{ captureId: retake, state: "pending" }, {}] });
+    h.repo.finishJob(retake, "unreadable");
+    // One server retake per side: the second unusable photo is flagged for staff, never refused.
+    expect(await readJson(await get(h, token))).toMatchObject({ sides: [{ captureId: retake, state: "ok", reason: null }, {}] });
+  });
+
+  it("never asks for a retake of a photo whose code lines the phone read right", async () => {
+    const h = setup();
+    const { token, back } = await cni(h);
+    h.repo.mrzRecords.push({
+      verificationId: "",
+      captureId: back,
+      lines: null,
+      format: null,
+      outcome: "pass",
+      details: {} as MrzCheckDetails,
+    });
+    h.repo.finishJob(back, "unreadable");
+    expect(await readJson(await get(h, token))).toMatchObject({ sides: [{}, { captureId: back, state: "ok" }] });
+  });
+
+  it.each(["budget", "ineligible", "attempts", "expired"])("reports a job given up (%s) as unchecked at once", async (code) => {
+    const h = setup();
+    const { token, front } = await cni(h);
+    Object.assign(h.repo.jobs.get(front)!, { status: "failed", errorCode: code });
+    expect(await readJson(await get(h, token))).toMatchObject({ done: false, sides: [{ state: "unchecked" }, { state: "pending" }] });
+  });
+
+  it("returns nothing read from the document", async () => {
+    const h = setup();
+    const { token, front, back } = await cni(h);
+    h.repo.finishJob(front, "ok");
+    h.repo.finishJob(back, "unreadable");
+    const body = await readJson(await get(h, token));
+    expect(Object.keys(body).sort()).toEqual(["done", "sides"]);
+    for (const side of body.sides as Record<string, unknown>[]) {
+      expect(Object.keys(side).sort()).toEqual(["captureId", "kind", "reason", "state"]);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // End to end through the handler
 // ---------------------------------------------------------------------------
 describe("rider flow", () => {
@@ -1408,7 +1788,7 @@ describe("rider flow", () => {
 
   it("answers preflight requests for every route", async () => {
     const { handler } = setup();
-    for (const path of ["/session", "/consent", "/document-type", "/upload-url", "/captures", "/mrz", "/submit"]) {
+    for (const path of ["/session", "/consent", "/document-type", "/upload-url", "/captures", "/mrz", "/checks", "/submit"]) {
       const res = await handler(makeRequest(`https://ref.supabase.co/flow${path}`, { method: "OPTIONS" }));
       expect(res.status, path).toBe(204);
       expect(res.headers.get("access-control-allow-headers")).toContain("x-session-token");

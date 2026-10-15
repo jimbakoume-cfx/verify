@@ -1,30 +1,14 @@
 // "Code lines (MRZ)" section of the case page: the server's verdict on what the rider's phone read,
-// per photo, and "Show data read" for the decrypted lines (audited, shown for a limited time).
-import { useMemo, useState } from "react";
+// per photo. The server's own reading of the photo is in the "Server checks" section, and the lines
+// themselves behind "Show data read" (CaseData.tsx).
+import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { type Language, MRZ_EXPECTATION } from "@verify/shared";
-import { useServices } from "../api/services";
-import { type OpenDocumentData, DocumentDataViewer } from "../components/DocumentDataViewer";
+import { CheckLines, OutcomeBadge } from "../components/Checks";
 import { ErrorText } from "../components/Feedback";
 import { formatDateTime, formatNumber, toLanguage } from "../lib/format";
 import { formatMrzFormat, type MrzEntry, mrzCheckLines, mrzOverview } from "../lib/mrz";
-import type { CaptureRecord, CheckOutcome, MrzCheckRecord, StaffProfile, VerificationSummary } from "../lib/records";
-import { documentDataAccess } from "../lib/roles";
-
-const OUTCOME_TONE: Record<CheckOutcome, "neutral" | "ok" | "warn" | "bad"> = {
-  pass: "ok",
-  flag: "warn",
-  fail: "bad",
-  error: "bad",
-  skipped: "neutral",
-};
-
-type DataState =
-  | { status: "closed" }
-  | { status: "opening" }
-  | { status: "open"; data: OpenDocumentData }
-  | { status: "expired" }
-  | { status: "error"; error: unknown };
+import type { CaptureRecord, MrzCheckRecord, VerificationSummary } from "../lib/records";
 
 export function MrzSection({
   verification,
@@ -33,8 +17,6 @@ export function MrzSection({
   error,
   loading,
   onReload,
-  profile,
-  initialData,
 }: {
   verification: VerificationSummary;
   captures: CaptureRecord[];
@@ -43,35 +25,13 @@ export function MrzSection({
   error: unknown;
   loading: boolean;
   onReload: () => void;
-  profile: StaffProfile;
-  /** Data already shown (dev screen preview only). */
-  initialData?: OpenDocumentData;
 }) {
   const { t, i18n } = useTranslation();
   const lang = toLanguage(i18n.language);
-  const services = useServices();
-  const [data, setData] = useState<DataState>(initialData ? { status: "open", data: initialData } : { status: "closed" });
   const overview = useMemo(
     () => (checks ? mrzOverview(verification.declaredDocument, captures, checks) : null),
     [verification.declaredDocument, captures, checks],
   );
-  const kindOf = useMemo(() => new Map(captures.map((c) => [c.id, c.kind])), [captures]);
-  const sideLabel = (captureId: string) => {
-    const kind = kindOf.get(captureId);
-    return kind ? t(`kinds.${kind}`, { defaultValue: kind }) : null;
-  };
-
-  async function show() {
-    setData({ status: "opening" });
-    // Count the time from before the request: the server's clock started no earlier than this.
-    const requestedAt = Date.now();
-    try {
-      const response = await services.documentData(verification.id);
-      setData({ status: "open", data: { items: response.items, deadlineMs: requestedAt + response.expiresIn * 1000 } });
-    } catch (err) {
-      setData({ status: "error", error: err });
-    }
-  }
 
   const declared = verification.declaredDocument;
   const expectation = declared ? MRZ_EXPECTATION[declared] : null;
@@ -114,42 +74,6 @@ export function MrzSection({
         </>
       )}
 
-      {/* Kept while data is open, so its timer always runs: data never sits in memory unshown. */}
-      {(overview?.hasData || data.status === "open") && (
-        <div className="dash-mrz-access">
-          {documentDataAccess(profile.role) === "admin_blocked" ? (
-            <p className="dash-alert info">{t("errors.adminNoDataAccess")}</p>
-          ) : (
-            <>
-              {data.status !== "open" && (
-                <>
-                  <p className="muted dash-small">{t("mrz.dataLogged")}</p>
-                  <div className="dash-capture-actions">
-                    <button type="button" onClick={() => void show()} disabled={data.status === "opening"}>
-                      {data.status === "opening" ? t("case.opening") : t("mrz.showData")}
-                    </button>
-                    {data.status === "expired" && (
-                      <p className="muted dash-small" role="status">
-                        {t("mrz.dataRemoved")}
-                      </p>
-                    )}
-                  </div>
-                </>
-              )}
-              {data.status === "error" && <ErrorText error={data.error} context="documentData" />}
-              {data.status === "open" && (
-                <DocumentDataViewer
-                  key={data.data.deadlineMs}
-                  data={data.data}
-                  sideLabel={sideLabel}
-                  onExpire={() => setData({ status: "expired" })}
-                  onClose={() => setData({ status: "closed" })}
-                />
-              )}
-            </>
-          )}
-        </div>
-      )}
     </section>
   );
 }
@@ -198,7 +122,7 @@ function MrzEntryItem({ entry, lang }: { entry: MrzEntry; lang: Language }) {
       <header className="dash-capture-head">
         <h3>{side}</h3>
         <span className="dash-row-badges">
-          <span className={`badge ${OUTCOME_TONE[check.outcome]}`}>{t(`checkOutcome.${check.outcome}`)}</span>
+          <OutcomeBadge outcome={check.outcome} />
           {entry.superseded && <span className="badge neutral">{t("mrz.earlierPhoto")}</span>}
         </span>
       </header>
@@ -211,24 +135,7 @@ function MrzEntryItem({ entry, lang }: { entry: MrzEntry; lang: Language }) {
       {d?.result === "unreadable" && (
         <p className="dash-alert info">{t(d.reason ? `mrz.unreadable.${d.reason}` : "mrz.unreadable.unknown")}</p>
       )}
-      {d && read && (
-        <ul className="dash-mrz-checks">
-          {mrzCheckLines(d).map((line) => (
-            <li key={line.key} className={line.ok === null ? "unknown" : line.ok ? "ok" : "bad"}>
-              <span className="dash-mrz-icon" aria-hidden="true">
-                {line.ok === null ? "—" : line.ok ? "✅" : "❌"}
-              </span>
-              <span>
-                {t(line.key)}
-                <span className="visually-hidden">
-                  {", "}
-                  {t(line.ok === null ? "mrz.tick.unknown" : line.ok ? "mrz.tick.ok" : "mrz.tick.bad")}
-                </span>
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
+      {d && read && <CheckLines lines={mrzCheckLines(d)} />}
       <dl className="dash-facts compact">
         {facts.map(([label, value]) => (
           <div key={label}>

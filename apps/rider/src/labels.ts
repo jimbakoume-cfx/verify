@@ -1,4 +1,4 @@
-import type { CaptureSide, DeclaredDocument } from "@verify/shared";
+import type { CaptureSide, DeclaredDocument, RetakeReason } from "@verify/shared";
 
 /** i18n key naming the side being photographed ("Front", or "Photo page" for a passport). */
 export function sideLabelKey(document: DeclaredDocument | null, side: CaptureSide): string {
@@ -18,4 +18,12 @@ export function documentHintKey(document: DeclaredDocument): string | null {
     default:
       return null;
   }
+}
+
+/**
+ * i18n key of why the server asks for a new photo (GET /flow/checks). No document found reads like the
+ * camera's own hint; only "unreadable" has its own text.
+ */
+export function retakeReasonKey(reason: RetakeReason): string {
+  return reason === "no_document" ? "hints.no_document" : "checks.unreadable";
 }

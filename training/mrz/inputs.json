@@ -1,0 +1,89 @@
+{
+  "about": "Every input of the MRZ model training, pinned. bin/00-setup.sh fetches the downloads into work/inputs and refuses any file whose SHA-256 differs; the repository files are checked the same way. None of these files is shipped: the model we ship is our own output (see README.md).",
+  "downloads": [
+    {
+      "name": "tesstrain (Makefile and list helpers)",
+      "git": "https://github.com/tesseract-ocr/tesstrain",
+      "commit": "405346a3a67d8e4e049341d1da6a4b752e0b8351",
+      "date": "2025-04-18",
+      "dest": "tesstrain",
+      "licence": "Apache-2.0",
+      "use": "make unicharset, lists, proto-model and the .lstmf files",
+      "files": {
+        "Makefile": "7f7c4153ac3f985fbb3d3787117f7023dc4a497c11bca1840dc46899ed921c7a",
+        "generate_eval_train.py": "fcace6a7e4ba4a2ac9365134624b2204e286debf13a10591eabeb86bba0b9da4",
+        "shuffle.py": "dab4e4cc9313416736fdadda7da7f67cf335f5be657d0eac0914bce48ed24b36",
+        "LICENSE": "a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9"
+      }
+    },
+    {
+      "name": "langdata_lstm radical-stroke.txt",
+      "url": "https://raw.githubusercontent.com/tesseract-ocr/langdata_lstm/07930fd9f246622c26eb5de794d9212ceac432d3/radical-stroke.txt",
+      "dest": "langdata/radical-stroke.txt",
+      "bytes": 330874,
+      "sha256": "9b441331169924e640233ae3abff9b4ac7019e33978a074c9d322f89afab1b89",
+      "licence": "Apache-2.0",
+      "use": "character property table read by combine_lang_model (proto model)"
+    },
+    {
+      "name": "langdata_lstm Latin.unicharset",
+      "url": "https://raw.githubusercontent.com/tesseract-ocr/langdata_lstm/07930fd9f246622c26eb5de794d9212ceac432d3/Latin.unicharset",
+      "dest": "langdata/Latin.unicharset",
+      "bytes": 267393,
+      "sha256": "2c5344876ec1edfc3187530949c76b93aab97c6031fa94a48bf85f40a3c7e128",
+      "licence": "Apache-2.0",
+      "use": "character properties of the Latin script (proto model); our 37 characters are A-Z, 0-9 and <"
+    },
+    {
+      "name": "tessdata_fast eng.traineddata",
+      "url": "https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/87416418657359cb625c412a48b6e1d6d41c29bd/eng.traineddata",
+      "dest": "layout/eng.traineddata",
+      "bytes": 4113088,
+      "sha256": "7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2",
+      "licence": "Apache-2.0",
+      "use": "lets native Tesseract run its line finding on prepared bands (node/cutLines.ts); only the geometry is kept, the text it reads is thrown away. Not a training input of the model."
+    },
+    {
+      "name": "tessdata_best eng.traineddata",
+      "url": "https://raw.githubusercontent.com/tesseract-ocr/tessdata_best/e12c65a915945e4c28e237a9b52bc4a8f39a0cec/eng.traineddata",
+      "dest": "tessdata_best/eng.traineddata",
+      "bytes": 15400601,
+      "sha256": "8280aed0782fe27257a68ea10fe7ef324ca0f8d85bd2fd145d1c2b560bcb66ba",
+      "licence": "Apache-2.0 (trained by Google on synthetic renders in about 4,500 fonts, many commercial: see README.md)",
+      "use": "fallback run 2 only (bin/31-finetune.sh): the starting weights of the fine-tune. Not fetched unless asked (bin/00-setup.sh --finetune)",
+      "optional": true
+    }
+  ],
+  "repository": [
+    {
+      "name": "OCR-B font (Matthew Skala's OCR fonts 0.3.1)",
+      "path": "scripts/fonts/ocr-b/OCRB.otf",
+      "sha256": "87c8d5bfd541d28023d2ba3383169c49f565e10d487ebb027ea0d735ef558707",
+      "licence": "Schwarz: free use without limitation; Skala: no copyright claimed (scripts/fonts/ocr-b/README.md)",
+      "use": "draws every MRZ character of the training data and the benchmarks"
+    },
+    {
+      "name": "MRZ fixture renderer",
+      "path": "scripts/make-mrz-fixtures.py",
+      "licence": "our own code",
+      "use": "the G2/G3 benchmark's documents (py/bench.py), a renderer the training data never used",
+      "sha256": "301ebad30414e7975233629b41fc49a8a5791822f0b7bbdaee0f740b5933ec23",
+      "onMismatch": "warn: the benchmark changes with it, so results from before and after are not comparable"
+    },
+    {
+      "name": "Doubango mrz.traineddata (the model in use today)",
+      "path": "apps/rider/public/ocr/mrz-1/mrz.traineddata.gz",
+      "sha256": "dbbd4add162b8d28ed82b4a384c5f16dff274c63ddcd80b63e0315fd130a3909",
+      "licence": "BSD-3-Clause",
+      "use": "the G1/G3 baseline only; never a training input"
+    }
+  ],
+  "python": "training/mrz/pyproject.toml and uv.lock (Pillow 12.3.0 and NumPy 2.5.3 wheels, hashes in the lock)",
+  "node": "the repository's package-lock.json (tesseract.js 7.0.0, tesseract.js-core 7.0.0, Vite for node/run.mjs)",
+  "tools": {
+    "tesseract": "Tesseract 5.3.4 with its training tools (lstmtraining, lstmeval, combine_tessdata, combine_lang_model, unicharset_extractor): Ubuntu 24.04 package tesseract-ocr 5.3.4-1build5. Build tool only, never shipped (see README.md, Licences).",
+    "make": "GNU Make 4.2 or later (tesstrain needs it)",
+    "uv": "0.11 or later",
+    "node": "22 or later"
+  }
+}

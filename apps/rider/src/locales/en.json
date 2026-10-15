@@ -66,7 +66,7 @@
     "cni_biometric": "New national ID card (2025)",
     "cni_legacy": "Old national ID card",
     "passport": "Passport",
-    "residence_permit": "Residence permit",
+    "residence_permit": "Residence permit or refugee card",
     "driving_licence": "Driving licence",
     "voter_card": "Voter card"
   },
@@ -164,6 +164,13 @@
     "failedTitle": "The photos could not be sent",
     "progressLabel": "Upload progress"
   },
+  "checks": {
+    "title": "Checking your photos…",
+    "body": "We're checking that your photos are sharp and readable. This takes a few seconds.",
+    "keepOpen": "Keep this page open.",
+    "retake": "{{side}}: please take this photo again",
+    "unreadable": "Text unreadable: avoid blur and glare"
+  },
   "done": {
     "title": "Photos received",
     "next": "Next step: face check (coming in M5).",
@@ -200,6 +207,9 @@
     "image_too_large": "The photo file is too large. Please take the photo again.",
     "image_resolution_too_low": "The photo is not detailed enough. Hold your phone upright and take it again; if this keeps happening, use another phone.",
     "invalid_mrz": "The code lines sent are not valid.",
+    "invalid_signature": "The request could not be verified. Try again.",
+    "replayed_request": "This request was already received. Try again.",
+    "image_gone": "The photo is no longer available. Please take it again.",
     "audit_failed": "The action could not be recorded. Please try again.",
     "invalid_invite": "The email address or invite code is not valid.",
     "weak_password": "The password does not meet the rules.",

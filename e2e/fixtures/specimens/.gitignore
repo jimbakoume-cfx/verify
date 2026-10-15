@@ -1,0 +1,3 @@
+# The rest of the repository ignores images (never commit ID photos); these are our own fictitious
+# SPECIMEN renders (scripts/make-specimens.py), so they are committed.
+!*.jpg

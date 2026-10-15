@@ -1,0 +1,117 @@
+{
+ "about": "bin/smoke.sh on 2026-10-14, 4 vCPU sandbox (shared with other work), from an empty work/smoke: every stage ran; seconds per stage below. The benchmark's first 200 stills were already rendered (bin/50-bench.sh 200 took 127 s on its own). The models are a few hundred iterations old: the gates must run, not pass.",
+ "secondsPerStage": {
+  "setup": 1,
+  "data": 176,
+  "lstmf": 35,
+  "train_scratch_300": 30,
+  "train_scratch_resume_to_400": 10,
+  "finetune_200": 43,
+  "bench_200": 0,
+  "gates_scratch_20docs": 118,
+  "gates_finetune_20docs": 105
+ },
+ "threads": 4,
+ "trainThreads": 4,
+ "benchRender200Seconds": 127,
+ "data": {
+  "lines": {
+   "realistic": 1555,
+   "synthetic": 1477,
+   "g1": 290
+  },
+  "skipped": {
+   "realistic": {
+    "jobs": 715,
+    "lines": 1555,
+    "fallback": 81,
+    "width": 6,
+    "characters": 10,
+    "no_rows": 1,
+    "row_count": 3,
+    "tesseract_lines": 3
+   },
+   "synthetic": {
+    "jobs": 874,
+    "lines": 851,
+    "fallback": 0,
+    "characters": 15,
+    "row_count": 2,
+    "width": 4,
+    "tesseract_lines": 2
+   },
+   "g1": {
+    "jobs": 300,
+    "lines": 290,
+    "fallback": 0,
+    "no_rows": 1,
+    "characters": 7,
+    "row_count": 2
+   }
+  }
+ },
+ "lists": {
+  "train": 2910,
+  "eval": 122,
+  "unicharset": 40,
+  "protoModelSha256": "5697a815c7fa2160a51c95558a5ac9b7d43ea58730c541c34e8a28dd22632fb2"
+ },
+ "rates": {
+  "dataLinesPerSecond": 18.9,
+  "lstmfLinesPerSecond": 86.6,
+  "scratchIterationsPerMinute": 600,
+  "finetuneIterationsPerMinute": 279
+ },
+ "models": {
+  "finetune-4.805_84_200": {
+   "integerGzBytes": 1299225,
+   "floatBytes": 11396760,
+   "checkpoint": "mrz_4.805_84_200.checkpoint"
+  },
+  "scratch-checkpoint": {
+   "integerGzBytes": 373594,
+   "floatBytes": 2979488,
+   "checkpoint": "mrz_checkpoint"
+  }
+ },
+ "gates20Docs": {
+  "finetune-4.805_84_200": {
+   "n": 20,
+   "validExact": 14,
+   "validWrong": 0,
+   "invalid": 5,
+   "notFound": 1,
+   "nameExact": 19,
+   "cer": 5.281,
+   "msPerStill": 587
+  },
+  "scratch-checkpoint": {
+   "n": 20,
+   "validExact": 0,
+   "validWrong": 0,
+   "invalid": 0,
+   "notFound": 20,
+   "nameExact": 0,
+   "cer": 100,
+   "msPerStill": 1362
+  }
+ },
+ "lstmeval": {
+  "finetune-4.805_84_200": {
+   "int clean": 1.396,
+   "int degraded": 9.528,
+   "int lowres": 2.13,
+   "float clean": 1.374,
+   "float degraded": 9.607,
+   "float lowres": 2.176
+  },
+  "scratch-checkpoint": {
+   "int clean": 100.0,
+   "int degraded": 100.0,
+   "int lowres": 100.0,
+   "float clean": 100.0,
+   "float degraded": 100.0,
+   "float lowres": 100.0
+  }
+ }
+}

@@ -13,13 +13,17 @@ import { ClientError } from "../lib/errors";
 import {
   CAPTURE_COLUMNS,
   type CaptureRecord,
+  CHECK_COLUMNS,
   countCaptures,
-  MRZ_CHECK_COLUMNS,
+  JOB_COLUMNS,
   type MrzCheckRecord,
+  SERVER_CHECK_NAME_LIST,
+  type ServerChecks,
   STAFF_PROFILE_COLUMNS,
   type StaffProfile,
   toCapture,
   toMrzCheck,
+  toServerChecks,
   toStaffProfile,
   toVerification,
   VERIFICATION_COLUMNS,
@@ -38,9 +42,14 @@ export interface DashboardServices {
   captures(verificationId: string): Promise<CaptureRecord[]>;
   /** Results of the MRZ check, latest first. Outcomes and counts only: no data read from the document. */
   mrzChecks(verificationId: string): Promise<MrzCheckRecord[]>;
+  /** The server's checks (M3). Outcomes, generic codes and metrics only: no data read from the document. */
+  serverChecks(verificationId: string): Promise<ServerChecks>;
   createTestSession(request: TestSessionRequest): Promise<TestSessionResponse>;
   viewCapture(captureId: string): Promise<CaptureViewResponse>;
-  /** The decrypted MRZ lines of a case (POST /admin/document-data, audited before decryption). */
+  /**
+   * The decrypted data read from a case's documents: code lines from the phone and the server, printed
+   * fields from the server (POST /admin/document-data, audited before decryption).
+   */
   documentData(verificationId: string): Promise<DocumentDataResponse>;
 }
 
@@ -111,12 +120,29 @@ export function createSupabaseServices(supabase: Supabase): DashboardServices {
     async mrzChecks(verificationId) {
       const { data, error } = await supabase
         .from("check_result")
-        .select(MRZ_CHECK_COLUMNS)
+        .select(CHECK_COLUMNS)
         .eq("verification_id", verificationId)
         .eq("check_name", MRZ_CHECK_NAME)
         .order("created_at", { ascending: false });
       if (error) throw dbError(error);
       return (data ?? []).map(toMrzCheck).filter((c): c is MrzCheckRecord => c !== null);
+    },
+
+    // Queries of their own, like the MRZ checks: a failure leaves the rest of the case readable.
+    async serverChecks(verificationId) {
+      const [checks, jobs] = await Promise.all([
+        supabase
+          .from("check_result")
+          .select(CHECK_COLUMNS)
+          .eq("verification_id", verificationId)
+          .in("check_name", [...SERVER_CHECK_NAME_LIST])
+          .order("created_at", { ascending: false }),
+        // Each photo's job status only: the other columns (evidence, error codes) are not granted.
+        supabase.from("worker_job").select(JOB_COLUMNS).eq("verification_id", verificationId),
+      ]);
+      if (checks.error) throw dbError(checks.error);
+      if (jobs.error) throw dbError(jobs.error);
+      return toServerChecks(checks.data ?? [], jobs.data ?? []);
     },
 
     async createTestSession(request) {

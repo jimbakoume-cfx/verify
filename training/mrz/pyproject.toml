@@ -1,0 +1,22 @@
+# Training pipeline of our own MRZ ("code lines") reading model (M3). Developer and training-machine
+# tool only: nothing here is installed by CI or shipped. See README.md.
+[project]
+name = "confiance-verify-mrz-training"
+version = "1.0.0"
+description = "Renders fictitious MRZ training data and benchmarks for our Tesseract MRZ model"
+readme = "README.md"
+classifiers = ["Private :: Do Not Upload"]
+requires-python = "==3.12.*"
+# Exact pins, each released at least two weeks before it was adopted (exclude-newer enforces it).
+# The PyPI wheels, never the distro packages: Ubuntu's python3-pil links GPL-3.0+ libimagequant and
+# GPL-2+ libjbig (see README.md, "Licences").
+dependencies = [
+  "pillow==12.3.0",
+  "numpy==2.5.3",
+]
+
+[tool.uv]
+# Scripts, not an installable package.
+package = false
+# The two-week rule, enforced: nothing published after this instant is ever resolved.
+exclude-newer = "2026-10-01T00:00:00Z"

@@ -4,7 +4,11 @@ import { CAPTURE_LIMITS, type ClientQuality } from "../../supabase/functions/_sh
 import type { StoredObject } from "./backend";
 import { hasApp1 } from "./jpeg";
 
-/** The calls of a complete ID-card flow: photos are sent after both sides are accepted. */
+/**
+ * The calls of a complete ID-card flow: photos are sent after both sides are accepted, then the app
+ * asks for the server's checks of them (M3) before submitting. The fake worker has checked them by
+ * the first answer unless a test says otherwise (FakeBackend.worker).
+ */
 export const CARD_FLOW = [
   "GET /session",
   "POST /consent",
@@ -13,13 +17,14 @@ export const CARD_FLOW = [
   "POST /captures",
   "POST /upload-url",
   "POST /captures",
+  "GET /checks",
   "POST /submit",
 ];
 
 /** The new CNI: as above, plus the report of its code lines once the back is on the server. */
-export const NEW_CNI_FLOW = [...CARD_FLOW.slice(0, -1), "POST /mrz", "POST /submit"];
+export const NEW_CNI_FLOW = [...CARD_FLOW.slice(0, -2), "POST /mrz", "GET /checks", "POST /submit"];
 
-/** A passport: one photo (the data page), the report of its code lines, then the submit. */
+/** A passport: one photo (the data page), the report of its code lines, the checks, then the submit. */
 export const PASSPORT_FLOW = [
   "GET /session",
   "POST /consent",
@@ -27,8 +32,14 @@ export const PASSPORT_FLOW = [
   "POST /upload-url",
   "POST /captures",
   "POST /mrz",
+  "GET /checks",
   "POST /submit",
 ];
+
+/** The routes from the first photo's upload link on: what the server saw of the photos. */
+export function afterPhotos(routes: readonly string[]): string[] {
+  return routes.slice(routes.indexOf("POST /upload-url"));
+}
 
 /** A photo as the server must receive it: a small canvas JPEG, no metadata, big enough to read. */
 export function expectCleanPhoto(object: StoredObject): void {

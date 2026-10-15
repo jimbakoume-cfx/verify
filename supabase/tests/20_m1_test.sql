@@ -687,23 +687,33 @@ rollback;
 -- supabase-js accepts any string in .select(), .insert(), .eq() and .rpc(), so neither the type
 -- checks nor the handler tests (in-memory fakes) would notice a renamed column or RPC parameter:
 -- the first sign would be a 500 on a phone. These checks pin the names used by
--- supabase/functions/flow/repo.ts, supabase/functions/admin/repo.ts, supabase/functions/_shared/db.ts
--- (audit) and the dashboard (apps/dashboard/src/api/services.ts, lib/records.ts). A migration that
--- renames one must update the code and this list together.
+-- supabase/functions/flow/repo.ts, supabase/functions/admin/repo.ts, supabase/functions/worker/repo.ts,
+-- supabase/functions/_shared/db.ts (audit) and the dashboard (apps/dashboard/src/api/services.ts,
+-- lib/records.ts). A migration that renames one must update the code and this list together.
 select pg_temp.assert_true(
   (select array_agg(p.proname || '(' || array_to_string(p.proargnames, ',') || ')' order by p.proname)
      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'public'
       and p.proname in ('flow_claim_upload_slot', 'flow_submit', 'staff_find_auth_user', 'staff_invite_accept', 'staff_invite_verify',
-                        'flow_record_mrz', 'staff_read_document_data'))
+                        'flow_record_mrz', 'staff_read_document_data',
+                        'flow_check_state', 'worker_use_nonce', 'worker_claim', 'worker_image_lookup',
+                        'worker_case_snapshot', 'worker_record_result', 'worker_write_case'))
   = array[
+    'flow_check_state(p_verification,capture_id,kind,live,created_at,job_status,job_error,ring_failed,quality_verdict,phone_mrz_pass)',
     'flow_claim_upload_slot(p_verification,p_max)',
     'flow_record_mrz(p_verification,p_capture,p_lines,p_format,p_outcome,p_details)',
     'flow_submit(p_verification,p_required)',
     'staff_find_auth_user(p_email,user_id,email_confirmed)',
     'staff_invite_accept(p_email,p_code_hash,p_user_id)',
     'staff_invite_verify(p_email,p_code_hash)',
-    'staff_read_document_data(p_verification,p_actor,p_role,capture_id,source,format,lines,recorded_at)'
+    -- M3: every source; printed fields come back in `fields`.
+    'staff_read_document_data(p_verification,p_actor,p_role,capture_id,source,format,lines,fields,recorded_at)',
+    'worker_case_snapshot(p_verification,p_job)',
+    'worker_claim(job_id,attempt,capture_id,kind,declared_document,sha256,byte_size,width,height)',
+    'worker_image_lookup(p_job,p_attempt,result,capture_id,verification_id,storage_path,byte_size)',
+    'worker_record_result(p_kid,p_job,p_attempt,p_fingerprint,p_capture_checks,p_evidence,p_case,p_mrz_lines,p_mrz_format,p_fields)',
+    'worker_use_nonce(p_kid,p_nonce,p_expires_at)',
+    'worker_write_case(p_verification,p_fingerprint,p_case)'
   ],
   'the RPCs and their parameter and result names are those the repos call');
 
@@ -731,7 +741,12 @@ begin
     -- M2: the MRZ check, read by the dashboard through RLS.
     ('check_result', 'id'), ('check_result', 'verification_id'), ('check_result', 'capture_id'),
     ('check_result', 'check_name'), ('check_result', 'check_version'), ('check_result', 'outcome'),
-    ('check_result', 'details'), ('check_result', 'created_at')
+    ('check_result', 'details'), ('check_result', 'created_at'),
+    -- M3: the worker's keys and settings, the photo a capture was replaced by, the job a ring failed for.
+    ('check_result', 'score'), ('capture', 'superseded_by'),
+    ('worker_key', 'kid'), ('worker_key', 'public_key'), ('worker_key', 'revoked_at'),
+    ('worker_settings', 'enabled_for_real_sessions'),
+    ('worker_job', 'capture_id'), ('worker_job', 'status'), ('worker_job', 'ring_failed_at')
   ) as used(t, c)
   where not exists (
     select 1 from information_schema.columns ic

@@ -1,0 +1,69 @@
+{
+  "description": "Fixed Ed25519 test vectors for the worker request signatures (contract.ts, Worker API). The key is RFC 8032 section 7.1 TEST 1, a published test key: never use it for anything real. Both the Edge Function (signature.test.ts) and the Python worker check these. seed and public are base64url without padding; signature is base64url without padding over the ASCII bytes of canonical; bodySha256 is the hex SHA-256 of the UTF-8 bytes of body.",
+  "kid": "test-2026-10",
+  "seed": "nWGxne_9WmC6hEr0kuwsxERJxWl7MmkZcDusAxyuf2A",
+  "public": "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo",
+  "rfc8032": {
+    "seedHex": "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60",
+    "publicHex": "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+    "message": "",
+    "signatureHex": "e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b"
+  },
+  "cases": [
+    {
+      "name": "claim",
+      "method": "POST",
+      "path": "/claim",
+      "timestamp": "1791968400",
+      "nonce": "00112233445566778899aabbccddeeff",
+      "body": "{}",
+      "bodySha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "canonical": "v1|confiance-verify/worker|test-2026-10|POST|/claim|1791968400|00112233445566778899aabbccddeeff|44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "signature": "Qjw1j8ravQhhp4QMC61cQA6y7thF64fsfPSfU5qC1RiZFhab9b8iAVSZzEMGGJgxp3P7dsKS0KnQBF72YAHKBQ"
+    },
+    {
+      "name": "claim with an empty body",
+      "method": "POST",
+      "path": "/claim",
+      "timestamp": "1791968401",
+      "nonce": "0123456789abcdef0123456789abcdef",
+      "body": "",
+      "bodySha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "canonical": "v1|confiance-verify/worker|test-2026-10|POST|/claim|1791968401|0123456789abcdef0123456789abcdef|e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "signature": "YrmFk0BmcP4DT8YiONXSNAu7R_Mw9qkpzJ8fbwW3A2CcGdtEIBOi-KLPSfXDjNitinAdKNzGR-kgAl3XZHB_Ag"
+    },
+    {
+      "name": "image",
+      "method": "POST",
+      "path": "/image",
+      "timestamp": "1791968402",
+      "nonce": "fedcba9876543210fedcba9876543210",
+      "body": "{\"jobId\":\"7b0c3c1e-1a59-4c55-9d40-2f6f2a0d9c11\",\"attempt\":1}",
+      "bodySha256": "2d3ab34b40fbf65669d53f22aae471d9a2ba6f8a55152e5267ab5e2a9f897d95",
+      "canonical": "v1|confiance-verify/worker|test-2026-10|POST|/image|1791968402|fedcba9876543210fedcba9876543210|2d3ab34b40fbf65669d53f22aae471d9a2ba6f8a55152e5267ab5e2a9f897d95",
+      "signature": "GxaX4ihDXMjP0R_uLWAcLCcJBFs6qSD9Fpe3VXf6tZ33tmenrzHpfYKLvEYeRYyeiR6WyxWNumMpzs7kdnAnCA"
+    },
+    {
+      "name": "result",
+      "method": "POST",
+      "path": "/result",
+      "timestamp": "1791968410",
+      "nonce": "a0a1a2a3a4a5a6a7a8a9aaabacadaeaf",
+      "body": "{\"jobId\":\"7b0c3c1e-1a59-4c55-9d40-2f6f2a0d9c11\",\"attempt\":1,\"engine\":\"worker-1/test\",\"quality\":{\"sharpness\":42.5,\"glareRatio\":0.001,\"meanLuma\":140.2,\"documentFound\":true,\"documentConfidence\":0.93,\"longSide\":1600,\"textLines\":14},\"mrzCandidates\":[],\"classification\":{\"rotation\":0,\"keywordHits\":{\"passport\":1},\"qrPresent\":false,\"orientation\":\"landscape\"},\"fields\":{},\"timing\":{\"ms\":2100,\"cold\":false}}",
+      "bodySha256": "5f1d9dcb6243c67e8ba3846248e3e9a749d860bfcf2e0786843d90d8b73d4fb7",
+      "canonical": "v1|confiance-verify/worker|test-2026-10|POST|/result|1791968410|a0a1a2a3a4a5a6a7a8a9aaabacadaeaf|5f1d9dcb6243c67e8ba3846248e3e9a749d860bfcf2e0786843d90d8b73d4fb7",
+      "signature": "Vi21tbWThXNiTTr0VjB7pJnI7oPXxfE6xoI2Um-W_5DfbOZHElgez-Wv4odFth9sjX_5EWYprLdzZSe9jCqfBw"
+    },
+    {
+      "name": "non-ASCII body (UTF-8 bytes are hashed)",
+      "method": "POST",
+      "path": "/result",
+      "timestamp": "1791968411",
+      "nonce": "b0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "body": "{\"note\":\"Né à Yaoundé\"}",
+      "bodySha256": "cded157ce8864da44ebd6de8e322fd0295d2cef6238edfd776a2f96217fd9624",
+      "canonical": "v1|confiance-verify/worker|test-2026-10|POST|/result|1791968411|b0b1b2b3b4b5b6b7b8b9babbbcbdbebf|cded157ce8864da44ebd6de8e322fd0295d2cef6238edfd776a2f96217fd9624",
+      "signature": "lC_f28zLxUKX8h86HjWhwdbLfWge57jfzuEAOWRfLFAA7nTjK6WH_E_sQ2hJfwt8LA7CLFHc1Qcoco4pgRTGBQ"
+    }
+  ]
+}

@@ -66,7 +66,7 @@
     "cni_biometric": "Nouvelle CNI (2025)",
     "cni_legacy": "Ancienne CNI",
     "passport": "Passeport",
-    "residence_permit": "Carte de séjour",
+    "residence_permit": "Titre de séjour ou carte de réfugié",
     "driving_licence": "Permis de conduire",
     "voter_card": "Carte d'électeur"
   },
@@ -164,6 +164,13 @@
     "failedTitle": "Les photos n'ont pas pu être envoyées",
     "progressLabel": "Progression de l'envoi"
   },
+  "checks": {
+    "title": "Vérification de vos photos…",
+    "body": "Nous vérifions que vos photos sont nettes et lisibles. Cela prend quelques secondes.",
+    "keepOpen": "Gardez cette page ouverte.",
+    "retake": "{{side}} : photo à reprendre",
+    "unreadable": "Texte illisible : évitez le flou et les reflets"
+  },
   "done": {
     "title": "Photos reçues",
     "next": "Prochaine étape : le contrôle du visage (arrive en M5).",
@@ -200,6 +207,9 @@
     "image_too_large": "Le fichier de la photo est trop lourd. Reprenez la photo.",
     "image_resolution_too_low": "La photo manque de détails. Tenez votre téléphone à la verticale et reprenez-la ; si le problème persiste, utilisez un autre téléphone.",
     "invalid_mrz": "Les lignes de code envoyées ne sont pas valides.",
+    "invalid_signature": "La demande n'a pas pu être vérifiée. Réessayez.",
+    "replayed_request": "Cette demande a déjà été reçue. Réessayez.",
+    "image_gone": "La photo n'est plus disponible. Reprenez la photo.",
     "audit_failed": "L'action n'a pas pu être enregistrée. Réessayez.",
     "invalid_invite": "L'adresse e-mail ou le code d'invitation n'est pas valide.",
     "weak_password": "Le mot de passe ne respecte pas les règles.",

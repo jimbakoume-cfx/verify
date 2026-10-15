@@ -1,0 +1,48 @@
+{
+  "about": "Acceptance gates for a new MRZ model, from the M3 research (own-mrz-model). A model replaces Doubango's only when every automated gate passes AND G4 (the PM's own test-session photos, checked offline) passes. py/gates.py applies these numbers; bin/60-gates.sh produces the measurements.",
+  "G1": {
+    "what": "Character error rate (CER, %) per line, held-out line sets (other seeds), integer model in tesseract.js 7.0.0 with the rider's settings but page segmentation 7 (one line per image); never worse than Doubango on the same set",
+    "sets": {
+      "clean": {
+        "maxCer": 0.5,
+        "minLineExact": 98
+      },
+      "lowres": {
+        "maxCer": 1.0
+      },
+      "degraded": {
+        "maxCer": 10.0
+      }
+    },
+    "notWorseThanBaseline": true
+  },
+  "G2": {
+    "what": "Wrong reads that pass every check digit, on synthetic documents from a renderer and seeds training never saw, through the real rider pipeline (tesseract.js 7.0.0, page segmentation 6)",
+    "maxWrongButValid": 0,
+    "minDocuments": 1000,
+    "countCorrectionCaused": false,
+    "note": "countCorrectionCaused: true counts every wrong-but-valid read, as the rider would see it. Some come from the shared look-alike correction, not the model (a real K before fillers in optional data becomes '<', which no check digit can see): the report lists them separately. Set it to false to judge the model alone.",
+    "decision": "2026-10-14: judge the model alone. A K and a '<' weigh the same in every ICAO check digit (K=20, a multiple of 10), so the shared corrector's choice to read a K at the start of an empty optional-data run as a misread filler can make a real K disappear without any check failing. That is a property of the corrector (kept: a '<' misread as K is far more common), it only touches optional data, which no decision uses, and it affects every model equally. The report still lists these reads separately."
+  },
+  "G3": {
+    "what": "No worse than Doubango on the same documents",
+    "minValidExactRate": 97,
+    "minNameExactRate": 99,
+    "notWorseThanBaseline": [
+      "validExactRate",
+      "validWrong"
+    ]
+  },
+  "fixtures": {
+    "what": "The repository's own MRZ fixtures read as apps/rider/src/mrz/reader.fixtures.test.ts expects (6/6)",
+    "maxFailures": 0
+  },
+  "size": {
+    "what": "Integer model, gzipped, as the rider downloads it",
+    "maxGzBytes": 1500000
+  },
+  "G4": {
+    "what": "The PM's own test-session photos, read offline on the phone pipeline before switching: valid rate at least Doubango's and zero wrong-but-valid. Manual (photos never leave the test project).",
+    "automated": false
+  }
+}

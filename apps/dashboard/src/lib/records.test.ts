@@ -1,14 +1,26 @@
 import { describe, expect, it } from "vitest";
+import { CLASSIFICATION_DETAIL_KEYS } from "@verify/shared";
 import {
+  CAPTURE_COLUMNS,
   type CaptureRecord,
+  CHECK_COLUMNS,
   countCaptures,
-  MRZ_CHECK_COLUMNS,
+  JOB_COLUMNS,
+  newestLiveCaptures,
+  PRINTED_FIELDS,
+  SERVER_CHECK_NAME_LIST,
   sessionOpen,
   sortCaptures,
   toCapture,
   toCaptureQuality,
+  toClassificationDetails,
+  toDocumentPolicyDetails,
   toMrzCheck,
   toMrzCheckDetails,
+  toMrzServerDetails,
+  toOcrFieldsDetails,
+  toQualityServerDetails,
+  toServerChecks,
   toStaffProfile,
   toVerification,
   type VerificationSummary,
@@ -223,7 +235,7 @@ describe("toMrzCheck", () => {
   };
 
   it("asks for the columns it reads", () => {
-    expect(MRZ_CHECK_COLUMNS.split(", ").sort()).toEqual(
+    expect(CHECK_COLUMNS.split(", ").sort()).toEqual(
       ["capture_id", "check_name", "check_version", "created_at", "details", "id", "outcome"].sort(),
     );
   });
@@ -323,5 +335,254 @@ describe("toMrzCheckDetails", () => {
     expect(toMrzCheckDetails({ ...base, expectedFormat: "TD2" })).toBeNull();
     expect(toMrzCheckDetails({ ...base, result: "partly" })).toBeNull();
     expect(toMrzCheckDetails([base])).toBeNull();
+  });
+});
+
+describe("captures replaced by a newer photo (M3)", () => {
+  it("asks for the column and maps it", () => {
+    expect(CAPTURE_COLUMNS.split(", ")).toContain("superseded_by");
+    const row = { id: "c1", kind: "document_back", byte_size: 1, created_at: "2026-10-14T08:00:00Z", deleted_at: "2026-10-14T08:05:00Z" };
+    expect(toCapture({ ...row, superseded_by: "c2" })?.supersededBy).toBe("c2");
+    expect(toCapture(row)?.supersededBy).toBeNull();
+  });
+});
+
+describe("newestLiveCaptures", () => {
+  const capture = (id: string, kind: string, createdAt: string, deleted = false) =>
+    ({ id, kind, createdAt, deleted }) as CaptureRecord;
+
+  it("keeps the newest photo of each kind still holding an image", () => {
+    const newest = newestLiveCaptures([
+      capture("back-1", "document_back", "2026-10-14T08:01:00Z"),
+      capture("back-3", "document_back", "2026-10-14T08:09:00Z", true),
+      capture("back-2", "document_back", "2026-10-14T08:05:00Z"),
+      capture("front-1", "document_front", "2026-10-14T08:00:00Z"),
+    ]);
+    expect(Object.fromEntries([...newest].map(([kind, c]) => [kind, c.id]))).toEqual({
+      document_back: "back-2",
+      document_front: "front-1",
+    });
+  });
+
+  it("breaks a tie on the time by the id, as the database does", () => {
+    const at = "2026-10-14T08:01:00Z";
+    const ids = (list: CaptureRecord[]) => newestLiveCaptures(list).get("document_back")?.id;
+    expect(ids([capture("b", "document_back", at), capture("a", "document_back", at)])).toBe("b");
+    expect(ids([capture("a", "document_back", at), capture("b", "document_back", at)])).toBe("b");
+  });
+
+  it("has nothing for a kind whose photos are all erased", () => {
+    expect(newestLiveCaptures([capture("x", "document_front", "2026-10-14T08:00:00Z", true)]).size).toBe(0);
+  });
+});
+
+// As written by the worker Edge Function (supabase/functions/worker/decide.ts) and the database
+// (worker_refresh_policy): outcomes, generic codes and metrics only.
+const QUALITY = {
+  verdict: "poor",
+  quality: {
+    sharpness: 4.2,
+    glareRatio: 0.031,
+    meanLuma: 140.5,
+    documentFound: true,
+    documentConfidence: 0.88,
+    longSide: 1600,
+    textLines: 14,
+  },
+  provisional: true,
+  engine: "worker-1/rapidocr-3.10.0/ppocrv6",
+  timing: { ms: 2310, cold: true },
+};
+const MRZ_SERVER = {
+  parserVersion: "mrz-v1",
+  found: true,
+  format: "TD3",
+  checks: { documentNumber: true, birthDate: true, expiryDate: true, personalNumber: true, composite: false },
+  documentCodeFits: true,
+  datesValid: true,
+  corrections: 2,
+  phone: "differs",
+};
+const FIELDS = { found: ["surname", "givenNames", "issueDate"], provisional: true };
+const CLASSIFICATION = {
+  detected: "passport",
+  basis: "mrz",
+  provisional: false,
+  matchesDeclared: true,
+  confidence: 1,
+  qrPresent: false,
+};
+const POLICY = { reasons: ["mrz_disagreement", "manual_review_document"] };
+
+function checkRow(name: string, captureId: string | null, details: unknown, createdAt = "2026-10-14T09:00:00+00:00") {
+  return {
+    id: `${name}-${captureId ?? "case"}-${createdAt}`,
+    capture_id: captureId,
+    check_name: name,
+    check_version: "server-checks-v1",
+    outcome: "flag",
+    details,
+    created_at: createdAt,
+  };
+}
+
+describe("toServerChecks", () => {
+  it("queries every server check by name", () => {
+    expect([...SERVER_CHECK_NAME_LIST].sort()).toEqual(
+      ["classification", "document_policy", "mrz_server", "ocr_fields", "quality_server"].sort(),
+    );
+  });
+
+  it("sorts each row into its check, per photo or per case, with its details", () => {
+    const checks = toServerChecks([
+      checkRow("quality_server", "front", QUALITY),
+      checkRow("mrz_server", "front", MRZ_SERVER),
+      checkRow("ocr_fields", "front", FIELDS),
+      checkRow("classification", null, CLASSIFICATION),
+      checkRow("document_policy", null, POLICY),
+    ]);
+    expect(checks.quality).toEqual([
+      {
+        id: "quality_server-front-2026-10-14T09:00:00+00:00",
+        captureId: "front",
+        checkVersion: "server-checks-v1",
+        outcome: "flag",
+        details: QUALITY,
+        createdAt: "2026-10-14T09:00:00+00:00",
+      },
+    ]);
+    expect(checks.mrz[0].details).toEqual(MRZ_SERVER);
+    expect(checks.fields[0].details).toEqual(FIELDS);
+    expect(checks.classification?.details).toEqual(CLASSIFICATION);
+    expect(checks.policy?.details).toEqual({ reasons: ["manual_review_document", "mrz_disagreement"] });
+  });
+
+  it("puts the latest first and keeps the newest check of the case", () => {
+    const checks = toServerChecks([
+      checkRow("quality_server", "a", QUALITY, "2026-10-14T09:00:00Z"),
+      checkRow("quality_server", "b", QUALITY, "2026-10-14T09:05:00Z"),
+      checkRow("document_policy", null, { reasons: [] }, "2026-10-14T09:06:00Z"),
+      checkRow("document_policy", null, POLICY, "2026-10-14T09:01:00Z"),
+    ]);
+    expect(checks.quality.map((c) => c.captureId)).toEqual(["b", "a"]);
+    expect(checks.policy?.details).toEqual({ reasons: [] });
+  });
+
+  it("leaves out rows in the wrong place, of other checks, or incomplete", () => {
+    const checks = toServerChecks([
+      checkRow("quality_server", null, QUALITY),
+      checkRow("classification", "front", CLASSIFICATION),
+      checkRow("mrz", "front", { source: "mrz_phone" }),
+      checkRow("face_match", "front", {}),
+      { ...checkRow("ocr_fields", "front", FIELDS), outcome: "maybe" },
+      { ...checkRow("ocr_fields", "front", FIELDS), id: null },
+      null,
+    ]);
+    expect(checks).toEqual({ quality: [], mrz: [], fields: [], classification: null, policy: null, jobs: new Map() });
+  });
+
+  it("reads each photo's job state, and nothing else of the job", () => {
+    const checks = toServerChecks([], [
+      { capture_id: "a", status: "pending" },
+      { capture_id: "b", status: "claimed" },
+      { capture_id: "c", status: "done", evidence: { mrz: "ERIKSSON" } },
+      { capture_id: "d", status: "failed", error_code: "budget" },
+      { capture_id: "e", status: "superseded" },
+      { capture_id: "f", status: "lost" },
+      { capture_id: null, status: "done" },
+      null,
+    ]);
+    expect(checks.jobs).toEqual(
+      new Map([
+        ["a", "waiting"],
+        ["b", "waiting"],
+        ["c", "done"],
+        ["d", "failed"],
+      ]),
+    );
+    expect(JOB_COLUMNS).toBe("capture_id, status");
+  });
+
+  it("keeps the outcome when the details have a shape this dashboard does not know", () => {
+    const checks = toServerChecks([checkRow("quality_server", "front", { verdict: "great" })]);
+    expect(checks.quality[0]).toMatchObject({ outcome: "flag", details: null });
+  });
+});
+
+describe("server check details", () => {
+  it("copy only the known fields, so nothing else stored there can reach the page", () => {
+    const extra = { surname: "ERIKSSON", documentNumber: "L898902C3" };
+    const parsed = [
+      toQualityServerDetails({ ...QUALITY, ...extra, quality: { ...QUALITY.quality, ...extra } }),
+      toMrzServerDetails({ ...MRZ_SERVER, ...extra, checks: { ...MRZ_SERVER.checks, ...extra } }),
+      toOcrFieldsDetails({ ...FIELDS, ...extra }),
+      toClassificationDetails({ ...CLASSIFICATION, ...extra, keywordHits: { passport: 2, ERIKSSON: 1 } }),
+      toDocumentPolicyDetails({ ...POLICY, ...extra, reasons: [...POLICY.reasons, "ERIKSSON"] }),
+    ];
+    expect(JSON.stringify(parsed)).not.toMatch(/ERIKSSON|L898902C3/);
+    expect(parsed.every((p) => p !== null)).toBe(true);
+  });
+
+  it("need the fields every photo check carries", () => {
+    expect(toQualityServerDetails(QUALITY)).toEqual(QUALITY);
+    expect(toQualityServerDetails({ ...QUALITY, verdict: "great" })).toBeNull();
+    expect(toQualityServerDetails({ ...QUALITY, provisional: false })).toBeNull();
+    expect(toQualityServerDetails({ ...QUALITY, engine: 3 })).toBeNull();
+    expect(toQualityServerDetails({ ...QUALITY, timing: { ms: 10 } })).toBeNull();
+    expect(toQualityServerDetails({ ...QUALITY, quality: { ...QUALITY.quality, textLines: "14" } })).toBeNull();
+    for (const verdict of ["ok", "no_document", "unreadable"]) {
+      expect(toQualityServerDetails({ ...QUALITY, verdict })?.verdict).toBe(verdict);
+    }
+  });
+
+  it("read the server's code lines, optional fields falling back to null", () => {
+    expect(toMrzServerDetails(MRZ_SERVER)).toEqual(MRZ_SERVER);
+    expect(
+      toMrzServerDetails({ ...MRZ_SERVER, found: false, format: "TD2", checks: { documentNumber: true }, datesValid: "yes" }),
+    ).toEqual({ ...MRZ_SERVER, found: false, format: null, checks: null, datesValid: null });
+    for (const phone of ["agrees", "missing", "unreadable"]) expect(toMrzServerDetails({ ...MRZ_SERVER, phone })?.phone).toBe(phone);
+    expect(toMrzServerDetails({ ...MRZ_SERVER, phone: "maybe" })).toBeNull();
+    expect(toMrzServerDetails({ ...MRZ_SERVER, found: undefined })).toBeNull();
+    expect(toMrzServerDetails({ ...MRZ_SERVER, corrections: null })).toBeNull();
+  });
+
+  it("list the printed fields found by name, in page order, never the card sub-type", () => {
+    expect(toOcrFieldsDetails({ found: ["issueDate", "subtype", "surname", "address"], provisional: true })).toEqual({
+      found: ["surname", "issueDate"],
+      provisional: true,
+    });
+    expect(toOcrFieldsDetails({ found: "surname", provisional: true })).toBeNull();
+    expect(toOcrFieldsDetails({ found: [] })).toBeNull();
+  });
+
+  it("read the classification, never keyword counts (they would tell a Cameroonian passport from a foreign one)", () => {
+    expect(toClassificationDetails(CLASSIFICATION)).toEqual(CLASSIFICATION);
+    expect(
+      toClassificationDetails({
+        ...CLASSIFICATION,
+        matchesDeclared: "yes",
+        qrPresent: null,
+        keywordHits: { passport: 2, republic: 2, field_labels: 11 },
+      }),
+    ).toEqual({ ...CLASSIFICATION, matchesDeclared: null, qrPresent: null });
+    expect(Object.keys(toClassificationDetails({ ...CLASSIFICATION, keywordHits: { republic: 2 } })!).sort())
+      .toEqual([...CLASSIFICATION_DETAIL_KEYS].sort());
+    expect(toClassificationDetails({ ...CLASSIFICATION, detected: "library_card" })).toBeNull();
+    expect(toClassificationDetails({ ...CLASSIFICATION, basis: "guess" })).toBeNull();
+    expect(toClassificationDetails({ ...CLASSIFICATION, confidence: "high" })).toBeNull();
+  });
+
+  it("keep the known reasons once each, in the contract's order", () => {
+    expect(
+      toDocumentPolicyDetails({ reasons: ["server_unchecked", "type_mismatch", "server_unchecked", "new_reason"] }),
+    ).toEqual({ reasons: ["type_mismatch", "server_unchecked"] });
+    expect(toDocumentPolicyDetails({ reasons: "type_mismatch" })).toBeNull();
+    expect(toDocumentPolicyDetails(null)).toBeNull();
+  });
+});
+
+describe("PRINTED_FIELDS", () => {
+  it("names every printed field the worker reads, in the order staff compare them", () => {
+    expect(PRINTED_FIELDS).toEqual(["surname", "givenNames", "documentNumber", "birthDate", "expiryDate", "issueDate", "subtype"]);
   });
 });

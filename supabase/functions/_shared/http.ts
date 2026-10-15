@@ -1,5 +1,5 @@
-// HTTP plumbing shared by the flow and admin functions: JSON and error responses, CORS, routing,
-// bounded body reading. Every non-2xx body is { error: { code, message } } (contract.ts).
+// HTTP plumbing shared by the flow, admin and worker functions: JSON and error responses, CORS,
+// routing, bounded body reading. Every non-2xx body is { error: { code, message } } (contract.ts).
 import type { ApiErrorBody, ErrorCode } from "./contract.ts";
 import { MAX_BODY_BYTES } from "./config.ts";
 import { consoleLogger, type Logger } from "./log.ts";
@@ -25,6 +25,9 @@ const DEFAULT_MESSAGES: Record<ErrorCode, string> = {
   image_too_large: "The image file is too large.",
   image_resolution_too_low: "The image resolution is too low.",
   invalid_mrz: "The code lines do not fit the declared document.",
+  invalid_signature: "The request signature is missing or not valid.",
+  replayed_request: "This signed request was already used.",
+  image_gone: "The photo was replaced or erased.",
   audit_failed: "The access could not be recorded, so it was refused.",
   invalid_invite: "The email or invite code is not valid.",
   weak_password: "The password does not meet the requirements.",
@@ -92,6 +95,8 @@ export interface RouterOptions {
   routes: RouteTable;
   allowedOrigins: ReadonlySet<string>;
   log?: Logger;
+  /** Larger bodies are refused from their Content-Length (default MAX_BODY_BYTES). */
+  maxBodyBytes?: number;
 }
 
 /** Path inside the function, without the optional /functions/v1 and /<name> prefixes or a trailing slash. */
@@ -123,7 +128,7 @@ export function createRouter(options: RouterOptions): Handler {
 
     try {
       const length = req.headers.get("content-length");
-      if (length !== null && !(Number(length) <= MAX_BODY_BYTES)) {
+      if (length !== null && !(Number(length) <= (options.maxBodyBytes ?? MAX_BODY_BYTES))) {
         throw new HttpError(413, "bad_request", "Request body too large.");
       }
       const path = routePath(new URL(req.url).pathname, options.name);
@@ -155,11 +160,16 @@ export function createRouter(options: RouterOptions): Handler {
  * may be absent or wrong). An empty body is {} only when allowEmpty is set.
  */
 export async function readJsonObject(req: Request, { allowEmpty = false } = {}): Promise<Record<string, unknown>> {
-  const bytes = await readLimited(req, MAX_BODY_BYTES);
+  const bytes = await readBodyBytes(req, MAX_BODY_BYTES);
   if (bytes.length === 0) {
     if (allowEmpty) return {};
     throw new HttpError(400, "bad_request", "A JSON body is required.");
   }
+  return parseJsonObject(bytes);
+}
+
+/** A JSON object from UTF-8 bytes; 400 bad_request otherwise. */
+export function parseJsonObject(bytes: Uint8Array): Record<string, unknown> {
   let parsed: unknown;
   try {
     parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
@@ -170,7 +180,11 @@ export async function readJsonObject(req: Request, { allowEmpty = false } = {}):
   return parsed;
 }
 
-async function readLimited(req: Request, limit: number): Promise<Uint8Array> {
+/**
+ * The raw body, counting bytes as they stream in (Content-Length may be absent or wrong): 413 beyond
+ * `limit`. The worker function verifies its signature over exactly these bytes before parsing them.
+ */
+export async function readBodyBytes(req: Request, limit: number): Promise<Uint8Array<ArrayBuffer>> {
   if (!req.body) return new Uint8Array(0);
   const reader = req.body.getReader();
   const chunks: Uint8Array[] = [];

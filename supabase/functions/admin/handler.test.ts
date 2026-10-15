@@ -246,6 +246,7 @@ function setup(configOverrides: Partial<FunctionConfig> = {}, { logToConsole = f
     allowedOrigins: new Set([ALLOWED_ORIGIN]),
     riderAppUrl: RIDER_APP_URL,
     testSessionTtlMinutes: 30,
+    workerRingUrl: null,
     ...configOverrides,
   };
   const handler = createAdminHandler({
@@ -851,6 +852,42 @@ describe("POST /document-data", () => {
       targetId: id,
       details: { role: "supervisor", items: 2 },
     }]);
+  });
+
+  it("returns the server's code lines and printed fields too (M3), each in its own shape", async () => {
+    const h = setup();
+    const back = crypto.randomUUID();
+    const front = crypto.randomUUID();
+    const { id } = withCase(h, [
+      { captureId: back, source: "mrz_phone", format: "TD1", lines: TD1.join("\n"), recordedAt: "2026-10-14T09:00:00.000Z" },
+      { captureId: back, source: "mrz_server", format: "TD1", lines: TD1.join("\n"), recordedAt: "2026-10-14T09:00:05.000Z" },
+      {
+        captureId: front,
+        source: "ocr_server",
+        fields: { surname: "ERIKSSON", givenNames: "ANNA MARIA", issueDate: "2025-03-01", subtype: "refugee" },
+        recordedAt: "2026-10-14T09:00:07.000Z",
+      },
+    ]);
+    const { token } = h.staff("supervisor");
+    const res = await h.call("/document-data", { body: { verificationId: id }, token });
+    expect(res.status).toBe(200);
+    expect(await readJson(res)).toEqual({
+      items: [
+        {
+          captureId: front,
+          source: "ocr_server",
+          fields: { surname: "ERIKSSON", givenNames: "ANNA MARIA", issueDate: "2025-03-01", subtype: "refugee" },
+          recordedAt: "2026-10-14T09:00:07.000Z",
+        },
+        { captureId: back, source: "mrz_server", format: "TD1", lines: TD1, recordedAt: "2026-10-14T09:00:05.000Z" },
+        { captureId: back, source: "mrz_phone", format: "TD1", lines: TD1, recordedAt: "2026-10-14T09:00:00.000Z" },
+      ],
+      expiresIn: 60,
+    });
+    expect(h.world.events).toEqual(["audit:document_data.view", "decrypt"]);
+    expect(h.repo.audits.map((a) => a.details)).toEqual([{ role: "supervisor", items: 3 }]);
+    // The audit entry names no value and no sub-type.
+    expect(JSON.stringify(h.repo.audits)).not.toMatch(/ERIKSSON|refugee|2025-03-01/);
   });
 
   it("returns no items for a case without data, and still audits the read", async () => {

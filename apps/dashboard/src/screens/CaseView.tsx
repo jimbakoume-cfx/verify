@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { Language } from "@verify/shared";
 import { useServices } from "../api/services";
@@ -17,8 +17,12 @@ import {
   toLanguage,
 } from "../lib/format";
 import { type CaptureRecord, sessionOpen, sortCaptures, type StaffProfile, type VerificationSummary } from "../lib/records";
+import { phoneLinesRead } from "../lib/mrz";
 import { photoAccess } from "../lib/roles";
+import { mayHaveDocumentData } from "../lib/serverChecks";
+import { DocumentDataSection } from "./CaseData";
 import { MrzSection } from "./CaseMrz";
+import { ServerChecksSection } from "./CaseServer";
 
 export interface CaseViewProps {
   id: string;
@@ -39,12 +43,18 @@ export function CaseView({ id, profile, initialPhotos, initialDocumentData }: Ca
     },
     `case:${id}`,
   );
-  // Loaded on its own, so a failure there leaves the rest of the case readable.
+  // Each loaded on its own, so a failure there leaves the rest of the case readable.
   const mrz = useAsync(() => services.mrzChecks(id), `mrz:${id}`);
+  const server = useAsync(() => services.serverChecks(id), `server:${id}`);
   const reloadAll = () => {
     state.reload();
     mrz.reload();
+    server.reload();
   };
+  const mayHaveData = useMemo(
+    () => mayHaveDocumentData(mrz.data ? phoneLinesRead(mrz.data) : false, server.data),
+    [mrz.data, server.data],
+  );
 
   return (
     <>
@@ -75,6 +85,14 @@ export function CaseView({ id, profile, initialPhotos, initialDocumentData }: Ca
       {state.data?.verification && (
         <>
           <CaseSummary verification={state.data.verification} />
+          <ServerChecksSection
+            verification={state.data.verification}
+            captures={state.data.captures}
+            checks={server.data}
+            error={server.error}
+            loading={server.loading}
+            onReload={reloadAll}
+          />
           <MrzSection
             verification={state.data.verification}
             captures={state.data.captures}
@@ -82,6 +100,11 @@ export function CaseView({ id, profile, initialPhotos, initialDocumentData }: Ca
             error={mrz.error}
             loading={mrz.loading}
             onReload={reloadAll}
+          />
+          <DocumentDataSection
+            verificationId={state.data.verification.id}
+            captures={state.data.captures}
+            mayHaveData={mayHaveData}
             profile={profile}
             initialData={initialDocumentData}
           />
@@ -244,6 +267,7 @@ function CaptureItem({
         <span className="dash-row-badges">
           {q.source && <span className="badge neutral">{t(`capture.source.${q.source}`)}</span>}
           {q.reusedElsewhere === true && <span className="badge bad">{t("capture.reused")}</span>}
+          {c.supersededBy && <span className="badge neutral">{t("capture.replaced")}</span>}
           {c.deleted && <span className="badge neutral">{t("capture.deleted")}</span>}
         </span>
       </header>

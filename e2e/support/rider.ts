@@ -1,6 +1,11 @@
 // The rider's steps through the flow, found by role and visible text in the current language.
 import { type Locator, type Page, expect } from "@playwright/test";
-import { type CaptureSide, type DeclaredDocument, MRZ_EXPECTATION } from "../../supabase/functions/_shared/contract";
+import {
+  type CaptureSide,
+  type DeclaredDocument,
+  MRZ_EXPECTATION,
+  type RetakeReason,
+} from "../../supabase/functions/_shared/contract";
 import type { FakeBackend } from "./backend";
 import { type Language, translate } from "./i18n";
 
@@ -11,6 +16,8 @@ export const AUTO_CAPTURE_TIMEOUT = 10_000;
  * engine's start on a fresh browser profile (the model is not cached yet). Generous for CI.
  */
 export const READ_TIMEOUT = 20_000;
+/** Spec: the manual shutter appears when auto-capture has not fired within 8 s. */
+export const SHUTTER_TIMEOUT = 12_000;
 
 export class Rider {
   /** The language the rider currently sees (French by default). */
@@ -35,7 +42,32 @@ export class Rider {
 
   /** The camera screen's title: "Recto", "Verso" or "Page photo". */
   captureHeading(document: DeclaredDocument, side: CaptureSide): Locator {
-    return this.heading(document === "passport" && side === "document_front" ? "sides.passportPage" : `sides.${side}`);
+    return this.heading(sideKey(document, side));
+  }
+
+  /** How the app names a side: "Recto", "Verso" or "Page photo". */
+  sideName(document: DeclaredDocument, side: CaptureSide): string {
+    return this.t(sideKey(document, side));
+  }
+
+  /** "Checking your photos…" (M3): the app waits for the server's checks of the photos just sent. */
+  get checkingHeading(): Locator {
+    return this.heading("checks.title");
+  }
+
+  /** "<Side>: please take this photo again", as the server asked (M3). */
+  retakeTitle(document: DeclaredDocument, side: CaptureSide): string {
+    return this.t("checks.retake", { side: this.sideName(document, side) });
+  }
+
+  /** Why the server asked for a new photo, as the rider reads it. */
+  retakeReason(reason: RetakeReason): string {
+    return this.t(reason === "no_document" ? "hints.no_document" : "checks.unreadable");
+  }
+
+  /** The camera's alert after a server retake: the side to take again, then why. */
+  cameraRetakeAlert(document: DeclaredDocument, side: CaptureSide): Locator {
+    return this.page.locator(".capture-alert[role=alert]").filter({ hasText: this.retakeTitle(document, side) });
   }
 
   get hint(): Locator {
@@ -104,6 +136,20 @@ export class Rider {
     await expect(this.heading("review.title")).toBeVisible({ timeout: read ? READ_TIMEOUT : undefined });
   }
 
+  /**
+   * The photo taken with the shutter, offered after 8 s without an automatic one, then (for the side
+   * that carries the code lines) their reading: ends on the review screen. Used after a server retake:
+   * the camera's alert ("photo à reprendre") sits above the hint and places the guide lower, where
+   * the fake camera's card, drawn for the usual guide, is not centred for an automatic photo.
+   */
+  async shutterCapture(document: DeclaredDocument, side: CaptureSide): Promise<void> {
+    await expect(this.captureHeading(document, side)).toBeVisible();
+    await expect(this.shutter).toBeVisible({ timeout: SHUTTER_TIMEOUT });
+    await this.shutter.click();
+    const read = MRZ_EXPECTATION[document]?.side === side;
+    await expect(this.heading("review.title")).toBeVisible({ timeout: read ? READ_TIMEOUT : undefined });
+  }
+
   async usePhoto(): Promise<void> {
     await expect(this.page.locator(".notice.warn")).toHaveCount(0);
     await this.button("review.use").click();
@@ -114,6 +160,13 @@ export class Rider {
     await this.button("turnOver.continue").click();
   }
 
+  /** The "turn over" step after the server asked for a new photo of the back: titled so, with why. */
+  async turnOverForRetake(document: DeclaredDocument, reason: RetakeReason): Promise<void> {
+    await expect(this.page.getByRole("heading", { level: 1, name: this.retakeTitle(document, "document_back"), exact: true })).toBeVisible();
+    await expect(this.page.getByRole("alert")).toHaveText(this.retakeReason(reason));
+    await this.button("turnOver.continue").click();
+  }
+
   /** Both sides of an ID-1 card, automatically, then the upload. */
   async photographCard(document: DeclaredDocument): Promise<void> {
     await this.autoCapture(document, "document_front");
@@ -121,6 +174,11 @@ export class Rider {
     await this.turnOver();
     await this.autoCapture(document, "document_back");
     await this.usePhoto();
+  }
+
+  /** From the checking screen to the end: the server's checks are over and the case is submitted. */
+  async waitForSubmit(timeout = 30_000): Promise<void> {
+    await expect(this.heading("done.title")).toBeVisible({ timeout });
   }
 
   /** Every screen title shown since the link was opened, in order (logged by fixtures.ts). */
@@ -150,4 +208,9 @@ export class Rider {
       return { x: box.x, y: box.y, width: box.width, height: box.height };
     });
   }
+}
+
+/** The locale key of a side's name: the passport has a single "photo page". */
+function sideKey(document: DeclaredDocument, side: CaptureSide): string {
+  return document === "passport" && side === "document_front" ? "sides.passportPage" : `sides.${side}`;
 }

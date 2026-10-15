@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { type MrzCheckDetails, parseMrz } from "@verify/shared";
-import { formatMrzFormat, mrzCheckLines, mrzFields, mrzOverview } from "./mrz";
+import { type MrzCheckDetails, type MrzServerDetails, parseMrz } from "@verify/shared";
+import {
+  formatMrzFormat,
+  mrzCheckLines,
+  mrzFields,
+  mrzOverview,
+  phoneComparisonLine,
+  phoneLinesRead,
+  serverMrzCheckLines,
+} from "./mrz";
 import type { CaptureRecord, MrzCheckRecord } from "./records";
 
 // ICAO 9303 specimens (Utopia): no real person.
@@ -17,6 +25,7 @@ function capture(id: string, kind: string, createdAt: string, deleted = false): 
     createdAt,
     sha256: "",
     deleted,
+    supersededBy: null,
     quality: {
       source: "auto",
       sharpness: null,
@@ -223,5 +232,94 @@ describe("mrzFields", () => {
     const fields = Object.fromEntries(mrzFields(parsed).map((f) => [f.key, f.value]));
     expect(fields.documentCode).toEqual({ type: "text", text: "I" });
     expect(fields.optionalData).toEqual({ type: "text", text: "" });
+  });
+});
+
+describe("phoneLinesRead", () => {
+  it("is true when some report holds lines, or details this page cannot read", () => {
+    const unreadable = details({ result: "unreadable", reason: "not_found", format: null, checks: null });
+    expect(phoneLinesRead([])).toBe(false);
+    expect(phoneLinesRead([check("c1", BACK.id, unreadable)])).toBe(false);
+    expect(phoneLinesRead([check("c1", BACK.id, unreadable), check("c0", BACK.id)])).toBe(true);
+    expect(phoneLinesRead([check("c1", BACK.id, null)])).toBe(true);
+  });
+});
+
+describe("serverMrzCheckLines", () => {
+  function server(overrides: Partial<MrzServerDetails> = {}): MrzServerDetails {
+    return {
+      parserVersion: "mrz-v1",
+      found: true,
+      format: "TD1",
+      checks: ALL_PASS,
+      documentCodeFits: true,
+      datesValid: true,
+      corrections: 0,
+      phone: "agrees",
+      ...overrides,
+    };
+  }
+  const ok = (lines: ReturnType<typeof serverMrzCheckLines>) => Object.fromEntries(lines.map((l) => [l.key, l.ok]));
+
+  it("says the lines were found, then every check, then the comparison with the phone", () => {
+    expect(serverMrzCheckLines(server(), "TD1").map((l) => l.key)).toEqual([
+      "serverChecks.mrz.found",
+      "mrz.checks.format",
+      "mrz.checks.documentNumber",
+      "mrz.checks.birthDate",
+      "mrz.checks.expiryDate",
+      "mrz.checks.composite",
+      "mrz.checks.documentCode",
+      "mrz.checks.dates",
+      "serverChecks.mrz.phone.agrees",
+    ]);
+    expect(Object.values(ok(serverMrzCheckLines(server(), "TD1"))).every((v) => v === true)).toBe(true);
+  });
+
+  it("adds the personal number on a passport and shows each failed check", () => {
+    const lines = ok(
+      serverMrzCheckLines(
+        server({ format: "TD3", checks: { ...ALL_PASS, personalNumber: false, composite: false }, datesValid: false }),
+        "TD3",
+      ),
+    );
+    expect(lines).toMatchObject({
+      "mrz.checks.personalNumber": false,
+      "mrz.checks.composite": false,
+      "mrz.checks.dates": false,
+      "mrz.checks.documentNumber": true,
+    });
+  });
+
+  it("shows lines of the other format as found but not as expected", () => {
+    const lines = ok(serverMrzCheckLines(server({ found: false, format: "TD1", phone: "differs" }), "TD3"));
+    expect(lines).toMatchObject({ "serverChecks.mrz.found": false, "mrz.checks.format": false });
+    // Without the expected format (no declared document), "found" decides.
+    expect(ok(serverMrzCheckLines(server({ found: false }), null))["mrz.checks.format"]).toBe(false);
+  });
+
+  it("has only found and the comparison when nothing was read", () => {
+    const nothing = server({ found: false, format: null, checks: null, documentCodeFits: null, datesValid: null, phone: "unreadable" });
+    expect(serverMrzCheckLines(nothing, "TD1")).toEqual([
+      { key: "serverChecks.mrz.found", ok: false },
+      { key: "serverChecks.mrz.phone.unreadable", ok: null },
+    ]);
+  });
+});
+
+describe("phoneComparisonLine", () => {
+  it("ticks the same lines and crosses other lines", () => {
+    expect(phoneComparisonLine({ found: true, phone: "agrees" })).toEqual({ key: "serverChecks.mrz.phone.agrees", ok: true });
+    expect(phoneComparisonLine({ found: true, phone: "differs" })).toEqual({ key: "serverChecks.mrz.phone.differs", ok: false });
+  });
+
+  it("has no verdict when there is nothing to compare", () => {
+    expect(phoneComparisonLine({ found: true, phone: "missing" })).toEqual({ key: "serverChecks.mrz.phone.missing", ok: null });
+    expect(phoneComparisonLine({ found: true, phone: "unreadable" })).toEqual({
+      key: "serverChecks.mrz.phone.unreadable",
+      ok: null,
+    });
+    // The database says "differs" when only the phone read lines: the server's own line already says it found none.
+    expect(phoneComparisonLine({ found: false, phone: "differs" })).toEqual({ key: "serverChecks.mrz.phone.phoneOnly", ok: null });
   });
 });

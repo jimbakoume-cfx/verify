@@ -10,9 +10,10 @@ import {
   type MrzDate,
   type MrzExpectation,
   type MrzFormat,
+  type MrzServerDetails,
   type ParsedMrz,
 } from "@verify/shared";
-import type { CaptureRecord, MrzCheckRecord } from "./records";
+import { type CaptureRecord, type MrzCheckRecord, newestLiveCaptures } from "./records";
 
 export type MrzEntry =
   | {
@@ -40,17 +41,6 @@ export interface MrzOverview {
   hasData: boolean;
 }
 
-/** Latest photo still holding an image, per capture kind. */
-function latestLiveCaptures(captures: readonly CaptureRecord[]): Map<string, CaptureRecord> {
-  const latest = new Map<string, CaptureRecord>();
-  for (const capture of captures) {
-    if (capture.deleted) continue;
-    const current = latest.get(capture.kind);
-    if (!current || capture.createdAt > current.createdAt) latest.set(capture.kind, capture);
-  }
-  return latest;
-}
-
 /**
  * Entries of the "Code lines (MRZ)" section, `checks` latest first. "Not received" comes first when
  * the document has an MRZ and the latest photo of its side (or the side, when it has no photo yet)
@@ -64,7 +54,7 @@ export function mrzOverview(
 ): MrzOverview {
   const expectation = declared ? MRZ_EXPECTATION[declared] : null;
   const byId = new Map(captures.map((c) => [c.id, c]));
-  const latest = latestLiveCaptures(captures);
+  const latest = newestLiveCaptures(captures);
 
   const entries: MrzEntry[] = checks.map((check) => {
     const capture = check.captureId ? byId.get(check.captureId) : undefined;
@@ -93,7 +83,15 @@ export function mrzOverview(
     }
   }
 
-  return { expectation, entries, hasData: checks.some((c) => c.details?.result !== "unreadable") };
+  return { expectation, entries, hasData: phoneLinesRead(checks) };
+}
+
+/**
+ * Some report of the phone holds lines that "Show data read" can reveal: an unreadable MRZ stores
+ * none. Details this dashboard cannot read may still come with lines: the server decides.
+ */
+export function phoneLinesRead(checks: readonly MrzCheckRecord[]): boolean {
+  return checks.some((c) => c.details?.result !== "unreadable");
 }
 
 /** One ✅/❌ line; `ok` is null when the result does not say (shown as "—"). */
@@ -110,9 +108,16 @@ export interface MrzCheckLine {
  */
 export function mrzCheckLines(details: MrzCheckDetails): MrzCheckLine[] {
   if (details.result !== "read") return [];
+  return [
+    { key: "mrz.checks.format", ok: details.format === null ? null : details.format === details.expectedFormat },
+    ...verdictLines(details),
+  ];
+}
+
+/** Each check digit, the document code and the dates, in reading order: the same for phone and server. */
+function verdictLines(details: Pick<MrzCheckDetails, "format" | "checks" | "documentCodeFits" | "datesValid">): MrzCheckLine[] {
   const c = details.checks;
   const lines: MrzCheckLine[] = [
-    { key: "mrz.checks.format", ok: details.format === null ? null : details.format === details.expectedFormat },
     { key: "mrz.checks.documentNumber", ok: c?.documentNumber ?? null },
     { key: "mrz.checks.birthDate", ok: c?.birthDate ?? null },
     { key: "mrz.checks.expiryDate", ok: c?.expiryDate ?? null },
@@ -125,6 +130,44 @@ export function mrzCheckLines(details: MrzCheckDetails): MrzCheckLine[] {
     { key: "mrz.checks.documentCode", ok: details.documentCodeFits },
     { key: "mrz.checks.dates", ok: details.datesValid },
   );
+  return lines;
+}
+
+/**
+ * How the phone's reading of the same photo compares with the server's: ✅ the same lines, ❌ other
+ * lines, and "—" when there is nothing to compare (no report from the phone, the phone read nothing,
+ * or only the phone read lines: the database then says "differs", but the server's own line says
+ * that it found none).
+ */
+export function phoneComparisonLine(details: Pick<MrzServerDetails, "found" | "phone">): MrzCheckLine {
+  switch (details.phone) {
+    case "agrees":
+      return { key: "serverChecks.mrz.phone.agrees", ok: true };
+    case "differs":
+      return details.found
+        ? { key: "serverChecks.mrz.phone.differs", ok: false }
+        : { key: "serverChecks.mrz.phone.phoneOnly", ok: null };
+    case "missing":
+      return { key: "serverChecks.mrz.phone.missing", ok: null };
+    case "unreadable":
+      return { key: "serverChecks.mrz.phone.unreadable", ok: null };
+  }
+}
+
+/**
+ * The ✅/❌ lines of the code lines the server read from the photo: found or not, then (when lines of
+ * either format came out) the format, each check digit, the document code and the dates, and last the
+ * comparison with the phone. `expected` is the format of the declared document.
+ */
+export function serverMrzCheckLines(details: MrzServerDetails, expected: MrzFormat | null): MrzCheckLine[] {
+  const lines: MrzCheckLine[] = [{ key: "serverChecks.mrz.found", ok: details.found }];
+  if (details.format !== null) {
+    lines.push(
+      { key: "mrz.checks.format", ok: expected ? details.format === expected : details.found },
+      ...verdictLines(details),
+    );
+  }
+  lines.push(phoneComparisonLine(details));
   return lines;
 }
 

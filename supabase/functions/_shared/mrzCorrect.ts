@@ -25,7 +25,10 @@
 // in some other way (3 for 8...) into wrong numbers that pass. So a swap must also have been read
 // by the other pass; without that, the check stays failed and the rider retakes the photo. The
 // server re-parses the lines and trusts nothing the phone concludes.
-import { MRZ_LAYOUT, MRZ_REPORT_LIMITS, type MrzFormat, type ParsedMrz, documentCodeFits, parseMrz } from "@verify/shared";
+// Shared by the rider app (through @verify/shared) and the Edge Functions, so the phone and the server
+// correct OCR output in exactly one way. Imports only its siblings, with .ts extensions for Deno.
+import { MRZ_LAYOUT, MRZ_REPORT_LIMITS, type MrzFormat } from "./contract.ts";
+import { type ParsedMrz, documentCodeFits, parseMrz } from "./mrz.ts";
 
 export interface CorrectedMrz {
   /** The lines, exactly MRZ_LAYOUT[format] in size and characters; null when none were found. */

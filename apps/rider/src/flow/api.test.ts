@@ -81,6 +81,26 @@ describe("createFlowApi", () => {
     await expect(hanging.getSession()).rejects.toMatchObject({ code: "timeout" });
   });
 
+  it("asks for the server's checks, and stops when the caller gives up", async () => {
+    const checks = { done: false, sides: [{ kind: "document_front", captureId: "c1", state: "pending", reason: null }] };
+    const fetchMock = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => json(200, checks));
+    expect(await apiWith(fetchMock as typeof fetch).getChecks()).toEqual(checks);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect([String(url).slice(BASE.length), init?.method, init?.body]).toEqual(["/checks", "GET", undefined]);
+    expect(init?.cache).toBe("no-store");
+
+    const hanging = apiWith(((_url: string, init?: RequestInit) =>
+      new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+      })) as typeof fetch);
+    const controller = new AbortController();
+    const pending = hanging.getChecks(controller.signal);
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ code: "timeout" });
+    // Already given up: the request is abandoned at once.
+    await expect(hanging.getChecks(controller.signal)).rejects.toMatchObject({ code: "timeout" });
+  });
+
   it("reports a missing configuration without calling the network", async () => {
     const fetchMock = vi.fn();
     const api = createFlowApi({ baseUrl: null, token: TOKEN, apiKey: undefined, fetch: fetchMock as typeof fetch });

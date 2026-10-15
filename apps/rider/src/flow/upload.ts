@@ -1,8 +1,11 @@
-// Sends the accepted photos: for each side, POST /upload-url, upload straight to the private bucket,
-// then POST /captures; for the side that carries the MRZ, POST /mrz with what the phone read;
-// finally POST /submit. Each step is retried automatically with backoff, and a retry resumes where
-// the last attempt stopped (no new upload link, no second upload), which matters on slow networks
-// and keeps within the per-session upload-link limit.
+// Sends the accepted photos and submits the case, in two calls because the server checks the photos
+// in between (M3, the checking screen):
+// - uploadSides(): for each side, POST /upload-url, upload straight to the private bucket, then
+//   POST /captures; for the side that carries the MRZ, POST /mrz with what the phone read;
+// - submit(): POST /submit.
+// Each step is retried automatically with backoff, and a retry resumes where the last attempt
+// stopped (no new upload link, no second upload), which matters on slow networks and keeps within
+// the per-session upload-link limit.
 //
 // The MRZ report is best effort: it never fails the upload or holds back the submit. Staff then see
 // "not received" for the code lines and check the photo themselves.
@@ -37,9 +40,18 @@ export interface UploadListener {
   sideDone(side: CaptureSide): void;
 }
 
-export type UploadOutcome =
-  | { ok: true; session: FlowSession }
-  | { ok: false; error: FlowErrorCode; side: CaptureSide | null };
+/** How uploadSides() ended: every photo is on the server, or the side that failed. */
+export type SidesOutcome = { ok: true } | { ok: false; error: FlowErrorCode; side: CaptureSide };
+
+/** How submit() ended. */
+export type SubmitOutcome = { ok: true; session: FlowSession } | { ok: false; error: FlowErrorCode; side: null };
+
+/** The photos the progress bar of the submit counts (it continues the bar of their upload). */
+export interface SubmitSteps {
+  /** uploadSteps() of the photos. */
+  total: number;
+  photos: number;
+}
 
 /** What already happened for one photo, kept across attempts and manual retries. */
 interface Slot {
@@ -62,7 +74,7 @@ export function photoSteps(shot: Shot): number {
   return STEPS_PER_PHOTO + (shot.mrz ? MRZ_REPORT_STEPS : 0);
 }
 
-/** Steps of a whole run: every photo, then the submit. */
+/** Steps of a whole upload: every photo, then the submit. */
 export function uploadSteps(shots: readonly Shot[]): number {
   return shots.reduce((sum, shot) => sum + photoSteps(shot), 0) + 1;
 }
@@ -100,9 +112,14 @@ export class Uploader {
   readonly #deps: UploadDeps;
   // Keyed by the shot itself: a retaken photo is a new object and starts with a fresh slot.
   readonly #slots = new WeakMap<Shot, Slot>();
-  /** Photos whose MRZ report failed on a network or server error: tried again on the next run. */
+  /** Photos whose MRZ report failed on a network or server error: tried again before the submit. */
   readonly #unreported = new Set<Shot>();
-  /** A submit was sent in an earlier run or attempt: its answer may have been lost on the way back. */
+  /**
+   * Reports tried since the rider last acted ("Use this photo", "Try again"): each gets one round of
+   * retries per action, so a failing report does not hold back the submit that follows its photo.
+   */
+  #tried = new Set<Shot>();
+  /** A submit was sent in an earlier call or attempt: its answer may have been lost on the way back. */
   #submitSent = false;
 
   constructor(deps: UploadDeps) {
@@ -129,13 +146,20 @@ export class Uploader {
     });
   }
 
-  /** Sends `shots` (in order) and submits. Never throws: failures come back as an outcome. */
-  async run(shots: readonly Shot[], listener: UploadListener): Promise<UploadOutcome> {
-    const { api } = this.#deps;
+  /**
+   * Sends `shots` (in order): each photo, then the MRZ report of the side that carries the code
+   * lines. Never throws: failures come back as an outcome. The submit is a separate call (submit()),
+   * made once the server has checked the photos.
+   */
+  async uploadSides(shots: readonly Shot[], listener: UploadListener): Promise<SidesOutcome> {
     const photos = shots.length;
     const total = uploadSteps(shots);
-    // Reports tried during this run: each gets one round of retries per run.
-    const tried = new Set<Shot>();
+    this.#tried = new Set();
+    // A report not yet sent for an earlier photo of a side sent again now is moot: the server erases
+    // that photo, and the data read from it, when the new one arrives.
+    for (const old of this.#unreported) {
+      if (shots.some((shot) => shot.side === old.side && shot !== old)) this.#unreported.delete(old);
+    }
 
     let before = 0;
     for (const [index, shot] of shots.entries()) {
@@ -158,16 +182,28 @@ export class Uploader {
       }
       listener.sideDone(shot.side);
       if (shot.mrz && !slot.mrzSent) {
-        tried.add(shot);
+        this.#tried.add(shot);
         report("check", 1);
         await this.#reportMrz(shot, slot, (n) => report("check", n));
       }
     }
+    return { ok: true };
+  }
 
+  /**
+   * Submits the case, after one more round for MRZ reports that failed on a network or server error
+   * (the photo itself is already on the server), except those tried since the rider last acted.
+   * `steps` places the submit at the end of the photos' progress bar. Never throws.
+   */
+  async submit(listener: UploadListener, steps: SubmitSteps = { total: 1, photos: 0 }): Promise<SubmitOutcome> {
+    const { api } = this.#deps;
+    const { total, photos } = steps;
     const reportSubmit = (attempt: number) =>
       listener.progress({ done: total - 1, total, phase: "submit", photo: 0, photos, attempt });
 
-    // Reports that failed on an earlier run (the photo itself is already on the server).
+    const tried = this.#tried;
+    // The rider's next "Try again" gives every report still missing another round.
+    this.#tried = new Set();
     for (const shot of [...this.#unreported]) {
       if (tried.has(shot)) continue;
       reportSubmit(1);
@@ -182,7 +218,7 @@ export class Uploader {
         try {
           return await api.submit();
         } catch (err) {
-          // An earlier submit (this run, or one before the rider's "Try again") may have succeeded
+          // An earlier submit (this call, or one before the rider's "Try again") may have succeeded
           // with its answer lost on the way back.
           if (sentBefore && err instanceof FlowError && err.code === "already_submitted") {
             const current = await api.getSession();

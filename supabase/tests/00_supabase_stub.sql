@@ -26,6 +26,13 @@ create table storage.buckets (
   id text primary key, name text not null, public boolean default false,
   file_size_limit bigint, allowed_mime_types text[]
 );
+-- One row per stored file, as in Supabase Storage (reduced to what the migrations read).
+create table storage.objects (
+  id uuid primary key default gen_random_uuid(),
+  bucket_id text references storage.buckets (id),
+  name text not null,
+  unique (bucket_id, name)
+);
 
 -- Supabase installs extensions in their own schema. pgcrypto ships with PostgreSQL (contrib).
 -- Extensions belong to one database, and scripts/test-db.sh creates a new one each run.
@@ -68,3 +75,52 @@ grant usage on schema public to anon, authenticated, service_role;
 alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
 alter default privileges in schema public grant all on sequences to anon, authenticated, service_role;
 alter default privileges in schema public grant execute on functions to anon, authenticated, service_role;
+
+-- pg_net and pg_cron, reduced to what the M3 migration calls, so the sweep and its schedule can be
+-- tested. net.http_post has pg_net's signature and records each call instead of sending it;
+-- cron.schedule records the job by name (pg_cron replaces a job of the same name), and
+-- cron.job_run_details stands in for pg_cron's run log, which the sweep purges.
+create schema net;
+create table net.stub_http_post_calls (
+  id                    bigserial primary key,
+  url                   text not null,
+  body                  jsonb,
+  headers               jsonb,
+  timeout_milliseconds  integer,
+  called_at             timestamptz not null default now()
+);
+create function net.http_post(
+  url text,
+  body jsonb default '{}'::jsonb,
+  params jsonb default '{}'::jsonb,
+  headers jsonb default '{"Content-Type": "application/json"}'::jsonb,
+  timeout_milliseconds integer default 5000
+) returns bigint language sql as $$
+  insert into net.stub_http_post_calls (url, body, headers, timeout_milliseconds)
+  values (url, body, headers, timeout_milliseconds)
+  returning id
+$$;
+revoke all on schema net from public;
+revoke execute on function net.http_post(text, jsonb, jsonb, jsonb, integer) from public;
+
+create schema cron;
+create table cron.job (
+  jobid     bigserial primary key,
+  schedule  text not null,
+  command   text not null,
+  jobname   text unique
+);
+create table cron.job_run_details (
+  runid       bigserial primary key,
+  jobid       bigint,
+  status      text,
+  start_time  timestamptz,
+  end_time    timestamptz
+);
+create function cron.schedule(job_name text, schedule text, command text) returns bigint language sql as $$
+  insert into cron.job (jobname, schedule, command) values (job_name, schedule, command)
+  on conflict (jobname) do update set schedule = excluded.schedule, command = excluded.command
+  returning jobid
+$$;
+revoke all on schema cron from public;
+revoke execute on function cron.schedule(text, text, text) from public;

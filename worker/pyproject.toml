@@ -1,0 +1,57 @@
+# The AI worker (M3): re-checks photo quality, re-reads the code lines (MRZ), gathers evidence of the
+# document type and reads a few printed fields. Runs as one Vercel Python function (api/process.py);
+# the same code runs on any container host. See README.md.
+[project]
+name = "confiance-verify-worker"
+version = "1.0.0"
+description = "Confiance Verify AI worker: server-side photo checks for rider KYC"
+readme = "README.md"
+# In-house code, never published to PyPI.
+classifiers = ["Private :: Do Not Upload"]
+requires-python = "==3.12.*"
+# Exact pins, each released at least two weeks before it was adopted (exclude-newer enforces it for
+# everything the lock resolves). Licences, and the native libraries bundled in each wheel, are listed
+# in docs/LICENSES.md.
+dependencies = [
+  # OCR pipeline (Apache-2.0); its wheel carries the PP-OCRv6 models we load (see verify_worker/ocr.py).
+  "rapidocr==3.9.2",
+  "onnxruntime==1.30.0",
+  # Headless OpenCV: rapidocr 3.9.2 asks for the GUI build (Qt, LGPL-3.0), overridden below.
+  "opencv-python-headless==4.14.0.94",
+  "numpy==2.5.3",
+  "pillow==12.3.0",
+  # Ed25519 request signing.
+  "cryptography==50.0.2",
+]
+
+[dependency-groups]
+dev = [
+  "pytest==9.1.1",
+  # Licence report for the CI licence job (reads the installed packages' metadata).
+  "pip-licenses==5.5.5",
+]
+
+# Vercel treats a folder with a pyproject.toml as a Python app and needs its entrypoint named: the
+# standard-library handler class in api/process.py (vercel.json's "functions" entry is keyed on that file).
+[tool.vercel]
+entrypoint = "api.process:handler"
+
+[tool.uv]
+# Not an installable package: Vercel bundles the files as they are, and tests import from this folder.
+package = false
+# The two-week rule, enforced: nothing published after this instant is ever resolved.
+exclude-newer = "2026-10-01T00:00:00Z"
+# rapidocr 3.9.2 declares the GUI "opencv_python", which bundles Qt 5 (LGPL-3.0) and needs libGL.
+# The headless build provides the same cv2 module; this marker means the GUI build is never installed.
+override-dependencies = ["opencv-python; sys_platform == 'never'"]
+# antlr4-python3-runtime 4.9.3 (pulled in by omegaconf 2.3.1, a rapidocr dependency) is published as
+# a source archive only, so it is built at install time: pin the build backend it uses.
+build-constraint-dependencies = ["setuptools==84.0.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra"
+markers = [
+  "ocr: runs the real RapidOCR models (a few seconds per image)",
+]

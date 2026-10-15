@@ -13,7 +13,7 @@ This is the approved plan. Open questions are tracked in section 1.
 
 ---
 
-## 1. Remaining questions (none block M0–M2)
+## 1. Remaining questions (none block M0–M3)
 
 | # | Question | Needed before |
 |---|---|---|
@@ -21,10 +21,10 @@ This is the approved plan. Open questions are tracked in section 1.
 | Q2 | Maximum retries after a rejection (I suggest 3 per 24 h, then manual review only) | M10 |
 | Q3 | Image retention period (lawyer). Also, can we keep a text record (name, ID number, decision) longer than the images? | M13 |
 | Q4 | **Duplicate detection.** Should we flag the same ID number or the same face on two rider accounts? This catches a lot of fraud, but means storing a one-way fingerprint of the ID number and a face template. It is a privacy trade-off for the lawyer. | M8 |
-| Q5 | **Foreign riders.** Do we accept only Cameroonian residence permits, or also foreign passports? Passports are cheap to add because they follow one international standard. | M3 |
-| Q6 | **Voter card and driving licence.** Both have weak security features and no machine-readable zone. I suggest accepting them, but always sending them to manual review at first. | M3 |
-| Q7 | Specimen images of each document version (old and new CNI, fronts and backs). M2 assumes the new CNI (2025) carries 3 code lines on its back: please confirm with a real card. | M3 |
-| Q8 | **Where the "AI worker" runs** (see section 2). I recommend a small container host at about €5–20 per month. | M3 |
+| Q5 | ~~**Foreign riders.**~~ **Answered 2026-10-14:** passports of any country; Cameroonian residence permits (carte de séjour, carte de résident, new and old) and refugee cards, the latter two always reviewed by a person. See "Decisions for M3". | M3 |
+| Q6 | ~~**Voter card and driving licence.**~~ **Answered 2026-10-14:** accepted, always manual review. | M3 |
+| Q7 | Specimen images of each document version (old and new CNI, fronts and backs). Decree 2025/059 confirms that the new CNI (2025) carries 3 code lines (TD1) and a QR code on its back; still to see on a real card: the document code in the code lines, the number formats and the label wording. **Needed for the tuning step after M3** (list in `M3_SPEC.md`). | After M3 |
+| Q8 | ~~**Where the "AI worker" runs.**~~ **Answered 2026-10-14:** Vercel (Python function, Paris region), free Hobby plan **for testing only**; Vercel Pro and its DPA before real riders. See "Decisions for M3". | M3 |
 | Q9 | **Supabase region and plan.** I suggest Paris (`eu-west-3`) on the Pro plan (about $25/month). The free plan pauses after a week without activity and has no backups. **The lawyer must confirm that EU storage is acceptable before real riders use it.** | M0 (region), M14 (lawyer) |
 | Q10 | Do you have a security engineer (staff or contractor) for the reviews in section 6? | M9 |
 
@@ -60,14 +60,16 @@ Confiance ride app/backend ──(API key)──► Supabase Edge Function "sess
   - Secrets: Vault.
   - API: Edge Functions, written in TypeScript.
   - Role-based access: enforced in the database with "Row Level Security" rules, which are hard to bypass by mistake.
-- **One thing Supabase cannot do: run our AI models.** Edge Functions are limited to a couple of seconds of CPU and 256 MB of memory. OCR, face matching and anti-spoofing therefore run in **one small Python worker**. The worker takes jobs from the Supabase queue and writes results back. It is a single Docker container that can run on any host (see Q8).
+- **One thing Supabase cannot do: run our AI models.** Edge Functions are limited to a couple of seconds of CPU and 256 MB of memory. OCR, face matching and anti-spoofing therefore run in **one small Python worker** (see Q8).
+  - **As built in M3:** a Vercel Python function in Paris. Supabase rings its doorbell; the worker then claims jobs from a `worker_job` table through a signed Edge Function, fetches each photo through it, and sends its evidence back. The Edge Function decides and writes the results.
+  - The worker holds no database credential. The same code runs on Vercel Pro or any container host.
 - **Staying portable and standalone.** Supabase is open source (Apache-2.0) and can be self-hosted. If the lawyer later requires hosting in Cameroon, we move the same database, functions and worker to our own server without rewriting. Netlify pages are plain files that can be hosted anywhere. I will not use Netlify-specific features (Netlify Functions, Forms, Identity), so we are not locked in.
 - **The rider never logs in to Verify.** The Confiance backend asks for a single-use session link that expires after 30 minutes. The app opens it in a Chrome Custom Tab or WebView. The app then learns the result from a signed webhook. Drivers can be added later by using a different `subject_type`.
 
 ### Trade-offs to know about
 1. **Data location.** In the test phase, real ID images will sit in Supabase's EU region. That is fine for consenting volunteers, but the lawyer must approve it before launch (Q9).
-2. **Encryption.** Supabase encrypts all stored data on disk. I will *also* encrypt the most sensitive database columns (ID number, name, date of birth) inside the database; since M2 this covers the MRZ lines read on the phone (see `THREAT_MODEL.md`). Per-image encryption with our own keys is extra work; I propose deciding on it with the security engineer before launch.
-3. **Web flow vs native app.** A browser camera gives slightly less control than a native app. My mitigation: auto-capture, plus a server-side quality re-check that asks the rider to retake bad photos.
+2. **Encryption.** Supabase encrypts all stored data on disk. I will *also* encrypt the most sensitive database columns (ID number, name, date of birth) inside the database; since M2 this covers the MRZ lines read on the phone, and since M3 the code lines and printed fields read by the server (see `THREAT_MODEL.md`). Per-image encryption with our own keys is extra work; I propose deciding on it with the security engineer before launch.
+3. **Web flow vs native app.** A browser camera gives slightly less control than a native app. My mitigation: auto-capture, plus a server-side quality re-check that asks the rider to retake bad photos (in place since M3, for test sessions until the worker's switch is turned on).
 
 ### Stack and licences (all allow commercial use)
 | Area | Choice | Licence |
@@ -76,9 +78,9 @@ Confiance ride app/backend ──(API key)──► Supabase Edge Function "sess
 | Hosting of web pages | Netlify (a hosting service, not a library) | Commercial service; terms checked for production |
 | Web pages | React, TypeScript, Vite, i18next, supabase-js | MIT, Apache-2.0, MIT, MIT, MIT |
 | MRZ parsing and check digits | **Written by us** in TypeScript, following ICAO 9303. The same code runs on the phone (instant feedback) and on the server (the authoritative check). | Ours. The popular `mrz` library is GPL, so we avoid it |
-| MRZ reading on the phone (M2, before the worker exists) | tesseract.js 7 with DoubangoTelecom's MRZ model; our own model replaces it in M3 | Apache-2.0 (engine); BSD-3-Clause (model, checked 2026-10-13; trained by its authors on images collected from the web, see `LICENSES.md`) |
-| AI worker | Python 3.12, OpenCV, NumPy, Pillow, ONNX Runtime | PSF, Apache-2.0, BSD-3, HPND, MIT |
-| OCR, printed text FR/EN | RapidOCR with PP-OCR models | Apache-2.0 (code and models) |
+| MRZ reading on the phone (since M2) | tesseract.js 7 with DoubangoTelecom's MRZ model, until our own model (trained in M3 on fictitious renders only) passes its gates | Apache-2.0 (engine); BSD-3-Clause (model, checked 2026-10-13; trained by its authors on images collected from the web, see `LICENSES.md`) |
+| AI worker (M3) | Python 3.12 on Vercel, headless OpenCV, NumPy, Pillow, ONNX Runtime, cryptography (Ed25519) | PSF, Apache-2.0 (OpenCV; its wheel bundles LGPL and other parts, documented), BSD-3 and others, MIT-CMU, MIT, Apache-2.0 / BSD-3 |
+| OCR, printed text FR/EN, and the server's re-read of the code lines (M3) | RapidOCR 3.9.2 with the PP-OCRv6 "small" models (no Tesseract on the server: its packages bring GPL code) | Apache-2.0 (code and models) |
 | Face detection | OpenCV YuNet | MIT |
 | Live face guidance on the phone (blink, head turn) | MediaPipe Face Landmarker | Apache-2.0 |
 | Passive anti-spoofing | MiniVision Silent-Face-Anti-Spoofing | Apache-2.0 |
@@ -113,7 +115,8 @@ Confiance ride app/backend ──(API key)──► Supabase Edge Function "sess
 - `capture`: front/back/liveness, storage path, quality metrics, sha256.
 - `liveness_challenge`: actions, one-time code, expiry.
 - `check_result`: check name and version, score, pass/flag/fail, details (outcomes and counts only, never personal data). Since M2, tied to the photo it ran on.
-- `extracted_document_data`: sensitive fields encrypted; records whether each field came from MRZ or OCR. Since M2: the MRZ lines read on the phone (`source` = `mrz_phone`), encrypted inside the database with a key kept in Supabase Vault.
+- `extracted_document_data`: sensitive fields encrypted; records whether each field came from MRZ or OCR. Since M2: the MRZ lines read on the phone (`source` = `mrz_phone`), encrypted inside the database with a key kept in Supabase Vault. Since M3: the code lines read by the server (`mrz_server`) and the printed fields it read, including the card sub-type (`ocr_server`), under the same key.
+- Since M3: `worker_job` (one per document photo: the AI worker's queue), `worker_key` (the worker's public keys), `worker_nonce` (replay guard) and `worker_settings` (the test-only switch and the daily job cap). Only the Edge Functions can reach them.
 - `review_task`: priority, assignee, status, timing.
 - `decision`: system or reviewer, outcome, reason code, note.
 - `reason_code`: FR/EN text shown to riders.
@@ -138,12 +141,13 @@ The exact routes, request and response types, limits and error codes of the impl
 ### API 2: Rider web flow → Verify (single-use session token)
 - Since M1: `GET /flow/session` · `POST /flow/consent` · `POST /flow/document-type` · `POST /flow/upload-url` (a one-time upload link to private storage) · `POST /flow/captures {path, kind, quality}` (the server checks the uploaded image) · `POST /flow/submit`.
 - Since M2: `POST /flow/mrz` (what the phone read from the code lines; the server recomputes every check digit).
-- Planned: `POST /flow/liveness/challenge` (M5) · `GET /flow/status` (result, reason, retries left; M10) · `POST /flow/appeal` (M10). The server's own quality verdict on each capture arrives with the AI worker (M3).
+- Since M3: `GET /flow/checks` (the server's check of each photo: pending, ok, retake with a reason, or unchecked; the rider waits for it for at most 20 seconds).
+- Planned: `POST /flow/liveness/challenge` (M5) · `GET /flow/status` (result, reason, retries left; M10) · `POST /flow/appeal` (M10).
 
 ### API 3: Ops dashboard → Verify (Supabase Auth with 2FA required; enforced by role)
 - Queue and case details: read directly via database rules. Each role sees only what it is allowed.
 - Since M1: `POST /admin/enroll {email, code, password}` (staff account set-up by one-time invite code) · `POST /admin/test-sessions` (test rider links, until M10) · `POST /admin/captures/view {captureId}` (audited, 60-second link).
-- Since M2: `POST /admin/document-data {verificationId}` (the code lines read on the phone, decrypted; audited before decryption; never for admins).
+- Since M2: `POST /admin/document-data {verificationId}` (the code lines read on the phone, decrypted; audited before decryption; never for admins). Since M3 it also returns the code lines and printed fields read by the server.
 - Planned: `POST /admin/verifications/{id}/decision`
 - Search: supervisors and above.
 - Thresholds: admins only.
@@ -153,6 +157,10 @@ The exact routes, request and response types, limits and error codes of the impl
 - Reviewer: only cases assigned to them.
 - Supervisor: adds search, appeals and reviewer statistics.
 - Admin: adds thresholds, users and audit log, but **no** routine image access.
+
+### API 4: AI worker → Verify (since M3; every request Ed25519-signed by the worker)
+- `POST /worker/claim` (the next job, or nothing) · `POST /worker/image` (that job's photo, relayed; no URL ever leaves Supabase) · `POST /worker/result` (the worker's evidence; the Edge Function decides).
+- The worker is woken by an empty "ring" that carries no authority: from the `flow` function after each photo, and from a database job every minute while work waits.
 
 ---
 
@@ -164,7 +172,7 @@ Each milestone ends with a Netlify link and short test steps. The flow has a "de
 | **M0** | Repo and CI (tests, licence check, secret scan). Supabase **test project** created (Q9 region) with tables, security rules and private storage. Two Netlify sites (rider flow, dashboard) with automatic preview links. FR/EN hello page. | Open the link on your phone and switch the language |
 | **M1** | **ID capture.** Live camera with a card frame, blur/glare/framing hints, auto-capture, crop and compression (target under 300 KB). Upload straight to private Supabase storage. Front and back. | Capture your ID in good and bad light; bad photos are refused with a clear hint. The image appears in the (temporary) admin debug page. |
 | **M2** | **MRZ reading.** Read the MRZ on the phone, parse passport (TD3) and the new CNI (2025, TD1), validate check digits on the phone and again on the server. The old CNI has no MRZ. | Scan your passport or new CNI with the debug link: fields shown with ✅/❌ for each check digit; the dashboard shows the server's own check and "Show data read" |
-| M3 | **AI worker goes live (Q8).** Server re-reads the MRZ from the image itself, plus classification and printed-text OCR for each document type | Scan each document type: correct type and fields |
+| **M3** | **AI worker goes live (Q8).** On test sessions, the server re-checks each photo's quality (an unusable photo is retaken at once, at most once per side), re-reads the MRZ from the image and compares it with the phone's, recognises the document (firm from code lines, provisional from printed words) and reads a few printed fields. Our own MRZ model's training pipeline and gates. | Scan each document type with a test session: correct type, the server's code lines agree with the phone's, the fields behind "Show data read"; a blank card is sent back once (`M3_SPEC.md`) |
 | M4 | Consistency checks and first risk flags | Try an expired ID, and a test card whose printed data does not match its MRZ |
 | M5 | Active liveness capture: random challenge, frames uploaded | A new challenge appears each time |
 | M6 | Server-side liveness evaluation + passive anti-spoofing | A printed photo or a phone screen held to the camera is flagged |
@@ -184,6 +192,26 @@ Each milestone ends with a Netlify link and short test steps. The flow has a "de
 4. **Reading model: Doubango now, our own in M3.** DoubangoTelecom's `mrz.traineddata` (BSD-3-Clause). Its caveat is recorded in `LICENSES.md`: its authors trained it on images collected from the web. We replace it with our own model in M3.
 
 Details: `docs/M2_SPEC.md`.
+
+### Decisions for M3 (2026-10-14)
+1. **The AI worker runs on Vercel, not on a container host.**
+   - A Vercel Python function in Paris (`cdg1`) replaces the container host (Scaleway) considered earlier. The same code runs on Vercel Pro or any container host.
+   - **Free Hobby plan, for testing only.** You were told that Hobby's terms allow only non-commercial personal use, that Hobby has no data processing agreement (DPA), and that it includes 4 CPU-hours a month.
+   - **Enforced in code:** a database switch keeps the worker on test sessions only, until Vercel Pro and its DPA are in place (and the lawyer agrees). A daily job cap (150 by default) protects the CPU budget.
+2. **One milestone.** M3 is not split.
+3. **Documents accepted** (answers Q5 and Q6):
+   - passports of any country;
+   - Cameroonian residence permits (carte de séjour, carte de résident; new and old models);
+   - refugee cards (new grey and old red), for manual review;
+   - voter card and driving licence: accepted, always manual review;
+   - old CNI: manual review.
+
+   The rider's option becomes "Titre de séjour ou carte de réfugié / Residence permit or refugee card", and the server works out which card it is. An ID card issued by another state is flagged as not accepted. As built, every residence permit goes to a person, so the reason never reveals a refugee card.
+4. **The rider waits for the server's check:** "Checking your photos…", for at most about 20 seconds. A photo the server finds unusable (no document, or no readable text) is retaken at once, at most once per side. If the server is slow or down, the rider continues and staff review the case.
+5. **Our own MRZ model:** train from zero first (cleanest provenance). If that fails the gates, fine-tune Google's `eng` model (Apache-2.0; its list of about 4,500 mostly commercial training fonts goes to the lawyer). Doubango stays until one model passes; **M3 is complete even if none passes.**
+6. **OpenCV's bundled parts** (LGPL FFmpeg and libquadmath, Intel IPP, the GCC runtime with its exception, an unused out-of-support OpenSSL, and others) are accepted as documented exceptions (`LICENSES.md`). A slim OpenCV build that removes them comes before the pilot.
+
+Details: `docs/M3_SPEC.md`.
 
 **Supabase setup.** I can create the Supabase project and apply database changes directly through the connected Supabase tools. **I will ask before creating anything that costs money.** Netlify sites deploy automatically from GitHub.
 
@@ -213,15 +241,15 @@ Details: `docs/M2_SPEC.md`.
 5. Staff access: 2FA enforcement, onboarding and offboarding, admin break-glass access.
 6. Audit log integrity (no image is shown if the access can't be logged).
 7. Liveness and replay resistance (one-time codes, virtual cameras or fake camera feeds).
-8. The AI worker's host: hardening, network access, image scanning.
+8. The AI worker's host (Vercel since M3): the signed worker API and key rotation, the firewall rules, the test-only switch, the move to Pro with a DPA, the CPU budget, and the third-party parts inside its Python packages (see `THREAT_MODEL.md` and `LICENSES.md`).
 9. CI/CD and secrets (GitHub, Netlify and Supabase settings).
 10. Dependency, licence and model-provenance audit.
 11. External penetration test.
-12. With the lawyer: data-processing agreements with Supabase and Netlify, the EU region vs Cameroon data law, consent wording, retention and deletion (including backups), and registration with the data-protection authority.
+12. With the lawyer: data-processing agreements with Supabase, Netlify and Vercel (Vercel Inc. is a US company; the worker runs in its Paris region), the EU region vs Cameroon data law, consent wording, retention and deletion (including backups), and registration with the data-protection authority.
 13. Incident response plan if ID images leak.
 
 ---
 
 ## Verification
 - Each milestone: CI green (unit tests, database security-rule tests, licence check, secret scan) + deployed to a Netlify preview + your phone test passes.
-- M0–M2 use only your own documents and public ICAO samples.
+- M0–M3 use only your own documents (and, from the M3 tuning step, consenting volunteers' own documents), public ICAO samples and our own fictitious specimens.

@@ -1,5 +1,5 @@
 // Runs the flow: the reducer (machine.ts) plus the side effects it asks for (API calls, reading the
-// MRZ, uploads).
+// MRZ, uploads, waiting for the server's checks).
 import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -11,12 +11,14 @@ import {
   functionUrl,
   isSupportedLanguage,
   showLanguage,
+  type CaptureSide,
   type DeclaredDocument,
   type FlowSession,
 } from "@verify/shared";
 import { createLazyMrzReader, unavailableRead } from "../mrz/lazyReader";
 import type { MrzReader } from "../mrz/types";
 import { type FlowApi, createFlowApi } from "./api";
+import { type ChecksTiming, waitForChecks } from "./checks";
 import { isTransient, toFlowError } from "./errors";
 import { listenForBack, pushBackGuard } from "./history";
 import { sessionLanguage } from "./language";
@@ -24,11 +26,14 @@ import {
   type FlowAction,
   type FlowState,
   type Shot,
+  type UploadProgress,
+  checksDecision,
   flowReducer,
   handlesBack,
   initialFlowState,
   mrzExpectationFor,
   pendingShots,
+  sideShots,
 } from "./machine";
 import { UPLOAD_RETRY, withRetry } from "./retry";
 import { putObjectWithSupabase } from "./storage";
@@ -57,7 +62,12 @@ export interface Boot {
   invalidLink: boolean;
 }
 
-export function useFlow(boot: Boot): { state: FlowState; actions: FlowActions } {
+export interface FlowOptions {
+  /** How long to wait for the server's checks, and how often to ask (default: CHECKS_TIMING). */
+  checks?: Partial<ChecksTiming>;
+}
+
+export function useFlow(boot: Boot, options: FlowOptions = {}): { state: FlowState; actions: FlowActions } {
   const [state, dispatch] = useReducer(flowReducer, boot, (b: Boot) =>
     initialFlowState({ hasToken: b.token !== null, invalidLink: b.invalidLink }),
   );
@@ -171,8 +181,10 @@ export function useFlow(boot: Boot): { state: FlowState; actions: FlowActions } 
     };
   }, [readingShot, document, reader]);
 
-  // Closing or leaving the page during an upload loses the photos: ask first (where browsers allow).
-  const uploading = state.upload.status === "running" || state.upload.status === "queued";
+  // Closing or leaving the page during an upload, or while the server checks the photos before the
+  // submit, loses the photos: ask first (where browsers allow).
+  const checking = screen.name === "checking";
+  const uploading = state.upload.status === "running" || state.upload.status === "queued" || checking;
   useEffect(() => {
     if (!uploading) return;
     const warn = (event: BeforeUnloadEvent) => {
@@ -202,10 +214,35 @@ export function useFlow(boot: Boot): { state: FlowState; actions: FlowActions } 
     [api],
   );
 
-  // Uploads start when the reducer queues them (after the last photo is accepted, or "Try again").
+  // Uploads start when the reducer queues them: the photos after the last one is accepted (then the
+  // checking screen), the submit once the checks are over, and either again on "Try again".
   const { status: uploadStatus } = state.upload;
   useEffect(() => {
     if (uploadStatus !== "queued" || !uploader) return;
+    const listener = {
+      progress: (progress: UploadProgress) => dispatch({ type: "upload/progress", progress }),
+      sideDone: (side: CaptureSide) => dispatch({ type: "upload/sideDone", side }),
+    };
+    if (state.upload.stage === "submit") {
+      // The bar ends where the photos' upload left it: their steps, then this one.
+      const shots = sideShots(state);
+      const total = uploadSteps(shots);
+      const photos = shots.length;
+      dispatch({
+        type: "upload/started",
+        progress: { done: total - 1, total, phase: "submit", photo: 0, photos, attempt: 1 },
+      });
+      void uploader
+        .submit(listener, { total, photos })
+        .then((outcome) =>
+          dispatch(
+            outcome.ok
+              ? { type: "upload/submitted", session: outcome.session }
+              : { type: "upload/failed", error: outcome.error, side: null },
+          ),
+        );
+      return;
+    }
     const shots = pendingShots(state);
     const photos = shots.length;
     dispatch({
@@ -220,19 +257,34 @@ export function useFlow(boot: Boot): { state: FlowState; actions: FlowActions } 
       },
     });
     void uploader
-      .run(shots, {
-        progress: (progress) => dispatch({ type: "upload/progress", progress }),
-        sideDone: (side) => dispatch({ type: "upload/sideDone", side }),
-      })
+      .uploadSides(shots, listener)
       .then((outcome) =>
         dispatch(
-          outcome.ok
-            ? { type: "upload/submitted", session: outcome.session }
-            : { type: "upload/failed", error: outcome.error, side: outcome.side },
+          outcome.ok ? { type: "upload/sent" } : { type: "upload/failed", error: outcome.error, side: outcome.side },
         ),
       );
     // Only a newly queued upload starts a run; `state` is read at that moment on purpose.
   }, [uploadStatus, uploader]);
+
+  // The checking screen asks for the server's checks until they are settled or the time is up, then
+  // submits or sends the rider back to the camera. Leaving the screen stops the wait. A ring that
+  // never came, a server that is down or an error: the photos go as they are, with no error shown.
+  const waitMs = options.checks?.waitMs;
+  const pollMs = options.checks?.pollMs;
+  useEffect(() => {
+    if (!checking || !api) return;
+    const controller = new AbortController();
+    void waitForChecks({
+      getChecks: (signal) => api.getChecks(signal),
+      decide: (checks) => checksDecision(stateRef.current, checks),
+      timing: { waitMs, pollMs },
+      signal: controller.signal,
+    }).then((result) => {
+      if (!result || controller.signal.aborted) return;
+      dispatch(result.type === "decided" ? result.decision : { type: "checks/timeout" });
+    });
+    return () => controller.abort();
+  }, [checking, api, waitMs, pollMs]);
 
   const actions = useMemo<FlowActions>(() => {
     const language = () => (isSupportedLanguage(i18n.language) ? i18n.language : DEFAULT_LANGUAGE);

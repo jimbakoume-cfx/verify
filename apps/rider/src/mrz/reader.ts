@@ -5,7 +5,7 @@
 // the other binarisation (one global threshold instead of a local one). A pass only counts when
 // its own check digits say so, so extra passes cannot make wrong lines look valid. The two
 // readings of the same band also serve as evidence for each other's document-number repair
-// (see correct.ts).
+// (see mrzCorrect.ts in supabase/functions/_shared, exported through @verify/shared).
 import {
   type GrayImage,
   type MrzBand,
@@ -15,8 +15,7 @@ import {
   prepareForOcr,
   rotateGray180,
 } from "@verify/capture";
-import { type MrzExpectation, parseMrz } from "@verify/shared";
-import { correctMrz } from "./correct";
+import { type MrzExpectation, correctMrz, parseMrz } from "@verify/shared";
 import { type OcrEngine, createOcrEngine } from "./ocrEngine";
 import type { MrzReadOptions, MrzReadResult, MrzReadStatus, MrzReader } from "./types";
 

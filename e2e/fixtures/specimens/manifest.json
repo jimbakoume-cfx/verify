@@ -1,0 +1,874 @@
+{
+  "about": "Fictitious SPECIMEN documents drawn by scripts/make-specimens.py for the worker's tests. All data is fake; these images test the plumbing, not accuracy on real documents. Do not edit by hand.",
+  "fonts": [
+    "scripts/fonts/inter/Inter-Regular.ttf",
+    "scripts/fonts/inter/Inter-Bold.ttf",
+    "scripts/fonts/ocr-b/OCRB.otf"
+  ],
+  "photos": [
+    {
+      "file": "cni-new-front.jpg",
+      "document": "cni_new",
+      "side": "document_front",
+      "declaredDocument": "cni_biometric",
+      "width": 1280,
+      "height": 807,
+      "variant": "clean",
+      "expected": {
+        "family": "cni_biometric",
+        "basis": "mrz",
+        "rotation": 90,
+        "orientation": "portrait",
+        "mrz": null,
+        "qr": false,
+        "subtype": null,
+        "fields": {
+          "surname": "SPECIMEN",
+          "givenNames": "HELENE TEST"
+        }
+      },
+      "printed": {
+        "surname": "SPÉCIMEN",
+        "givenNames": "HÉLÈNE TEST",
+        "documentNumber": "SPC000123",
+        "birthDate": "1990-02-15",
+        "expiryDate": "2035-03-02"
+      },
+      "never": []
+    },
+    {
+      "file": "cni-new-back.jpg",
+      "document": "cni_new",
+      "side": "document_back",
+      "declaredDocument": "cni_biometric",
+      "width": 1280,
+      "height": 807,
+      "variant": "clean",
+      "expected": {
+        "family": "cni_biometric",
+        "basis": "mrz",
+        "rotation": 0,
+        "orientation": "landscape",
+        "mrz": {
+          "format": "TD1",
+          "lines": [
+            "IDCMRSPC0001239<<<<<<<<<<<<<<<",
+            "9002155F3503029CMR<<<<<<<<<<<2",
+            "SPECIMEN<<HELENE<TEST<<<<<<<<<"
+          ]
+        },
+        "qr": true,
+        "subtype": null,
+        "fields": {
+          "issueDate": "2025-03-02"
+        }
+      },
+      "printed": {
+        "issueDate": "2025-03-02"
+      },
+      "never": [
+        "PAPA ESSAI SPECIMEN EXEMPLAIRE",
+        "CHRISTELLE ESSAI MAMAN SPECIMEN",
+        "VILLE-TEST",
+        "TESTEUSE",
+        "1,65 M",
+        "12345678901234567"
+      ]
+    },
+    {
+      "file": "cni-new-back-jpeg.jpg",
+      "document": "cni_new",
+      "side": "document_back",
+      "declaredDocument": "cni_biometric",
+      "width": 1000,
+      "height": 630,
+      "variant": "1000 px, JPEG q35",
+      "expected": {
+        "family": "cni_biometric",
+        "basis": "mrz",
+        "rotation": 0,
+        "orientation": "landscape",
+        "mrz": {
+          "format": "TD1",
+          "lines": [
+            "IDCMRSPC0001239<<<<<<<<<<<<<<<",
+            "9002155F3503029CMR<<<<<<<<<<<2",
+            "SPECIMEN<<HELENE<TEST<<<<<<<<<"
+          ]
+        },
+        "qr": true,
+        "subtype": null,
+        "fields": {}
+      },
+      "printed": {
+        "issueDate": "2025-03-02"
+      },
+      "never": []
+    },
+    {
+      "file": "cni-old-front.jpg",
+      "document": "cni_old",
+      "side": "document_front",
+      "declaredDocument": "cni_legacy",
+      "width": 1280,
+      "height": 807,
+      "variant": "clean",
+      "expected": {
+        "family": "cni_legacy",
+        "basis": "keywords",
+        "rotation": 0,
+        "orientation": "landscape",
+        "mrz": null,
+        "qr": false,
+        "subtype": null,
+        "fields": {
+          "surname": "EXEMPLE",
+          "givenNames": "JEAN-PAUL ESSAI",
+          "birthDate": "1984-11-07"
+        }
+      },
+      "printed": {
+        "surname": "EXEMPLE",
+        "givenNames": "JEAN-PAUL ESSAI",
+        "birthDate": "1984-11-07"
+      },
+      "never": [
+        "VILLE-TEST",
+        "1,78 M",
+        "TESTEUR"
+      ]
+    },
+    {
+      "file": "cni-old-front-glare.jpg",
+      "document": "cni_old",
+      "side": "document_front",
+      "declaredDocument": "cni_legacy",
+      "width": 1280,
+      "height": 807,
+      "variant": "glare",
+      "expected": {
+        "family": "cni_legacy",
+        "basis": "keywords",
+        "rotation": 0,
+        "orientation": "landscape",
+        "mrz": null,
+        "qr": false,
+        "subtype": null,
+        "fields": {},
+        "glare": true
+      },
+      "printed": {
+        "surname": "EXEMPLE",
+        "givenNames": "JEAN-PAUL ESSAI",
+        "birthDate": "1984-11-07"
+      },
+      "never": []
+    },
+    {
+      "file": "cni-old-back.jpg",
+      "document": "cni_old",
+      "side": "document_back",
+      "declaredDocument": "cni_legacy",
+      "width": 1280,
+      "height": 807,
+      "variant": "clean",
+      "expected": {
+        "family": "cni_legacy",
+        "basis": "keywords",
+        "rotation": 0,
+        "orientation": "landscape",
+        "mrz": null,
+        "qr": false,
+        "subtype": null,
+        "fields": {
+          "issueDate": "2019-05-12",
+          "expiryDate": "2029-05-12",
+          "documentNumber": "100200300"
+        }
+      },
+      "printed": {
+        "issueDate": "2019-05-12",
+        "expiryDate": "2029-05-12",
+        "documentNumber": "100200300"
+      },
+      "never": [
+        "ESSAI PÈRE",
+        "ESSAI MÈRE",
+        "RUE DU TEST",
+        "NÉANT",
+        "98765432109876543"
+      ]
+    },
+    {
+      "file": "passport-cmr.jpg",
+      "document": "passport_cmr",
+      "side": "document_front",
+      "declaredDocument": "passport",
+      "width": 1280,
+      "height": 901,
+      "variant": "clean",
+      "expected": {
+        "family": "passport",
+        "basis": "mrz",
+        "rotation": 0,
+        "orientation": "landscape",
+        "mrz": {
+          "format": "TD3",
+          "lines": [
+            "P<CMRECHANTILLON<<FRANCOIS<ESSAI<<<<<<<<<<<<",
+            "SP76543217CMR8507044M2806309<<<<<<<<<<<<<<00"
+          ]
+        },
+        "qr": false,
+        "subtype": null,
+        "fields": {
+          "surname": "ECHANTILLON",
+          "givenNames": "FRANCOIS ESSAI",
+          "issueDate": "2023-06-30"
+        }
+      },
+      "printed": {
+        "surname": "ÉCHANTILLON",
+        "givenNames": "FRANÇOIS ESSAI",
+        "issueDate": "2023-06-30",
+        "birthDate": "1985-07-04",
+        "expiryDate": "2028-06-30"
+      },
+      "never": [
+        "VILLE-TEST",
+        "DGSN TEST",
+        "CAMEROUNAISE"
+      ]
+    },
+    {
+      "file": "passport-cmr-blur.jpg",
+      "document": "passport_cmr",
+      "side": "document_front",
+      "declaredDocument": "passport",
+      "width": 1280,
+      "height": 901,
+      "variant": "out of focus (Gaussian blur, 8 px)",
+      "expected": {
+        "family": "passport",
+        "basis": "mrz",
+        "rotation": 0,
+        "orientation": "landscape",
+        "mrz": {
+          "format": "TD3",
+          "lines": [
+            "P<CMRECHANTILLON<<FRANCOIS<ESSAI<<<<<<<<<<<<",
+            "SP76543217CMR8507044M2806309<<<<<<<<<<<<<<00"
+          ]
+        },
+        "qr": false,
+        "subtype": null,
+        "fields": {},
+        "blurry": true
+      },
+      "printed": {
+        "surname": "ÉCHANTILLON",
+        "givenNames": "FRANÇOIS ESSAI",
+        "issueDate": "2023-06-30",
+        "birthDate": "1985-07-04",
+        "expiryDate": "2028-06-30"
+      },
+      "never": []
+    },
+    {
+      "file": "passport-uto.jpg",
+      "document": "passport_uto",
+      "side": "document_front",
+      "declaredDocument": "passport",
+      "width": 1280,
+      "height": 901,
+      "variant": "clean",
+      "expected": {
+        "family": "passport",
+        "basis": "mrz",
+        "rotation": 0,
+        "orientation": "landscape",
+        "mrz": {
+          "format": "TD3",
+          "lines": [
+            "P<UTOMODEL<<ALEX<SAMPLE<<<<<<<<<<<<<<<<<<<<<",
+            "UT12345675UTO7903122<3208313<<<<<<<<<<<<<<02"
+          ]
+        },
+        "qr": false,
+        "subtype": null,
+        "fields": {
+          "surname": "MODEL",
+          "givenNames": "ALEX SAMPLE",
+          "issueDate": "2022-09-01"
+        }
+      },
+      "printed": {
+        "surname": "MODEL",
+        "givenNames": "ALEX SAMPLE",
+        "issueDate": "2022-09-01",
+        "birthDate": "1979-03-12",
+        "expiryDate": "2032-08-31"
+      },
+      "never": []
+    },
+    {
+      "file": "passport-uto-upside-down.jpg",
+      "document": "passport_uto",
+      "side": "document_front",
+      "declaredDocument": "passport",
+      "width": 1280,
+      "height": 901,
+      "variant": "upside down",
+      "expected": {
+        "family": "passport",
+        "basis": "mrz",
+        "rotation": 180,
+        "orientation": "landscape",
+        "mrz": {
+          "format": "TD3",
+          "lines": [
+            "P<UTOMODEL<<ALEX<SAMPLE<<<<<<<<<<<<<<<<<<<<<",
+            "UT12345675UTO7903122<3208313<<<<<<<<<<<<<<02"
+          ]
+        },
+        "qr": false,
+        "subtype": null,
+        "fields": {
+          "surname": "MODEL",
+          "givenNames": "ALEX SAMPLE",
+          "issueDate": "2022-09-01"
+        }
+      },
+      "printed": {
+        "surname": "MODEL",
+        "givenNames": "ALEX SAMPLE",
+        "issueDate": "2022-09-01",
+        "birthDate": "1979-03-12",
+        "expiryDate": "2032-08-31"
+      },
+      "never": []
+    },
+    {
+      "file": "sejour-new-front.jpg",
+      "document": "sejour_new",
+      "side": "document_front",
+      "declaredDocument": "residence_permit",
+      "width": 1280,
+      "height": 807,
+      "variant": "clean",
+      "expected": {
+        "family": "residence_permit",
+        "basis": "mrz",
+        "rotation": 90,
+        "orientation": "portrait",
+        "mrz": null,
+        "qr": false,
+        "subtype": "carte_de_sejour",
+        "fields": {
+          "surname": "DEMO",
+          "givenNames": "AICHA ESSAI"
+        }
+      },
+      "printed": {
+        "surname": "DÉMO",
+        "givenNames": "AÏCHA ESSAI",
+        "documentNumber": "SJ0004242",
+        "birthDate": "1988-05-21",
+        "expiryDate": "2027-04-15"
+      },
+      "never": []
+    },
+    {
+      "file": "sejour-new-back.jpg",
+      "document": "sejour_new",
+      "side": "document_back",
+      "declaredDocument": "residence_permit",
+      "width": 1280,
+      "height": 807,
+      "variant": "clean",
+      "expected": {
+        "family": "residence_permit",
+        "basis": "mrz",
+        "rotation": 0,
+        "orientation": "landscape",
+        "mrz": {
+          "format": "TD1",
+          "lines": [
+            "IRCMRSJ00042425<<<<<<<<<<<<<<<",
+            "8805212F2704151UTO<<<<<<<<<<<0",
+            "DEMO<<AICHA<ESSAI<<<<<<<<<<<<<"
+          ]
+        },
+        "qr": true,
+        "subtype": null,
+        "fields": {
+          "issueDate": "2025-04-15"
+        }
+      },
+      "printed": {
+        "issueDate": "2025-04-15"
+      },
+      "never": [
+        "UTOPIENNE",
+        "TESTEUR",
+        "1,70 M",
+        "24681357924681357"
+      ]
+    },
+    {
+      "file": "resident-new-front.jpg",
+      "document": "resident_new",
+      "side": "document_front",
+      "declaredDocument": "residence_permit",
+      "width": 1280,
+      "height": 807,
+      "variant": "clean",
+      "expected": {
+        "family": "residence_permit",
+        "basis": "mrz",
+        "rotation": 270,
+        "orientation": "portrait",
+        "mrz": null,
+        "qr": false,
+        "subtype": "carte_de_resident",
+        "fields": {
+          "surname": "FICTIF",
+          "givenNames": "OMAR TEST"
+        }
+      },
+      "printed": {
+        "surname": "FICTIF",
+        "givenNames": "OMAR TEST",
+        "documentNumber": "RS0001717",
+        "birthDate": "1976-09-30",
+        "expiryDate": "2035-06-01"
+      },
+      "never": []
+    },
+    {
+      "file": "resident-new-back.jpg",
+      "document": "resident_new",
+      "side": "document_back",
+      "declaredDocument": "residence_permit",
+      "width": 1280,
+      "height": 807,
+      "variant": "clean",
+      "expected": {
+        "family": "residence_permit",
+        "basis": "mrz",
+        "rotation": 0,
+        "orientation": "landscape",
+        "mrz": {
+          "format": "TD1",
+          "lines": [
+            "IRCMRRS00017173<<<<<<<<<<<<<<<",
+            "7609309M3506019UTO<<<<<<<<<<<4",
+            "FICTIF<<OMAR<TEST<<<<<<<<<<<<<"
+          ]
+        },
+        "qr": true,
+        "subtype": null,
+        "fields": {
+          "issueDate": "2025-06-01"
+        }
+      },
+      "printed": {
+        "issueDate": "2025-06-01"
+      },
+      "never": [
+        "UTOPIENNE",
+        "TESTEUR",
+        "1,70 M",
+        "24681357924681357"
+      ]
+    },
+    {
+      "file": "refugee-new-front.jpg",
+      "document": "refugee_new",
+      "side": "document_front",
+      "declaredDocument": "residence_permit",
+      "width": 1280,
+      "height": 807,
+      "variant": "clean",
+      "expected": {
+        "family": "residence_permit",
+        "basis": "mrz",
+        "rotation": 90,
+        "orientation": "portrait",
+        "mrz": null,
+        "qr": false,
+        "subtype": "refugee",
+        "fields": {
+          "surname": "ESSAI",
+          "givenNames": "GRACE EXEMPLE"
+        }
+      },
+      "printed": {
+        "surname": "ESSAI",
+        "givenNames": "GRÂCE EXEMPLE",
+        "documentNumber": "RF0000808",
+        "birthDate": "1995-01-17",
+        "expiryDate": "2027-09-10"
+      },
+      "never": []
+    },
+    {
+      "file": "refugee-new-back.jpg",
+      "document": "refugee_new",
+      "side": "document_back",
+      "declaredDocument": "residence_permit",
+      "width": 1280,
+      "height": 807,
+      "variant": "clean",
+      "expected": {
+        "family": "residence_permit",
+        "basis": "mrz",
+        "rotation": 0,
+        "orientation": "landscape",
+        "mrz": {
+          "format": "TD1",
+          "lines": [
+            "IRCMRRF00008088<<<<<<<<<<<<<<<",
+            "9501175F2709101XXC<<<<<<<<<<<2",
+            "ESSAI<<GRACE<EXEMPLE<<<<<<<<<<"
+          ]
+        },
+        "qr": true,
+        "subtype": null,
+        "fields": {
+          "issueDate": "2025-09-10"
+        }
+      },
+      "printed": {
+        "issueDate": "2025-09-10"
+      },
+      "never": [
+        "INDÉTERMINÉE",
+        "TESTEUR",
+        "1,70 M",
+        "24681357924681357"
+      ]
+    },
+    {
+      "file": "permit-old-front.jpg",
+      "document": "permit_old",
+      "side": "document_front",
+      "declaredDocument": "residence_permit",
+      "width": 1280,
+      "height": 807,
+      "variant": "clean",
+      "expected": {
+        "family": "residence_permit",
+        "basis": "keywords",
+        "rotation": 0,
+        "orientation": "landscape",
+        "mrz": null,
+        "qr": false,
+        "subtype": "carte_de_sejour",
+        "fields": {
+          "surname": "EXEMPLE",
+          "givenNames": "MARIA TEST",
+          "birthDate": "1981-04-03"
+        }
+      },
+      "printed": {
+        "surname": "EXEMPLE",
+        "givenNames": "MARIA TEST",
+        "birthDate": "1981-04-03"
+      },
+      "never": [
+        "UTOPIENNE"
+      ]
+    },
+    {
+      "file": "permit-old-back.jpg",
+      "document": "permit_old",
+      "side": "document_back",
+      "declaredDocument": "residence_permit",
+      "width": 1280,
+      "height": 807,
+      "variant": "clean",
+      "expected": {
+        "family": "residence_permit",
+        "basis": "keywords",
+        "rotation": 0,
+        "orientation": "landscape",
+        "mrz": null,
+        "qr": false,
+        "subtype": null,
+        "fields": {
+          "issueDate": "2024-01-20",
+          "expiryDate": "2026-01-20",
+          "documentNumber": "BP0031415"
+        }
+      },
+      "printed": {
+        "issueDate": "2024-01-20",
+        "expiryDate": "2026-01-20",
+        "documentNumber": "BP0031415"
+      },
+      "never": [
+        "RUE DU TEST",
+        "NÉANT"
+      ]
+    },
+    {
+      "file": "refugee-old-front.jpg",
+      "document": "refugee_old",
+      "side": "document_front",
+      "declaredDocument": "residence_permit",
+      "width": 1280,
+      "height": 807,
+      "variant": "clean",
+      "expected": {
+        "family": "residence_permit",
+        "basis": "keywords",
+        "rotation": 0,
+        "orientation": "landscape",
+        "mrz": null,
+        "qr": false,
+        "subtype": "refugee",
+        "fields": {
+          "surname": "MODELE",
+          "givenNames": "DAVID ESSAI",
+          "birthDate": "1990-12-11"
+        }
+      },
+      "printed": {
+        "surname": "MODÈLE",
+        "givenNames": "DAVID ESSAI",
+        "birthDate": "1990-12-11"
+      },
+      "never": [
+        "INDÉTERMINÉE"
+      ]
+    },
+    {
+      "file": "refugee-old-back.jpg",
+      "document": "refugee_old",
+      "side": "document_back",
+      "declaredDocument": "residence_permit",
+      "width": 1280,
+      "height": 807,
+      "variant": "clean",
+      "expected": {
+        "family": "residence_permit",
+        "basis": "keywords",
+        "rotation": 0,
+        "orientation": "landscape",
+        "mrz": null,
+        "qr": false,
+        "subtype": null,
+        "fields": {
+          "issueDate": "2023-07-05",
+          "expiryDate": "2025-07-05",
+          "documentNumber": "RR0027182"
+        }
+      },
+      "printed": {
+        "issueDate": "2023-07-05",
+        "expiryDate": "2025-07-05",
+        "documentNumber": "RR0027182"
+      },
+      "never": [
+        "RUE DU TEST",
+        "NÉANT"
+      ]
+    },
+    {
+      "file": "driving-licence-front.jpg",
+      "document": "driving_licence",
+      "side": "document_front",
+      "declaredDocument": "driving_licence",
+      "width": 1280,
+      "height": 807,
+      "variant": "clean",
+      "expected": {
+        "family": "driving_licence",
+        "basis": "keywords",
+        "rotation": 0,
+        "orientation": "landscape",
+        "mrz": null,
+        "qr": false,
+        "subtype": null,
+        "fields": {
+          "surname": "TESTEUR",
+          "givenNames": "PAUL ESSAI",
+          "birthDate": "1992-06-01",
+          "issueDate": "2022-02-14",
+          "expiryDate": "2032-02-13",
+          "documentNumber": "DL0042424"
+        }
+      },
+      "printed": {
+        "surname": "TESTEUR",
+        "givenNames": "PAUL ESSAI",
+        "birthDate": "1992-06-01",
+        "issueDate": "2022-02-14",
+        "expiryDate": "2032-02-13",
+        "documentNumber": "DL0042424"
+      },
+      "never": []
+    },
+    {
+      "file": "driving-licence-front-sideways.jpg",
+      "document": "driving_licence",
+      "side": "document_front",
+      "declaredDocument": "driving_licence",
+      "width": 807,
+      "height": 1280,
+      "variant": "turned a quarter (counter-clockwise)",
+      "expected": {
+        "family": "driving_licence",
+        "basis": "keywords",
+        "rotation": 90,
+        "orientation": "landscape",
+        "mrz": null,
+        "qr": false,
+        "subtype": null,
+        "fields": {
+          "surname": "TESTEUR",
+          "givenNames": "PAUL ESSAI",
+          "birthDate": "1992-06-01",
+          "issueDate": "2022-02-14",
+          "expiryDate": "2032-02-13",
+          "documentNumber": "DL0042424"
+        }
+      },
+      "printed": {
+        "surname": "TESTEUR",
+        "givenNames": "PAUL ESSAI",
+        "birthDate": "1992-06-01",
+        "issueDate": "2022-02-14",
+        "expiryDate": "2032-02-13",
+        "documentNumber": "DL0042424"
+      },
+      "never": []
+    },
+    {
+      "file": "driving-licence-back.jpg",
+      "document": "driving_licence",
+      "side": "document_back",
+      "declaredDocument": "driving_licence",
+      "width": 1280,
+      "height": 807,
+      "variant": "clean",
+      "expected": {
+        "family": "driving_licence",
+        "basis": "keywords",
+        "rotation": 0,
+        "orientation": "landscape",
+        "mrz": null,
+        "qr": false,
+        "subtype": null,
+        "fields": {}
+      },
+      "printed": {},
+      "never": []
+    },
+    {
+      "file": "voter-card-front.jpg",
+      "document": "voter_card",
+      "side": "document_front",
+      "declaredDocument": "voter_card",
+      "width": 1280,
+      "height": 807,
+      "variant": "clean",
+      "expected": {
+        "family": "voter_card",
+        "basis": "keywords",
+        "rotation": 0,
+        "orientation": "landscape",
+        "mrz": null,
+        "qr": false,
+        "subtype": null,
+        "fields": {
+          "surname": "DEMO",
+          "givenNames": "ROSE ESSAI",
+          "birthDate": "1979-08-22",
+          "documentNumber": "VC0012345"
+        }
+      },
+      "printed": {
+        "surname": "DÉMO",
+        "givenNames": "ROSE ESSAI",
+        "birthDate": "1979-08-22",
+        "documentNumber": "VC0012345"
+      },
+      "never": [
+        "ÉCOLE TEST"
+      ]
+    },
+    {
+      "file": "voter-card-back.jpg",
+      "document": "voter_card",
+      "side": "document_back",
+      "declaredDocument": "voter_card",
+      "width": 1280,
+      "height": 807,
+      "variant": "clean",
+      "expected": {
+        "family": "voter_card",
+        "basis": "keywords",
+        "rotation": 0,
+        "orientation": "landscape",
+        "mrz": null,
+        "qr": false,
+        "subtype": null,
+        "fields": {}
+      },
+      "printed": {},
+      "never": [
+        "ESSAI PÈRE",
+        "ESSAI MÈRE",
+        "TESTEUSE",
+        "QUARTIER TEST"
+      ]
+    },
+    {
+      "file": "blank-card.jpg",
+      "document": "blank",
+      "side": "document_front",
+      "declaredDocument": "cni_legacy",
+      "width": 1280,
+      "height": 807,
+      "variant": "a sharp card with nothing printed",
+      "expected": {
+        "family": "unknown",
+        "basis": "none",
+        "rotation": 0,
+        "orientation": null,
+        "mrz": null,
+        "qr": false,
+        "subtype": null,
+        "fields": {},
+        "textLines": 0
+      },
+      "printed": {},
+      "never": []
+    },
+    {
+      "file": "no-document.jpg",
+      "document": "none",
+      "side": "document_front",
+      "declaredDocument": "cni_legacy",
+      "width": 1280,
+      "height": 807,
+      "variant": "the table only",
+      "expected": {
+        "family": "unknown",
+        "basis": "none",
+        "rotation": 0,
+        "orientation": null,
+        "mrz": null,
+        "qr": false,
+        "subtype": null,
+        "fields": {},
+        "documentFound": false,
+        "textLines": 0
+      },
+      "printed": {},
+      "never": []
+    }
+  ]
+}

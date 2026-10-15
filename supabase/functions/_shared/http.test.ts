@@ -1,7 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
 import { MAX_BODY_BYTES } from "./config.ts";
 import { ERROR_CODES } from "./contract.ts";
-import { createRouter, errorResponse, HttpError, isUuid, jsonResponse, readJsonObject, routePath } from "./http.ts";
+import {
+  createRouter,
+  errorResponse,
+  HttpError,
+  isUuid,
+  jsonResponse,
+  parseJsonObject,
+  readBodyBytes,
+  readJsonObject,
+  routePath,
+} from "./http.ts";
 import { ALLOWED_ORIGIN, makeRequest, readJson } from "./test-helpers.ts";
 
 function router(log = { error: vi.fn() }) {
@@ -211,6 +221,46 @@ describe("request bodies", () => {
       code: "bad_request",
     });
     expect(await readJsonObject(new Request("https://x.example", { method: "POST" }), { allowEmpty: true })).toEqual({});
+  });
+});
+
+describe("raw bodies (the worker function verifies a signature over them)", () => {
+  it("reads the exact bytes, up to the given limit", async () => {
+    const bytes = Uint8Array.from([0x7b, 0x7d, 0x0a, 0xc3, 0xa9]);
+    expect(await readBodyBytes(new Request("https://x.example", { method: "POST", body: bytes }), 5)).toEqual(bytes);
+    expect(await readBodyBytes(new Request("https://x.example", { method: "POST" }), 5)).toEqual(new Uint8Array(0));
+    await expect(readBodyBytes(new Request("https://x.example", { method: "POST", body: bytes }), 4)).rejects.toMatchObject({
+      status: 413,
+      code: "bad_request",
+    });
+  });
+
+  it("parses a JSON object from bytes, 400 otherwise", () => {
+    expect(parseJsonObject(new TextEncoder().encode('{"a":1}'))).toEqual({ a: 1 });
+    for (const raw of ["[]", "1", "{nope", ""]) {
+      expect(() => parseJsonObject(new TextEncoder().encode(raw))).toThrow(HttpError);
+    }
+  });
+
+  it("lets a router accept larger bodies than the default", async () => {
+    const handler = createRouter({
+      name: "big",
+      allowedOrigins: new Set(),
+      maxBodyBytes: 32 * 1024,
+      routes: { "/in": { POST: async (req) => jsonResponse(200, { bytes: (await readBodyBytes(req, 32 * 1024)).length }) } },
+    });
+    const ok = await handler(makeRequest("https://fn.example/big/in", {
+      origin: null,
+      rawBody: "x".repeat(20_000),
+      headers: { "content-length": "20000" },
+    }));
+    expect(await readJson(ok)).toEqual({ bytes: 20_000 });
+    const tooBig = await handler(makeRequest("https://fn.example/big/in", {
+      origin: null,
+      rawBody: "{}",
+      headers: { "content-length": String(32 * 1024 + 1) },
+    }));
+    expect(tooBig.status).toBe(413);
   });
 });
 
