@@ -13,6 +13,10 @@ zero** (cleanest provenance). Only if it fails the gates, run 2 **fine-tunes Goo
 
 Nothing here runs in CI or ships by itself. Everything generated goes to `work/` (git-ignored).
 
+**Status (2026-10-15):** run 1 (from zero) failed the gates; run 2 (fine-tuned from `eng`) passed every
+automated gate and ships **for test sessions only** under `/ocr/mrz-2/` (M4). G4, the PM's own photos,
+is still to do; until it passes, every other session keeps Doubango's model. See "Results" below.
+
 ## Quick start (exact commands, 4 vCPU / 8 GB / 10 GB free disk)
 
 Run from the repository root after `npm ci` (Ubuntu 24.04 with
@@ -190,19 +194,42 @@ documents); the 200 benchmark stills took 127 s on their own. In all about 9 min
 iterations the fine-tuned model already read 14 of 20 benchmark documents exactly, with no wrong-but-
 valid read; the model from zero, at 400 iterations, reads nothing yet (as expected).
 
-## Shipping a model that passes
+## Results
 
-1. `gzip`ped integer model to `apps/rider/public/ocr/mrz-2/mrz.traineddata.gz`; in
-   `apps/rider/src/mrz/types.ts` `OCR_ASSETS`: `langPath: "/ocr/mrz-2"`, `cachePath: "ocr-mrz-2"`,
-   `engine: "tesseract.js-7.0.0/mrz-2"` (a new path, so phones never mix the old cached model with the
-   new one).
-2. Notice: our model, Apache-2.0-compatible inputs; a fine-tuned model must also carry the Apache-2.0
-   text with a statement that we changed Google's `eng` weights (`apps/rider/public/ocr/NOTICE.txt`).
-3. `docs/LICENSES.md`: the model's row with its SHA-256 (from `model.json`), the run (`run.json`), the
-   inputs (`inputs.json`), the training log archived with it.
-4. `npx vitest run apps/rider/src/mrz/reader.fixtures.test.ts` with the new model, and G4 on the PM's
-   photos, before switching.
-5. If no model passes, Doubango stays and the outcome is recorded in `docs/M3_SPEC.md`.
+Both full runs, on the 4 vCPU sandbox (2026-10-14/15). Reports: `results/run1-scratch-gates.md` and
+`results/run2-finetune-gates.md` (with their `.json`), the models' `model.json` (sizes, SHA-256, the
+run's settings and the repository commit), and each run's progress log; run 2's full training log is
+`results/run2-finetune-training-log.txt`. The decisions are also recorded in `gates.json` (`results`).
+
+| | Run 1, from zero (`scratch-0.863_22490_139500`) | Run 2, fine-tuned (`finetune-0.428_1526_18300`) | Doubango |
+|---|---|---|---|
+| G1 clean CER, lines exact | 0.036%, 98.83% (**worse than Doubango**) | 0%, 100% | 0.014%, 99.5% |
+| G1 low resolution CER | 0.61% | 0.512% | 0.922% |
+| G1 degraded CER | 3.982% | 3.16% | 5.457% |
+| G2 wrong but valid, the model's own (1,000 documents) | **3** | 0 | — |
+| Wrong but valid made by the correction step (information) | 3 | 3 | 1 in 200 |
+| G3 valid and exact, names line exact | 98.8%, 99.7% | 99.6%, 99.9% | 98% (200 documents) |
+| Repository fixtures | 6/6 | 6/6 | 6/6 |
+| Integer model, gzipped | 354,816 bytes | 1,299,528 bytes | 1,310,573 bytes |
+| Automated gates | **fail** | **pass** | baseline |
+
+## Shipped: run 2, test sessions only (M4)
+
+PM decision (2026-10-15): run 2 ships, for test sessions only, until G4 passes on the PM's photos.
+
+1. The gzipped integer model is `apps/rider/public/ocr/mrz-2/mrz.traineddata.gz` (SHA-256 of the
+   gzipped file `bbcd6a33…cc18`, of the model `575e55e5…747b`, both pinned by
+   `apps/rider/src/mrz/model.test.ts`). `apps/rider/src/mrz/types.ts` `MRZ_MODELS["mrz-2"]`:
+   `langPath: "/ocr/mrz-2"`, `cachePath: "ocr-mrz-2"`, `engine: "tesseract.js-7.0.0/mrz-2"` (a new path,
+   so phones never mix it with the cached Doubango model). `mrzModelFor(isTest)` picks it for test
+   sessions; `GET /flow/session` says `isTest`.
+2. Notice: `apps/rider/public/ocr/NOTICE.txt` section 3b (Apache-2.0, with the statement that we changed
+   Google's `eng` weights; the licence text is section 5).
+3. `docs/LICENSES.md`: the model's row, its provenance and the lawyer's item (eng's training fonts).
+4. `apps/rider/src/mrz/reader.fixtures.test.ts` reads every fixture with both models.
+5. **G4 before it becomes the default:** the PM's own test-session photos, read offline with
+   `node/docbench.ts` (above), valid rate at least Doubango's and zero wrong-but-valid. Then
+   `mrzModelFor` returns `mrz-2` for every session, and Doubango's model can be removed.
 
 ## Licences and provenance
 
