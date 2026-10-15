@@ -169,7 +169,13 @@
     "body": "We're checking that your photos are sharp and readable. This takes a few seconds.",
     "keepOpen": "Keep this page open.",
     "retake": "{{side}}: please take this photo again",
-    "unreadable": "Text unreadable: avoid blur and glare"
+    "unreadable": "Text unreadable: avoid blur and glare",
+    "expired": {
+      "title": "This document has expired",
+      "body": "Please use another, valid ID document.",
+      "another": "Use another document",
+      "continue": "Continue anyway"
+    }
   },
   "done": {
     "title": "Photos received",
@@ -245,6 +251,7 @@
     "attempts": "attempts",
     "mrz": {
       "title": "Code lines (MRZ)",
+      "model": "model",
       "status": "result",
       "format": "format",
       "charHeight": "character height",

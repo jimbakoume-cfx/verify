@@ -434,7 +434,7 @@ describe("reading the code lines (MRZ)", () => {
   };
   function read(status: MrzReadStatus, format: MrzFormat = "TD1"): MrzReadResult {
     const lines = status === "valid" || status === "invalid" ? LINES[format] : null;
-    return { status, format, lines, parsed: null, corrections: 0, ms: 300, rawText: "", charHeight: 18, rotated: false };
+    return { status, format, lines, parsed: null, corrections: 0, ms: 300, rawText: "", charHeight: 18, rotated: false, engine: "tesseract.js-7.0.0/mrz-1" };
   }
 
   function chosen(document: DeclaredDocument): FlowState {
@@ -679,7 +679,7 @@ describe("the server's checks (M3)", () => {
   ];
   function read(status: MrzReadStatus): MrzReadResult {
     const lines = status === "valid" || status === "invalid" ? LINES_TD1 : null;
-    const timing = { corrections: 0, ms: 300, rawText: "", charHeight: 18, rotated: false };
+    const timing = { corrections: 0, ms: 300, rawText: "", charHeight: 18, rotated: false, engine: "tesseract.js-7.0.0/mrz-1" };
     return { status, format: "TD1", lines, parsed: null, ...timing };
   }
 
@@ -719,7 +719,7 @@ describe("the server's checks (M3)", () => {
         reason: state === "no_document" ? "no_document" : retake ? "unreadable" : null,
       };
     });
-    return { done: list.every((side) => side.state !== "pending"), sides: list };
+    return { done: list.every((side) => side.state !== "pending"), sides: list, expired: false };
   }
 
   const retakeFront = { type: "checks/retake", sides: [{ side: "document_front", reason: "no_document" }] } as const;
@@ -974,6 +974,7 @@ describe("the server's checks (M3)", () => {
       const state = checkingCni();
       const odd: FlowChecks = {
         done: true,
+        expired: false,
         sides: [
           { kind: "document_front", captureId: "c", state: "retake", reason: "too_shiny" as never },
           { kind: "document_back", captureId: "d", state: "ok", reason: null },
@@ -991,6 +992,67 @@ describe("the server's checks (M3)", () => {
       );
       const answer = checks({ document_front: "ok", document_back: "retake" });
       expect(checksDecision(passport, answer)).toEqual({ type: "checks/ok" });
+    });
+  });
+
+  describe("an expired document (M4)", () => {
+    const expired = (answer: FlowChecks): FlowChecks => ({ ...answer, expired: true });
+
+    it("is told at once, before any retake, and the waiting stops", () => {
+      const state = checkingCni();
+      expect(checksDecision(state, expired(checks({ document_front: "retake", document_back: "ok" })))).toEqual({
+        type: "checks/expired",
+      });
+      expect(checksDecision(state, expired(checks({ document_front: "pending", document_back: "ok" })))).toEqual({
+        type: "checks/expired",
+      });
+      const shown = run(state, { type: "checks/expired" });
+      expect(shown.screen).toEqual({ name: "checking" });
+      expect(shown.expiredNotice).toBe("shown");
+      // Back does nothing; a second answer changes nothing.
+      expect(run(shown, { type: "nav/back" })).toBe(shown);
+      expect(run(shown, { type: "checks/expired" })).toBe(shown);
+    });
+
+    it("'Continue anyway' goes on as usual and is never asked again for these photos", () => {
+      const accepted = run(checkingCni(), { type: "checks/expired" }, { type: "expired/continue" });
+      expect(accepted).toMatchObject({ screen: { name: "checking" }, expiredNotice: "accepted" });
+      expect(checksDecision(accepted, expired(checks({ document_front: "ok", document_back: "ok" })))).toEqual({
+        type: "checks/ok",
+      });
+      expect(checksDecision(accepted, expired(checks({ document_front: "no_document", document_back: "ok" })))).toEqual(
+        retakeFront,
+      );
+      const submitting = run(accepted, { type: "checks/ok" });
+      expect(submitting.upload).toEqual({ status: "queued", stage: "submit", progress: null });
+    });
+
+    it("'Use another document' goes back to the list, and even the same type starts with new photos", () => {
+      const state = run(checkingCni(), retakeBack);
+      const back = run(state, { type: "turnOver/ready" }, { type: "capture/taken", shot: shot("document_back") }, { type: "review/accept" });
+      const shown = run(send(back), { type: "checks/expired" });
+      const another = run(shown, { type: "expired/another" });
+      expect(another.screen).toEqual({ name: "document" });
+      expect(another).toMatchObject({ document: null, sides: [], shots: {}, uploaded: {}, expiredNotice: "none" });
+      expect(another.upload).toEqual({ status: "idle", stage: "sides", progress: null });
+      // The server's retakes stay counted per side, as the server counts them.
+      expect(another.serverRetakes).toEqual({ document_back: 1 });
+      const same = run(another, { type: "document/chosen", session: withDocument("cni_legacy", ["document_front", "document_back"]) });
+      expect(same.screen).toEqual({ name: "capture", side: "document_front" });
+      expect(same.shots).toEqual({});
+    });
+
+    it("only on the checking screen, and only once shown", () => {
+      expect(run(cniChosen, { type: "checks/expired" })).toBe(cniChosen);
+      const state = checkingCni();
+      expect(run(state, { type: "expired/another" })).toBe(state);
+      expect(run(state, { type: "expired/continue" })).toBe(state);
+    });
+
+    it("never when the server does not say so (or says nothing, as before M4)", () => {
+      const state = checkingCni();
+      const { expired: _omitted, ...older } = checks({ document_front: "ok", document_back: "ok" });
+      expect(checksDecision(state, older as FlowChecks)).toEqual({ type: "checks/ok" });
     });
   });
 

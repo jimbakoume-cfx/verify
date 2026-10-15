@@ -95,7 +95,8 @@ function clampInteger(value: number, min: number, max: number): number {
  */
 export function mrzReport(read: MrzReadResult, attempt: number, captureId: string): MrzReportRequest {
   const { maxAttempts, maxCorrections, maxMs } = MRZ_REPORT_LIMITS;
-  const base = { captureId, attempts: clampInteger(attempt, 1, maxAttempts), engine: OCR_ASSETS.engine };
+  // The model that read (MRZ_MODELS): test sessions read with our own, so the server records which.
+  const base = { captureId, attempts: clampInteger(attempt, 1, maxAttempts), engine: read.engine || OCR_ASSETS.engine };
   if (read.lines && (read.status === "valid" || read.status === "invalid")) {
     return {
       ...base,

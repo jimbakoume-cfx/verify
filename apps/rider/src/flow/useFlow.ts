@@ -16,7 +16,7 @@ import {
   type FlowSession,
 } from "@verify/shared";
 import { createLazyMrzReader, unavailableRead } from "../mrz/lazyReader";
-import type { MrzReader } from "../mrz/types";
+import { type MrzModel, type MrzReader, mrzModelFor } from "../mrz/types";
 import { type FlowApi, createFlowApi } from "./api";
 import { type ChecksTiming, waitForChecks } from "./checks";
 import { isTransient, toFlowError } from "./errors";
@@ -55,6 +55,10 @@ export interface FlowActions {
   useShot(): void;
   turnOverReady(): void;
   retryUpload(): void;
+  /** M4, the document has expired: back to the document list. */
+  chooseAnotherDocument(): void;
+  /** M4, the document has expired: go on with it (staff see the flag). */
+  continueExpired(): void;
 }
 
 export interface Boot {
@@ -131,12 +135,26 @@ export function useFlow(boot: Boot, options: FlowOptions = {}): { state: FlowSta
   );
 
   // One MRZ reader for the visit: its engine and model are downloaded once (about 2.8 MB the first
-  // time, then cached by the browser), and stopped when the app goes away.
-  const readerRef = useRef<MrzReader | null>(null);
-  const reader = useCallback(() => (readerRef.current ??= createLazyMrzReader()), []);
+  // time, then cached by the browser), and stopped when the app goes away. Test sessions read with
+  // our own model (M4); the session is known before any document is chosen, so the reader is made
+  // with the right one (a change of session, which never happens in one visit, would make a new one).
+  const model = mrzModelFor(state.session?.isTest === true);
+  const modelRef = useRef<MrzModel>(model);
+  useEffect(() => {
+    modelRef.current = model;
+  });
+  const readerRef = useRef<{ model: MrzModel; reader: MrzReader } | null>(null);
+  const reader = useCallback(() => {
+    const wanted = modelRef.current;
+    if (readerRef.current?.model !== wanted) {
+      readerRef.current?.reader.dispose();
+      readerRef.current = { model: wanted, reader: createLazyMrzReader(undefined, undefined, wanted) };
+    }
+    return readerRef.current.reader;
+  }, []);
   useEffect(
     () => () => {
-      readerRef.current?.dispose();
+      readerRef.current?.reader.dispose();
       readerRef.current = null;
     },
     [],
@@ -163,14 +181,15 @@ export function useFlow(boot: Boot, options: FlowOptions = {}): { state: FlowSta
     const shot = readingShot;
     const controller = new AbortController();
     let settled = false;
+    const engine = modelRef.current.engine;
     const read = shot.gray
       ? reader().read(shot.gray, expectation, {
           signal: controller.signal,
           onProgress: (progress) => dispatch({ type: "mrz/progress", shot, progress }),
         })
-      : Promise.resolve(unavailableRead(expectation.format));
+      : Promise.resolve(unavailableRead(expectation.format, engine));
     void read
-      .catch(() => unavailableRead(expectation.format))
+      .catch(() => unavailableRead(expectation.format, engine))
       .then((result) => {
         settled = true;
         if (!controller.signal.aborted) dispatch({ type: "mrz/read", shot, result });
@@ -269,10 +288,13 @@ export function useFlow(boot: Boot, options: FlowOptions = {}): { state: FlowSta
   // The checking screen asks for the server's checks until they are settled or the time is up, then
   // submits or sends the rider back to the camera. Leaving the screen stops the wait. A ring that
   // never came, a server that is down or an error: the photos go as they are, with no error shown.
+  // M4: while the rider decides about an expired document, nothing is asked; "Continue anyway"
+  // starts a new wait.
   const waitMs = options.checks?.waitMs;
   const pollMs = options.checks?.pollMs;
+  const waiting = checking && state.expiredNotice !== "shown";
   useEffect(() => {
-    if (!checking || !api) return;
+    if (!waiting || !api) return;
     const controller = new AbortController();
     void waitForChecks({
       getChecks: (signal) => api.getChecks(signal),
@@ -284,7 +306,7 @@ export function useFlow(boot: Boot, options: FlowOptions = {}): { state: FlowSta
       dispatch(result.type === "decided" ? result.decision : { type: "checks/timeout" });
     });
     return () => controller.abort();
-  }, [checking, api, waitMs, pollMs]);
+  }, [waiting, api, waitMs, pollMs]);
 
   const actions = useMemo<FlowActions>(() => {
     const language = () => (isSupportedLanguage(i18n.language) ? i18n.language : DEFAULT_LANGUAGE);
@@ -316,6 +338,8 @@ export function useFlow(boot: Boot, options: FlowOptions = {}): { state: FlowSta
       useShot: () => dispatch({ type: "review/accept" }),
       turnOverReady: () => dispatch({ type: "turnOver/ready" }),
       retryUpload: () => dispatch({ type: "upload/retry" }),
+      chooseAnotherDocument: () => dispatch({ type: "expired/another" }),
+      continueExpired: () => dispatch({ type: "expired/continue" }),
     };
   }, [i18n, loadSession, request]);
 

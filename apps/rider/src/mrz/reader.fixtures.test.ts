@@ -1,4 +1,4 @@
-// The whole reading pipeline with the REAL OCR engine (tesseract.js 7 and the committed model) on
+// The whole reading pipeline with the REAL OCR engine (tesseract.js 7 and each committed model) on
 // the committed fixtures (scripts/make-mrz-fixtures.py): decode the still, locate, prepare, encode
 // as PGM, OCR, correct, parse. The phone runs the same path; only the worker and core files come
 // from node_modules instead of /ocr/. Catches regressions in the model, the engine or the pipeline.
@@ -7,6 +7,7 @@ import { MRZ_EXPECTATION, type MrzExpectation, type MrzFormat } from "@verify/sh
 import { afterAll, describe, expect, it } from "vitest";
 import { createOcrEngine } from "./ocrEngine";
 import { createMrzReader } from "./reader";
+import { MRZ_MODELS, type MrzModel } from "./types";
 
 // The rider app is typed for the browser (no Node types): Node's fs is imported by a non-literal
 // name and given the one function used here.
@@ -17,7 +18,7 @@ const nodeFs = "node:fs";
 const { readFileSync } = (await import(/* @vite-ignore */ nodeFs)) as NodeFs;
 
 const FIXTURES = new URL("../../../../e2e/fixtures/mrz/", import.meta.url);
-const MODEL_DIR = decodeURIComponent(new URL("../../public/ocr/mrz-1", import.meta.url).pathname);
+const modelDir = (model: MrzModel) => decodeURIComponent(new URL(`../../public${model.langPath}`, import.meta.url).pathname);
 
 interface Manifest {
   documents: Record<string, { format: MrzFormat; lines: string[] }>;
@@ -31,27 +32,30 @@ const expectation: Record<MrzFormat, MrzExpectation> = {
   TD3: MRZ_EXPECTATION.passport as MrzExpectation,
 };
 
-// Node: tesseract.js uses its own Node worker and the core from node_modules; the model is read
-// from the folder the site serves it from, never cached.
-const reader = createMrzReader({
-  engine: createOcrEngine({
-    workerPath: undefined,
-    corePath: undefined,
-    langPath: MODEL_DIR,
-    cacheMethod: "none",
-    isSupported: () => true,
-  }),
-});
+// Doubango's model (every session) and our own (test sessions, M4): both must read every fixture.
+describe.each(Object.entries(MRZ_MODELS))("reading the fixtures with the real OCR engine and %s", (_id, model) => {
+  // Node: tesseract.js uses its own Node worker and the core from node_modules; the model is read
+  // from the folder the site serves it from, never cached.
+  const reader = createMrzReader({
+    model,
+    engine: createOcrEngine({
+      workerPath: undefined,
+      corePath: undefined,
+      langPath: modelDir(model),
+      cacheMethod: "none",
+      isSupported: () => true,
+    }),
+  });
 
-afterAll(() => reader.dispose());
+  afterAll(() => reader.dispose());
 
-describe("reading the fixtures with the real OCR engine", () => {
   for (const still of manifest.stills) {
     it(`${still.file}: ${still.expect === "valid" ? "reads every line exactly" : "is not read as valid"}`, { timeout: 60_000 }, async () => {
       const result = await reader.read(load(still.file), expectation[still.format]);
       if (still.expect === "valid") {
         expect(result.rawText).not.toBe("");
         expect(result.status).toBe("valid");
+        expect(result.engine).toBe(model.engine);
         expect(result.lines).toEqual(manifest.documents[still.document].lines);
         expect(result.parsed?.valid).toBe(true);
         expect(result.rotated).toBe(false);

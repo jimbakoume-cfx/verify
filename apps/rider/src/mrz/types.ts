@@ -4,21 +4,43 @@
 import type { GrayImage } from "@verify/capture";
 import type { MrzExpectation, MrzFormat, ParsedMrz } from "@verify/shared";
 
+/** A reading model: a `<language>.traineddata.gz` in its own versioned folder. */
+export interface MrzModel {
+  /** Folder of the model, served under /ocr/. */
+  langPath: string;
+  /** IndexedDB key prefix for the cached model: a new model needs a new prefix. */
+  cachePath: string;
+  /** Sent to the server with each report (MrzReadReport.engine) and shown in the debug panel. */
+  engine: string;
+}
+
+/**
+ * The reading models. mrz-1: DoubangoTelecom's (BSD-3-Clause; trained by its authors on images from
+ * the web), for every session. mrz-2: our own (M3 training, run 2, fine-tuned from Google's eng),
+ * which passed the automated gates; for test sessions only until the PM's own photos (G4) pass.
+ */
+export const MRZ_MODELS = {
+  "mrz-1": { langPath: "/ocr/mrz-1", cachePath: "ocr-mrz-1", engine: "tesseract.js-7.0.0/mrz-1" },
+  "mrz-2": { langPath: "/ocr/mrz-2", cachePath: "ocr-mrz-2", engine: "tesseract.js-7.0.0/mrz-2" },
+} as const satisfies Record<string, MrzModel>;
+
+/** Test sessions read with our own model (PM, 2026-10-15); every other session with Doubango's. */
+export function mrzModelFor(isTest: boolean): MrzModel {
+  return MRZ_MODELS[isTest ? "mrz-2" : "mrz-1"];
+}
+
 /**
  * Self-hosted OCR files. The engine files are emitted from node_modules by the Vite plugin in
- * vite.config.ts; the model is committed under public/ocr/mrz-1. Paths are versioned, so they can be
- * cached forever; change the folder (and `cachePath`) whenever a file changes.
+ * vite.config.ts; the models are committed under public/ocr/mrz-<n>. Paths are versioned, so they can
+ * be cached forever; change the folder (and `cachePath`) whenever a file changes. The model fields
+ * here are the default model's (real sessions).
  */
 export const OCR_ASSETS = {
   workerPath: "/ocr/7.0.0/worker.min.js",
   /** Folder: tesseract.js picks the *-lstm.wasm.js variant the browser supports. */
   corePath: "/ocr/7.0.0",
-  langPath: "/ocr/mrz-1",
   language: "mrz",
-  /** IndexedDB key prefix for the cached model: a new model needs a new prefix. */
-  cachePath: "ocr-mrz-1",
-  /** Sent to the server with each report (MrzReadReport.engine). */
-  engine: "tesseract.js-7.0.0/mrz-1",
+  ...MRZ_MODELS["mrz-1"],
 } as const;
 
 /**
@@ -47,6 +69,8 @@ export interface MrzReadResult {
   charHeight: number | null;
   /** True when the MRZ was only found after turning the image 180 degrees. */
   rotated: boolean;
+  /** The engine and model that read (MrzModel.engine): reported to the server, shown in debug mode. */
+  engine: string;
 }
 
 export interface MrzReadOptions {

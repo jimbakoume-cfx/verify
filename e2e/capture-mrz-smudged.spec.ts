@@ -2,7 +2,7 @@
 // lines: the photo is fine, the lines cannot be read. PM rule: tips and Retake; after 3 failed tries
 // "Continue anyway" appears, and the case is flagged for staff.
 import { MRZ_TRIES_BEFORE_OVERRIDE } from "../supabase/functions/_shared/contract";
-import { OCR_ASSETS } from "../apps/rider/src/mrz/types";
+import { OCR_ASSETS, mrzModelFor } from "../apps/rider/src/mrz/types";
 import { NEW_CNI_FLOW } from "./support/expectations";
 import { expect, test } from "./support/fixtures";
 
@@ -49,7 +49,7 @@ test("smudged code lines: tips and Retake, then 'Continue anyway' after 3 tries,
   const backCapture = backend.captures.find((c) => c.kind === "document_back")!;
   expect(backend.mrzReports).toHaveLength(1);
   const [report] = backend.mrzReports;
-  expect(report.body).toMatchObject({ captureId: backCapture.captureId, attempts: MRZ_TRIES_BEFORE_OVERRIDE, engine: OCR_ASSETS.engine });
+  expect(report.body).toMatchObject({ captureId: backCapture.captureId, attempts: MRZ_TRIES_BEFORE_OVERRIDE, engine: mrzModelFor(true).engine });
   // Whatever the reader made of the smear (no complete lines, or lines failing their check digits),
   // the server flags the case for staff.
   if (report.body.result === "unreadable") {
