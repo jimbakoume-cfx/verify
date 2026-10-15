@@ -346,6 +346,8 @@ The recognised family says whether the card is a new CNI (Cameroonian holder) or
 ## Our own MRZ model (`training/mrz/`)
 **Status: the training pipeline is built and smoke-tested from start to finish. The full run (about 6.5 hours) has not been launched yet, so no candidate model exists. Doubango stays on the phone.**
 
+**Update (M4, 2026-10-15):** both runs were made. Run 1 (from zero) failed the gates; run 2 (fine-tuned) passed every automated gate and now reads test sessions (`/ocr/mrz-2/`). Results: `training/mrz/README.md` ("Results") and `docs/M4_SPEC.md`.
+
 - **Recipe** (`training/mrz/README.md`, one command per stage, resumable): Tesseract's own training tools (tesstrain), the same engine the phone already runs, so a new model is just a new file under a new path (`/ocr/mrz-2/`). Every input is pinned with its SHA-256 (`inputs.json`).
 - **Training data, all fictitious:** 80,000 lines.
   - Half come from whole document photos we draw, passed through the rider's own locate and prepare steps, then cut where Tesseract itself cuts each line. This targets the research's main failure (the first character of a line).
