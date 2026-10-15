@@ -1,23 +1,53 @@
 // Supabase implementation of WorkerRepo, CaseStore and ImageStorage (service role).
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { CAPTURE_SIDES, DECLARED_DOCUMENTS } from "../_shared/contract.ts";
+import { CAPTURE_SIDES, DECLARED_DOCUMENTS, type WorkerFields } from "../_shared/contract.ts";
 import { ID_CAPTURES_BUCKET } from "../_shared/config.ts";
 import { dbError, insertAudit } from "../_shared/db.ts";
 import { isOneOf, isPlainObject, isUuid } from "../_shared/http.ts";
 import { InternalError } from "../_shared/log.ts";
+import { detectMrzFormat } from "../_shared/mrz.ts";
 import type { CaseSnapshot, CaseStore, JobStatus, SnapshotJob } from "./case.ts";
-import { type CaseSide, parseEvidence } from "./decide.ts";
+import type { SideDocumentData } from "./consistency.ts";
+import { type CaseSide, parseEvidence, WORKER_FIELD_NAMES } from "./decide.ts";
 import type { ClaimedJob, ImageLookup, ImageStorage, NonceResult, RecordResult, WorkerRepo } from "./handler.ts";
 
 const JOB_STATUSES: readonly JobStatus[] = ["pending", "claimed", "done", "failed", "superseded"];
 const FINGERPRINT_RE = /^[0-9a-f]{32}$/;
+/** Printed fields as the worker sends them (printable ASCII, at most 80 characters). */
+const FIELD_VALUE_RE = /^[\x20-\x7e]{1,80}$/;
+
+/**
+ * One photo's decrypted values (M4), checked field by field: code lines of a real format, printed
+ * fields of known names only (never the sub-type). Null when malformed. The values are never put in
+ * an error message.
+ */
+function parseDocumentData(value: unknown): SideDocumentData | null {
+  if (!isPlainObject(value) || !isUuid(value.captureId) || !isOneOf(CAPTURE_SIDES, value.kind)) return null;
+  let mrzLines: string[] | null = null;
+  if (value.mrzLines !== null) {
+    if (typeof value.mrzLines !== "string") return null;
+    mrzLines = value.mrzLines.split("\n");
+    if (detectMrzFormat(mrzLines) === null) return null;
+  }
+  let fields: WorkerFields | null = null;
+  if (value.fields !== null) {
+    if (!isPlainObject(value.fields)) return null;
+    fields = {};
+    for (const [key, field] of Object.entries(value.fields)) {
+      if (key === "subtype" || !(WORKER_FIELD_NAMES as readonly string[]).includes(key)) return null;
+      if (typeof field !== "string" || !FIELD_VALUE_RE.test(field)) return null;
+      fields[key as keyof WorkerFields] = field;
+    }
+  }
+  return { kind: value.kind, captureId: value.captureId, mrzLines, fields };
+}
 
 /** worker_case_snapshot's JSON, checked field by field; anything unexpected is a bug, not data. */
 export function parseSnapshot(data: unknown): CaseSnapshot | null {
   if (data === null) return null;
   const fail = () => new InternalError("rpc.worker_case_snapshot returned an unexpected value");
   if (!isPlainObject(data)) throw fail();
-  const { verificationId, declaredDocument, fingerprint, sides, job } = data;
+  const { verificationId, declaredDocument, fingerprint, sides, job, documentData } = data;
   if (!isUuid(verificationId) || typeof fingerprint !== "string" || !FINGERPRINT_RE.test(fingerprint)) throw fail();
   if (declaredDocument !== null && !isOneOf(DECLARED_DOCUMENTS, declaredDocument)) throw fail();
   if (!Array.isArray(sides)) throw fail();
@@ -26,6 +56,12 @@ export function parseSnapshot(data: unknown): CaseSnapshot | null {
     const evidence = side.evidence === null ? null : parseEvidence(side.evidence);
     if (side.evidence !== null && evidence === null) throw fail();
     return { kind: side.kind, captureId: side.captureId, evidence };
+  });
+  if (!Array.isArray(documentData)) throw fail();
+  const parsedData = documentData.map((item: unknown) => {
+    const parsed = parseDocumentData(item);
+    if (!parsed) throw fail();
+    return parsed;
   });
   let parsedJob: SnapshotJob | null = null;
   if (job !== null) {
@@ -45,7 +81,7 @@ export function parseSnapshot(data: unknown): CaseSnapshot | null {
       captureLive: job.captureLive,
     };
   }
-  return { verificationId, declaredDocument, sides: parsedSides, fingerprint, job: parsedJob };
+  return { verificationId, declaredDocument, sides: parsedSides, documentData: parsedData, fingerprint, job: parsedJob };
 }
 
 export function createWorkerRepo(db: SupabaseClient): WorkerRepo {

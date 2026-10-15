@@ -1,6 +1,6 @@
 // Supabase implementation of FlowRepo and CaptureStorage (service role).
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { CaptureSide, DeclaredDocument, FlowStatus } from "../_shared/contract.ts";
+import { type CaptureSide, type DeclaredDocument, type FlowStatus, SERVER_CHECK_NAMES } from "../_shared/contract.ts";
 import { ID_CAPTURES_BUCKET } from "../_shared/config.ts";
 import { dbError, insertAudit } from "../_shared/db.ts";
 import { InternalError } from "../_shared/log.ts";
@@ -223,6 +223,16 @@ export function createFlowRepo(db: SupabaseClient): FlowRepo {
         qualityVerdict: row.quality_verdict,
         phoneMrzPass: row.phone_mrz_pass,
       }));
+    },
+
+    async consistencyFlags(verificationId) {
+      // Generic codes only (check_result.details of the case-level consistency check, M4).
+      const { data, error } = await db.from("check_result").select("details")
+        .eq("verification_id", verificationId).is("capture_id", null).eq("check_name", SERVER_CHECK_NAMES.consistency)
+        .maybeSingle<{ details: { flags?: unknown } | null }>();
+      if (error) throw dbError("check_result.consistency", error);
+      const flags = data?.details?.flags;
+      return Array.isArray(flags) ? flags.filter((flag): flag is string => typeof flag === "string") : [];
     },
 
     async workerEnabledForRealSessions() {

@@ -41,6 +41,7 @@ describe("flowChecks: the state of one side", () => {
     expect(flowChecks(["document_front"], [newest])).toEqual({
       done: state !== "pending",
       sides: [{ kind: "document_front", captureId: newest.captureId, state, reason }],
+      expired: false,
     });
   });
 });
@@ -57,6 +58,7 @@ describe("flowChecks: the case", () => {
         { kind: "document_front", captureId: front.captureId, state: "pending", reason: null },
         { kind: "document_back", captureId: back.captureId, state: "ok", reason: null },
       ],
+      expired: false,
     });
   });
 
@@ -86,5 +88,44 @@ describe("flowChecks: the case", () => {
     const front = row({ jobStatus: "done", qualityVerdict: "no_document" });
     const back = row({ kind: "document_back", jobStatus: "failed", jobError: "budget" });
     expect(flowChecks(["document_front", "document_back"], [front, back])?.done).toBe(true);
+  });
+});
+
+describe("flowChecks: an expired document (M4)", () => {
+  const backSide = { mrzSide: "document_back" as const };
+
+  it("says expired once the side with the code lines is checked and the case is flagged", () => {
+    const front = row({ jobStatus: "claimed" });
+    const back = row({ kind: "document_back", jobStatus: "done", qualityVerdict: "ok" });
+    // Told at once, even while the other side is still being checked.
+    expect(flowChecks(["document_front", "document_back"], [front, back], { expiredFlag: true, ...backSide }))
+      .toMatchObject({ done: false, expired: true });
+  });
+
+  it.each<[string, Partial<CheckStateRow>]>([
+    ["still pending", { jobStatus: "pending" }],
+    ["being processed", { jobStatus: "claimed" }],
+    ["given up (unchecked)", { jobStatus: "failed", jobError: "budget" }],
+    ["never sent (no job)", { jobStatus: null }],
+  ])("never while that side is %s: the flag would be an earlier photo's", (_label, overrides) => {
+    const front = row({ jobStatus: "done", qualityVerdict: "ok" });
+    const back = row({ kind: "document_back", ...overrides });
+    expect(flowChecks(["document_front", "document_back"], [front, back], { expiredFlag: true, ...backSide })?.expired).toBe(false);
+  });
+
+  it("never without the flag, nor for a document without code lines", () => {
+    const front = row({ jobStatus: "done", qualityVerdict: "ok" });
+    const back = row({ kind: "document_back", jobStatus: "done", qualityVerdict: "ok" });
+    expect(flowChecks(["document_front", "document_back"], [front, back], { expiredFlag: false, ...backSide })?.expired).toBe(false);
+    expect(flowChecks(["document_front", "document_back"], [front, back], { expiredFlag: true, mrzSide: null })?.expired).toBe(false);
+    expect(flowChecks(["document_front", "document_back"], [front, back])?.expired).toBe(false);
+  });
+
+  it("follows a passport's photo page", () => {
+    const page = row({ jobStatus: "done", qualityVerdict: "ok" });
+    expect(flowChecks(["document_front"], [page], { expiredFlag: true, mrzSide: "document_front" })).toMatchObject({
+      done: true,
+      expired: true,
+    });
   });
 });
