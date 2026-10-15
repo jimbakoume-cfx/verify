@@ -78,7 +78,7 @@ Confiance ride app/backend ──(API key)──► Supabase Edge Function "sess
 | Hosting of web pages | Netlify (a hosting service, not a library) | Commercial service; terms checked for production |
 | Web pages | React, TypeScript, Vite, i18next, supabase-js | MIT, Apache-2.0, MIT, MIT, MIT |
 | MRZ parsing and check digits | **Written by us** in TypeScript, following ICAO 9303. The same code runs on the phone (instant feedback) and on the server (the authoritative check). | Ours. The popular `mrz` library is GPL, so we avoid it |
-| MRZ reading on the phone (since M2) | tesseract.js 7 with DoubangoTelecom's MRZ model, until our own model (trained in M3 on fictitious renders only) passes its gates | Apache-2.0 (engine); BSD-3-Clause (model, checked 2026-10-13; trained by its authors on images collected from the web, see `LICENSES.md`) |
+| MRZ reading on the phone (since M2) | tesseract.js 7 with DoubangoTelecom's MRZ model; since M4, test sessions read with our own model (trained in M3 on fictitious renders only, fine-tuned from Google's `eng`), which passed its automated gates and awaits G4 | Apache-2.0 (engine); BSD-3-Clause (Doubango's model, checked 2026-10-13; trained by its authors on images collected from the web); Apache-2.0 (our model, derived from `eng`); see `LICENSES.md` |
 | AI worker (M3) | Python 3.12 on Vercel, headless OpenCV, NumPy, Pillow, ONNX Runtime, cryptography (Ed25519) | PSF, Apache-2.0 (OpenCV; its wheel bundles LGPL and other parts, documented), BSD-3 and others, MIT-CMU, MIT, Apache-2.0 / BSD-3 |
 | OCR, printed text FR/EN, and the server's re-read of the code lines (M3) | RapidOCR 3.9.2 with the PP-OCRv6 "small" models (no Tesseract on the server: its packages bring GPL code) | Apache-2.0 (code and models) |
 | Face detection | OpenCV YuNet | MIT |
@@ -114,7 +114,7 @@ Confiance ride app/backend ──(API key)──► Supabase Edge Function "sess
 - `consent_record`: consent text version, language, time, device.
 - `capture`: front/back/liveness, storage path, quality metrics, sha256.
 - `liveness_challenge`: actions, one-time code, expiry.
-- `check_result`: check name and version, score, pass/flag/fail, details (outcomes and counts only, never personal data). Since M2, tied to the photo it ran on.
+- `check_result`: check name and version, score, pass/flag/fail, details (outcomes and counts only, never personal data). Since M2, tied to the photo it ran on. Since M4, a case-level `consistency` check (generic codes: which flags, which kinds of field disagree, never a value).
 - `extracted_document_data`: sensitive fields encrypted; records whether each field came from MRZ or OCR. Since M2: the MRZ lines read on the phone (`source` = `mrz_phone`), encrypted inside the database with a key kept in Supabase Vault. Since M3: the code lines read by the server (`mrz_server`) and the printed fields it read, including the card sub-type (`ocr_server`), under the same key.
 - Since M3: `worker_job` (one per document photo: the AI worker's queue), `worker_key` (the worker's public keys), `worker_nonce` (replay guard) and `worker_settings` (the test-only switch and the daily job cap). Only the Edge Functions can reach them.
 - `review_task`: priority, assignee, status, timing.
@@ -141,7 +141,7 @@ The exact routes, request and response types, limits and error codes of the impl
 ### API 2: Rider web flow → Verify (single-use session token)
 - Since M1: `GET /flow/session` · `POST /flow/consent` · `POST /flow/document-type` · `POST /flow/upload-url` (a one-time upload link to private storage) · `POST /flow/captures {path, kind, quality}` (the server checks the uploaded image) · `POST /flow/submit`.
 - Since M2: `POST /flow/mrz` (what the phone read from the code lines; the server recomputes every check digit).
-- Since M3: `GET /flow/checks` (the server's check of each photo: pending, ok, retake with a reason, or unchecked; the rider waits for it for at most 20 seconds).
+- Since M3: `GET /flow/checks` (the server's check of each photo: pending, ok, retake with a reason, or unchecked; the rider waits for it for at most 20 seconds). Since M4 it also says when the code lines show an expired document.
 - Planned: `POST /flow/liveness/challenge` (M5) · `GET /flow/status` (result, reason, retries left; M10) · `POST /flow/appeal` (M10).
 
 ### API 3: Ops dashboard → Verify (Supabase Auth with 2FA required; enforced by role)
@@ -173,7 +173,7 @@ Each milestone ends with a Netlify link and short test steps. The flow has a "de
 | **M1** | **ID capture.** Live camera with a card frame, blur/glare/framing hints, auto-capture, crop and compression (target under 300 KB). Upload straight to private Supabase storage. Front and back. | Capture your ID in good and bad light; bad photos are refused with a clear hint. The image appears in the (temporary) admin debug page. |
 | **M2** | **MRZ reading.** Read the MRZ on the phone, parse passport (TD3) and the new CNI (2025, TD1), validate check digits on the phone and again on the server. The old CNI has no MRZ. | Scan your passport or new CNI with the debug link: fields shown with ✅/❌ for each check digit; the dashboard shows the server's own check and "Show data read" |
 | **M3** | **AI worker goes live (Q8).** On test sessions, the server re-checks each photo's quality (an unusable photo is retaken at once, at most once per side), re-reads the MRZ from the image and compares it with the phone's, recognises the document (firm from code lines, provisional from printed words) and reads a few printed fields. Our own MRZ model's training pipeline and gates. | Scan each document type with a test session: correct type, the server's code lines agree with the phone's, the fields behind "Show data read"; a blank card is sent back once (`M3_SPEC.md`) |
-| M4 | Consistency checks and first risk flags | Try an expired ID, and a test card whose printed data does not match its MRZ |
+| **M4** | **Consistency checks and first risk flags.** On test sessions the server compares the printed fields with the code lines (tolerantly), checks the dates against each other and against today, and flags an expired document (the rider is told at once and may use another document), a holder under 18 and a printed field that disagrees. Our own MRZ model reads test sessions. | Try an expired ID, and a test card whose printed data does not match its MRZ (`M4_SPEC.md`) |
 | M5 | Active liveness capture: random challenge, frames uploaded | A new challenge appears each time |
 | M6 | Server-side liveness evaluation + passive anti-spoofing | A printed photo or a phone screen held to the camera is flagged |
 | M7 | Face match between selfie and ID portrait | Your selfie vs your ID matches; a colleague's does not |
@@ -212,6 +212,15 @@ Details: `docs/M2_SPEC.md`.
 6. **OpenCV's bundled parts** (LGPL FFmpeg and libquadmath, Intel IPP, the GCC runtime with its exception, an unused out-of-support OpenSSL, and others) are accepted as documented exceptions (`LICENSES.md`). A slim OpenCV build that removes them comes before the pilot.
 
 Details: `docs/M3_SPEC.md`.
+
+### Decisions for M4 (2026-10-15)
+1. **Expired document: the rider is told at once.** The server reads the expiry date from the code lines, or else from the printed expiry date (provisional). When the code lines say it (every check digit right), "Checking your photos…" tells the rider to use another, valid document, with "Use another document" (back to the document list) and "Continue anyway". Continuing leaves the hard flag `document_expired` for staff. An expiry read from print only is a provisional note for staff: the rider is told nothing. "Today" is the date in Douala.
+2. **Under 18** (birth date from the code lines, else printed): the hard flag `under_18`, staff review, never approved automatically. The rider sees nothing special.
+3. **Printed fields vs code lines, compared tolerantly:** accents, case, spaces, hyphens and apostrophes ignored; the code lines' truncated names allowed; OCR look-alikes (0/O, 1/I, 5/S, 8/B, 2/Z) in numbers; dates compared as dates whatever their format. A real disagreement is the flag `mrz_print_mismatch`, with the kinds of field (`name`, `number`, `birth_date`, `expiry_date`). Never a rider message.
+4. **Date logic and number formats:** birth before issue before expiry, issue not in the future, at most 15 years of validity (named constants) → `date_logic`; the number's format per document type, guessed until real cards are seen → `number_format`, recorded as provisional only. Everything that depends on printed formats stays provisional, as in M3, except decisions 2 and 3.
+5. **Our own MRZ model ships for test sessions only** (`/ocr/mrz-2/`): run 2 (fine-tuned from Google's `eng`, Apache-2.0) passed every automated gate; run 1 (from zero) did not. Doubango stays for every other session until G4 (the PM's own photos). `eng`'s training fonts (mostly commercial) are on the lawyer's list. The debug panel and the server's records name the model that read.
+
+Details: `docs/M4_SPEC.md`.
 
 **Supabase setup.** I can create the Supabase project and apply database changes directly through the connected Supabase tools. **I will ask before creating anything that costs money.** Netlify sites deploy automatically from GitHub.
 
