@@ -2,11 +2,14 @@
 // Rows are typed `unknown` because there are no generated database types; nothing is trusted blindly.
 import {
   type ClassificationDetails,
+  CONSISTENCY_FLAGS,
+  type ConsistencyDetails,
   DECLARED_DOCUMENTS,
   type DeclaredDocument,
   DETECTED_DOCUMENT_TYPES,
   type DocumentPolicyDetails,
   type FlowStatus,
+  MISMATCH_KINDS,
   MRZ_CHECK_NAME,
   MRZ_FORMATS,
   type MrzCheckDetails,
@@ -105,6 +108,8 @@ export interface ServerChecks {
   classification: CheckRecord<ClassificationDetails> | null;
   /** Null while there is neither a classification nor a reason. */
   policy: CheckRecord<DocumentPolicyDetails> | null;
+  /** M4: the document compared with itself and with today's date; null until a photo has a result. */
+  consistency: CheckRecord<ConsistencyDetails> | null;
   /**
    * The state of each photo's job, by capture id (worker_job: staff may read its status only). A
    * document photo with no entry has no job: it was taken before the server checks existed.
@@ -413,6 +418,26 @@ export function toClassificationDetails(value: unknown): ClassificationDetails |
   };
 }
 
+const CONSISTENCY_BASES: readonly ConsistencyDetails["basis"][] = ["mrz", "printed", "none"];
+
+/**
+ * The consistency check's details (M4): known codes only, once each, in the contract's order. Field by
+ * field: anything else a row may carry, a value read from a document above all, never gets through.
+ */
+export function toConsistencyDetails(value: unknown): ConsistencyDetails | null {
+  const d = asRow(value);
+  const { flags, provisional, mismatches } = d ?? {};
+  if (!d || !Array.isArray(flags) || !Array.isArray(provisional) || !Array.isArray(mismatches) || !isOneOf(CONSISTENCY_BASES, d.basis)) {
+    return null;
+  }
+  return {
+    flags: CONSISTENCY_FLAGS.filter((code) => flags.includes(code)),
+    provisional: CONSISTENCY_FLAGS.filter((code) => provisional.includes(code)),
+    basis: d.basis,
+    mismatches: MISMATCH_KINDS.filter((kind) => mismatches.includes(kind)),
+  };
+}
+
 /** The known reasons, once each, in the contract's order. An unknown one still shows as the "flag" outcome. */
 export function toDocumentPolicyDetails(value: unknown): DocumentPolicyDetails | null {
   const d = asRow(value);
@@ -430,7 +455,15 @@ function newer<T extends { createdAt: string }>(current: T | null, candidate: T)
  * have none, as the database writes them; anything else is left out.
  */
 export function toServerChecks(rows: readonly unknown[], jobRows: readonly unknown[] = []): ServerChecks {
-  const out: ServerChecks = { quality: [], mrz: [], fields: [], classification: null, policy: null, jobs: toServerJobs(jobRows) };
+  const out: ServerChecks = {
+    quality: [],
+    mrz: [],
+    fields: [],
+    classification: null,
+    policy: null,
+    consistency: null,
+    jobs: toServerJobs(jobRows),
+  };
   for (const value of rows) {
     const row = toCheckRow(value);
     if (!row) continue;
@@ -451,6 +484,9 @@ export function toServerChecks(rows: readonly unknown[], jobRows: readonly unkno
         break;
       case SERVER_CHECK_NAMES.policy:
         if (!perPhoto) out.policy = newer(out.policy, { ...check, details: toDocumentPolicyDetails(details) });
+        break;
+      case SERVER_CHECK_NAMES.consistency:
+        if (!perPhoto) out.consistency = newer(out.consistency, { ...check, details: toConsistencyDetails(details) });
         break;
     }
   }

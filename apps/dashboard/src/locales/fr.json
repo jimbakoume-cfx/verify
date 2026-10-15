@@ -201,7 +201,12 @@
         "mrz_unreadable_server": "Lignes de code non lues par le serveur",
         "phone_report_missing": "Rapport du téléphone manquant",
         "provisional_classification": "Type reconnu à titre provisoire",
-        "server_unchecked": "Photo non contrôlée par le serveur"
+        "server_unchecked": "Photo non contrôlée par le serveur",
+        "document_expired": "Document expiré",
+        "under_18": "Moins de 18 ans",
+        "mrz_print_mismatch": "Texte imprimé différent des lignes de code",
+        "date_logic": "Dates incohérentes",
+        "number_format": "Format du numéro inattendu"
       },
       "body": {
         "manual_review_document": "Ce type de document est toujours examiné par une personne : il n'a pas de lignes de code que le serveur peut contrôler (ancienne CNI, permis de conduire, carte d'électeur), ou c'est un titre de séjour ou une carte de réfugié.",
@@ -213,7 +218,12 @@
         "mrz_unreadable_server": "Le serveur n'a pas pu lire sur la photo des lignes de code au format attendu.",
         "phone_report_missing": "La lecture des lignes de code par le téléphone n'a pas été reçue : la lecture du serveur n'a donc pas pu lui être comparée.",
         "provisional_classification": "Le type de document a été reconnu d'après les mots imprimés seulement, pas d'après des lignes de code. C'est provisoire tant que les réglages n'ont pas été faits sur de vrais documents.",
-        "server_unchecked": "Le serveur n'a pas pu contrôler au moins une photo (service indisponible, budget du jour atteint, ou seules les sessions de test sont traitées pour l'instant)."
+        "server_unchecked": "Le serveur n'a pas pu contrôler au moins une photo (service indisponible, budget du jour atteint, ou seules les sessions de test sont traitées pour l'instant).",
+        "document_expired": "La date d'expiration lue dans les lignes de code (ou, à défaut, imprimée) est passée. Signal bloquant : jamais d'approbation automatique.",
+        "under_18": "D'après la date de naissance (lignes de code, sinon imprimée), le titulaire a moins de 18 ans aujourd'hui. Signal bloquant : jamais d'approbation automatique.",
+        "mrz_print_mismatch": "Un champ imprimé ne correspond pas aux lignes de code, après comparaison tolérante (accents, espaces, noms tronqués, caractères ressemblants). Comparez avec « Afficher les données lues ».",
+        "date_logic": "Les dates des lignes de code se contredisent (naissance après expiration).",
+        "number_format": "Le numéro du document ne suit pas le format connu pour ce document."
       }
     },
     "verdict": {
@@ -259,6 +269,27 @@
       "title": "Texte imprimé lu",
       "found": "Champs trouvés : {{fields}}. Leurs valeurs sont derrière « Afficher les données lues ».",
       "none": "Aucun champ lu."
+    },
+    "hardFlag": "Signal bloquant",
+    "consistency": {
+      "title": "Cohérence",
+      "pending": "Pas encore de résultat du serveur.",
+      "basis": {
+        "mrz": "D'après les lignes de code (fiable), comparées au texte imprimé.",
+        "printed": "D'après le texte imprimé seulement (provisoire).",
+        "none": "Rien à comparer : ni lignes de code ni texte imprimé lus."
+      },
+      "none": "Rien d'incohérent.",
+      "nothing": "Rien à comparer.",
+      "mismatches": "Champs qui diffèrent : {{kinds}}",
+      "kind": {
+        "name": "Nom",
+        "number": "Numéro",
+        "birth_date": "Date de naissance",
+        "expiry_date": "Date d'expiration"
+      },
+      "provisionalTitle": "Remarques provisoires",
+      "provisionalBody": "Tirées du texte imprimé, dont les formats ne sont pas encore vérifiés sur de vraies pièces : pour information, elles ne décident rien."
     }
   },
   "mrz": {

@@ -4,6 +4,7 @@ import { type ReactNode, useMemo } from "react";
 import type {
   CaptureViewResponse,
   ClassificationDetails,
+  ConsistencyDetails,
   DocumentDataItem,
   DocumentDataResponse,
   MrzCheckDetails,
@@ -54,6 +55,9 @@ const NO_MRZ_CASE_ID = "e5a2c9f0-6d1b-4a8e-8f37-9c4b2e7d1a44";
 const PENDING_CASE_ID = "3c8e1f45-2b7a-4d90-9e16-8a5f0c3b7d77";
 const UNCHECKED_CASE_ID = "6a1d9b38-4f2e-4c75-b8a0-3e7c5f9d2b88";
 const MISMATCH_CASE_ID = "8f4b2e61-9c3d-4a17-a5e8-0d6b1f7c4e99";
+// M4: an expired passport (a hard flag), and one whose print disagrees with its code lines.
+const EXPIRED_CASE_ID = "4d2a7c90-5b1e-4f36-9a8c-2e6f0b9d3c11";
+const PRINT_MISMATCH_CASE_ID = "1b6e3f82-7d4a-4c59-8e21-5a9c0d7f2e33";
 
 const VERIFICATIONS: VerificationListItem[] = [
   {
@@ -145,6 +149,26 @@ const VERIFICATIONS: VerificationListItem[] = [
     submittedAt: minutes(-73),
     sessionExpiresAt: minutes(-50),
     captureCount: 2,
+  },
+  {
+    id: EXPIRED_CASE_ID,
+    status: "submitted",
+    declaredDocument: "passport",
+    isTest: true,
+    createdAt: minutes(-90),
+    submittedAt: minutes(-86),
+    sessionExpiresAt: minutes(-60),
+    captureCount: 1,
+  },
+  {
+    id: PRINT_MISMATCH_CASE_ID,
+    status: "submitted",
+    declaredDocument: "passport",
+    isTest: true,
+    createdAt: minutes(-100),
+    submittedAt: minutes(-96),
+    sessionExpiresAt: minutes(-70),
+    captureCount: 1,
   },
 ];
 
@@ -369,11 +393,26 @@ function policy(createdAt: string, reasons: PolicyReason[]) {
   return serverCheck(null, reasons.length === 0 ? "pass" : "flag", { reasons }, createdAt);
 }
 
+/** M4: the consistency check, as decideConsistency writes it. */
+function consistency(createdAt: string, details: Partial<ConsistencyDetails> = {}): CheckRecord<ConsistencyDetails> {
+  const full: ConsistencyDetails = { flags: [], provisional: [], basis: "mrz", mismatches: [], ...details };
+  const outcome = full.flags.length > 0 ? "flag" : full.basis === "none" ? "skipped" : "pass";
+  return serverCheck(null, outcome, full, createdAt);
+}
+
 const FRONT_ID = CAPTURES[0].id;
 const BACK_ID = CAPTURES[1].id;
 const PASSPORT_ID = PASSPORT_CAPTURES[0].id;
 // Photos taken before the server checks existed have no job at all.
-const NO_SERVER_CHECKS: ServerChecks = { quality: [], mrz: [], fields: [], classification: null, policy: null, jobs: new Map() };
+const NO_SERVER_CHECKS: ServerChecks = {
+  quality: [],
+  mrz: [],
+  fields: [],
+  classification: null,
+  policy: null,
+  consistency: null,
+  jobs: new Map(),
+};
 const jobs = (state: ServerJobState, ...captureIds: string[]) => new Map(captureIds.map((id) => [id, state] as const));
 const BOTH_DONE = jobs("done", FRONT_ID, BACK_ID);
 
@@ -391,6 +430,7 @@ const SERVER_CHECKS: Record<string, ServerChecks> = {
       qrPresent: true,
     }),
     policy: policy(minutes(-4.6), []),
+    consistency: consistency(minutes(-4.6)),
     jobs: BOTH_DONE,
   },
   [PASSPORT_CASE_ID]: {
@@ -406,6 +446,7 @@ const SERVER_CHECKS: Record<string, ServerChecks> = {
       qrPresent: false,
     }),
     policy: policy(minutes(-19), ["mrz_disagreement"]),
+    consistency: consistency(minutes(-19), { provisional: ["date_logic"] }),
     jobs: jobs("done", PASSPORT_ID),
   },
   [UNREADABLE_CASE_ID]: {
@@ -431,6 +472,7 @@ const SERVER_CHECKS: Record<string, ServerChecks> = {
       qrPresent: true,
     }),
     policy: policy(minutes(-33), ["mrz_unreadable_server", "provisional_classification"]),
+    consistency: consistency(minutes(-33), { basis: "printed" }),
     jobs: BOTH_DONE,
   },
   [NOT_RECEIVED_CASE_ID]: {
@@ -446,6 +488,7 @@ const SERVER_CHECKS: Record<string, ServerChecks> = {
       qrPresent: true,
     }),
     policy: policy(minutes(-44), ["manual_review_document", "phone_report_missing"]),
+    consistency: consistency(minutes(-44)),
     jobs: BOTH_DONE,
   },
   [NO_MRZ_CASE_ID]: {
@@ -464,6 +507,7 @@ const SERVER_CHECKS: Record<string, ServerChecks> = {
       qrPresent: false,
     }),
     policy: policy(minutes(-60 * 26 + 5), ["manual_review_document", "provisional_classification"]),
+    consistency: consistency(minutes(-60 * 26 + 5), { basis: "printed", provisional: ["document_expired"] }),
     jobs: BOTH_DONE,
   },
   // The worker is on its way: nothing yet.
@@ -487,7 +531,44 @@ const SERVER_CHECKS: Record<string, ServerChecks> = {
       qrPresent: true,
     }),
     policy: policy(minutes(-73), ["manual_review_document", "type_mismatch"]),
+    consistency: consistency(minutes(-73)),
     jobs: BOTH_DONE,
+  },
+  [EXPIRED_CASE_ID]: {
+    quality: [quality(PASSPORT_ID, "ok", minutes(-87))],
+    mrz: [serverMrz(PASSPORT_ID, minutes(-87), { format: "TD3", checks: { ...ALL_DIGITS_RIGHT, personalNumber: true }, phone: "agrees" })],
+    fields: [fieldsFound(PASSPORT_ID, minutes(-87), ["surname", "givenNames", "documentNumber", "birthDate", "expiryDate", "issueDate"])],
+    classification: classification(minutes(-87), {
+      detected: "passport",
+      basis: "mrz",
+      provisional: false,
+      matchesDeclared: true,
+      confidence: 1,
+      qrPresent: false,
+    }),
+    policy: policy(minutes(-87), ["document_expired"]),
+    consistency: consistency(minutes(-87), { flags: ["document_expired"] }),
+    jobs: jobs("done", PASSPORT_ID),
+  },
+  [PRINT_MISMATCH_CASE_ID]: {
+    quality: [quality(PASSPORT_ID, "ok", minutes(-97))],
+    mrz: [serverMrz(PASSPORT_ID, minutes(-97), { format: "TD3", checks: { ...ALL_DIGITS_RIGHT, personalNumber: true }, phone: "agrees" })],
+    fields: [fieldsFound(PASSPORT_ID, minutes(-97), ["surname", "givenNames", "documentNumber", "birthDate", "expiryDate", "issueDate"])],
+    classification: classification(minutes(-97), {
+      detected: "passport",
+      basis: "mrz",
+      provisional: false,
+      matchesDeclared: true,
+      confidence: 1,
+      qrPresent: false,
+    }),
+    policy: policy(minutes(-97), ["mrz_print_mismatch", "under_18"]),
+    consistency: consistency(minutes(-97), {
+      flags: ["under_18", "mrz_print_mismatch"],
+      provisional: ["number_format"],
+      mismatches: ["name", "birth_date"],
+    }),
+    jobs: jobs("done", PASSPORT_ID),
   },
 };
 
@@ -558,7 +639,7 @@ function fakeServices(): DashboardServices {
     recentVerifications: async () => VERIFICATIONS,
     verification: async (id) => VERIFICATIONS.find((v) => v.id === id) ?? null,
     captures: async (id) => {
-      if (id === PASSPORT_CASE_ID || id === PENDING_CASE_ID) return PASSPORT_CAPTURES;
+      if ([PASSPORT_CASE_ID, PENDING_CASE_ID, EXPIRED_CASE_ID, PRINT_MISMATCH_CASE_ID].includes(id)) return PASSPORT_CAPTURES;
       return id === UNREADABLE_CASE_ID ? RETAKEN_CAPTURES : CAPTURES;
     },
     mrzChecks: async (id) => MRZ_CHECKS[id] ?? [],
@@ -593,6 +674,8 @@ const SCREENS = [
   "case-pending",
   "case-unchecked",
   "case-mismatch",
+  "case-expired",
+  "case-mismatch-print",
   "case-reviewer",
   "case-admin",
 ] as const;
@@ -683,6 +766,10 @@ export function Preview({ screen }: { screen: string }) {
       return staff(PROFILES.supervisor, supervisorCase(UNCHECKED_CASE_ID));
     case "case-mismatch":
       return staff(PROFILES.supervisor, supervisorCase(MISMATCH_CASE_ID));
+    case "case-expired":
+      return staff(PROFILES.supervisor, supervisorCase(EXPIRED_CASE_ID));
+    case "case-mismatch-print":
+      return staff(PROFILES.supervisor, supervisorCase(PRINT_MISMATCH_CASE_ID));
     case "case-reviewer":
       return staff(PROFILES.reviewer, <CaseView id={PASSPORT_CASE_ID} profile={PROFILES.reviewer} />);
     case "case-admin":
