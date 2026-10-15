@@ -139,12 +139,16 @@ def test_document_without_code_lines():
     }
 
 
-def test_document_with_code_lines_reads_names_and_issue_date_only():
-    assert extract(CARD, has_code_lines=True) == {
-        "surname": "EXEMPLE",
-        "givenNames": "JEAN-PAUL ESSAI",
-        "issueDate": "2019-05-12",
-    }
+def test_document_with_code_lines_reads_the_same_fields_since_m4():
+    # The server compares them with the code lines (mrz_print_mismatch).
+    assert extract(CARD, has_code_lines=True) == extract(CARD, has_code_lines=False)
+
+
+def test_passport_number_labels():
+    for label in ("N° DE PASSEPORT / PASSPORT No", "Passport No.", "NUMÉRO DE PASSEPORT", "PASSPORT NUMBER"):
+        assert find_label(normalize(label)).field == "documentNumber", label
+    p = page(("N° DE PASSEPORT / PASSPORT No", 400, 100), ("SP7654321", 400, 130))
+    assert extract(p, has_code_lines=True) == {"documentNumber": "SP7654321"}
 
 
 def test_never_read_values_never_come_out():

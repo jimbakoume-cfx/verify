@@ -42,6 +42,8 @@ FAMILY_GROUP = {
     "cni_old": "national_id",
     "passport_cmr": "passport",
     "passport_uto": "passport",
+    "passport_expired": "passport",
+    "passport_mismatch": "passport",
     "sejour_new": "residence",
     "resident_new": "residence",
     "refugee_new": "residence",
@@ -111,6 +113,7 @@ def photos(manifest_json: dict, keep=lambda p: True) -> list[dict]:
 
 
 MANIFEST = json.loads((SPECIMENS / "manifest.json").read_text(encoding="utf-8"))
+BY_FILE = {p["file"]: p for p in MANIFEST["photos"]}
 
 
 def ids(items):
@@ -173,6 +176,42 @@ def test_the_servers_corrector_reads_them(run):
     for photo, read in zip(READABLE_MRZ, json.loads(out.stdout), strict=True):
         assert read["lines"] == photo["expected"]["mrz"]["lines"], photo["file"]
         assert read["valid"] is True, photo["file"]
+
+
+def test_the_servers_consistency_checks_on_whole_documents(run):
+    """M4: the worker Edge Function's own decision (in Deno) on what the worker read from each whole
+    document: the expired passport and the one whose print disagrees with its code lines are flagged,
+    the others are not."""
+    if shutil.which("npx") is None:
+        deno_or_skip("Node (npx) is not installed")
+    cases = MANIFEST["cases"]
+    batch = {
+        "today": MANIFEST["consistencyToday"],
+        "cases": [
+            {
+                "declaredDocument": case["declaredDocument"],
+                "sides": [
+                    {
+                        "kind": BY_FILE[file]["side"],
+                        "mrzCandidates": run["results"][file]["mrzCandidates"],
+                        "fields": run["results"][file]["fields"],
+                    }
+                    for file in case["photos"]
+                ],
+            }
+            for case in cases
+        ],
+    }
+    try:
+        out = subprocess.run(
+            ["npx", "deno", "run", "--quiet", "worker/tests/tools/server_consistency.ts"],
+            cwd=REPO, input=json.dumps(batch), capture_output=True, text=True, timeout=300, check=True,
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as err:
+        deno_or_skip(f"Deno is not available ({type(err).__name__})")
+    for case, decided in zip(cases, json.loads(out.stdout), strict=True):
+        assert decided["consistency"]["details"] == case["consistency"], case["photos"]
+        assert set(case["consistency"]["flags"]) <= set(decided["reasons"]), case["photos"]
 
 
 FRONTS = photos(MANIFEST, lambda p: p["side"] == "document_front" and p["document"] in FAMILY_GROUP and not p["expected"].get("blurry"))

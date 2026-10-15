@@ -14,9 +14,13 @@ landscape guide, as a rider would hold them.
 
 These images test the plumbing (decoding, rotation, code-line candidates, keyword evidence, field
 reading). Because we drew the keywords ourselves, they prove nothing about accuracy on real cards.
+Since M4 two more passports test the consistency checks: one expired (valid check digits), one whose
+printed surname is not the one in its code lines. They are drawn last, so the earlier photos come out
+byte for byte as before.
 
 Outputs (committed): e2e/fixtures/specimens/*.jpg and manifest.json, with each photo's expected
-document family, code lines, fields and orientation. Dev only, run with the worker's environment:
+document family, code lines, fields and orientation, and the consistency the server should find for
+whole documents ("cases"). Dev only, run with the worker's environment:
 
     cd worker && uv run python ../scripts/make-specimens.py [OUT_DIR]
 """
@@ -297,8 +301,9 @@ class Photo:
     never: list = field(default_factory=list)
 
 
-MRZ_FIELDS = ("surname", "givenNames", "issueDate")
 ALL_FIELDS = ("surname", "givenNames", "documentNumber", "birthDate", "expiryDate", "issueDate")
+# Since M4 the worker reads every field on documents with code lines too (the server compares them).
+MRZ_FIELDS = ALL_FIELDS
 
 
 def ascii_upper(text: str) -> str:
@@ -307,11 +312,12 @@ def ascii_upper(text: str) -> str:
     return "".join(ch for ch in decomposed if not unicodedata.combining(ch)).upper()
 
 
-def expected(printed: dict, has_mrz: bool) -> dict:
-    """The fields the worker should read from a side: names and the issue date when the document has
-    code lines, every printed field it reads otherwise."""
+def expected(printed: dict, has_mrz: bool, unlabelled: tuple[str, ...] = ()) -> dict:
+    """The fields the worker should read from a side: every printed field it reads (since M4 the same
+    with or without code lines), except those printed without a label (`unlabelled`), which it
+    cannot tell apart."""
     keep = MRZ_FIELDS if has_mrz else ALL_FIELDS
-    return {k: ascii_upper(v) if k in ("surname", "givenNames") else v for k, v in printed.items() if k in keep}
+    return {k: ascii_upper(v) if k in ("surname", "givenNames") else v for k, v in printed.items() if k in keep and k not in unlabelled}
 
 
 def new_card_front(title: list[str], colours, person: dict, number: str) -> Image.Image:
@@ -371,7 +377,7 @@ def build(rng: random.Random) -> list[Photo]:
     printed = {"surname": "SPÉCIMEN", "givenNames": "HÉLÈNE TEST", "documentNumber": "SPC000123", "birthDate": "1990-02-15", "expiryDate": "2035-03-02"}
     photos.append(Photo("cni-new-front.jpg", "cni_new", "document_front", "cni_biometric", "cni_biometric", "mrz",
                         capture(front, rng, turn=-90), rotation=90, orientation="portrait", printed=printed,
-                        expect_fields=expected(printed, True)))
+                        expect_fields=expected(printed, True, unlabelled=("documentNumber",))))
     # The parents' names are long capitals starting like a code line (P..., C...), with the length of
     # one: the worker must still never send them anywhere, code-line candidates included. They sit
     # on rows of their own (the second column holds only two fields).
@@ -455,7 +461,7 @@ def build(rng: random.Random) -> list[Photo]:
     pp.stamp(100, 63, cap_mm=3.0, angle=8)
     pp_lines = td3("CMR", "SP7654321", "CMR", "850704", "M", "280630", "ÉCHANTILLON", "FRANÇOIS ESSAI")
     pp.mrz(pp_lines, TD3_MRZ)
-    printed = {"surname": "ÉCHANTILLON", "givenNames": "FRANÇOIS ESSAI", "issueDate": "2023-06-30", "birthDate": "1985-07-04", "expiryDate": "2028-06-30"}
+    printed = {"surname": "ÉCHANTILLON", "givenNames": "FRANÇOIS ESSAI", "documentNumber": "SP7654321", "issueDate": "2023-06-30", "birthDate": "1985-07-04", "expiryDate": "2028-06-30"}
     pp_photo = capture(pp.img, rng)
     photos.append(Photo("passport-cmr.jpg", "passport_cmr", "document_front", "passport", "passport", "mrz", pp_photo,
                         mrz={"format": "TD3", "lines": pp_lines}, printed=printed, expect_fields=expected(printed, True),
@@ -483,7 +489,7 @@ def build(rng: random.Random) -> list[Photo]:
     up.stamp(100, 63, cap_mm=3.0, angle=-8)
     up_lines = td3("UTO", "UT1234567", "UTO", "790312", "<", "320831", "MODEL", "ALEX SAMPLE")
     up.mrz(up_lines, TD3_MRZ)
-    printed = {"surname": "MODEL", "givenNames": "ALEX SAMPLE", "issueDate": "2022-09-01", "birthDate": "1979-03-12", "expiryDate": "2032-08-31"}
+    printed = {"surname": "MODEL", "givenNames": "ALEX SAMPLE", "documentNumber": "UT1234567", "issueDate": "2022-09-01", "birthDate": "1979-03-12", "expiryDate": "2032-08-31"}
     up_photo = capture(up.img, rng)
     photos.append(Photo("passport-uto.jpg", "passport_uto", "document_front", "passport", "passport", "mrz", up_photo,
                         mrz={"format": "TD3", "lines": up_lines}, printed=printed, expect_fields=expected(printed, True)))
@@ -506,7 +512,7 @@ def build(rng: random.Random) -> list[Photo]:
                    "birthDate": _iso(person["birth_print"]), "expiryDate": _iso(person["expiry_print"])}
         photos.append(Photo(f"{key.replace('_', '-')}-front.jpg", key, "document_front", "residence_permit", "residence_permit", "mrz",
                             capture(front, rng, turn=turn), rotation=rotation, orientation="portrait", printed=printed,
-                            expect_fields=expected(printed, True), subtype=person["subtype"]))
+                            expect_fields=expected(printed, True, unlabelled=("documentNumber",)), subtype=person["subtype"]))
         nationality = "UTOPIENNE" if code_nat == "UTO" else "INDÉTERMINÉE"
         back = new_card_back(colours, person, [
             ("NATIONALITÉ / NATIONALITY", nationality),
@@ -621,12 +627,84 @@ def build(rng: random.Random) -> list[Photo]:
     photos.append(Photo("no-document.jpg", "none", "document_front", "cni_legacy", "unknown", "none",
                         table_only(OUTPUT_LONG_SIDE, round(OUTPUT_LONG_SIDE / CARD_MM[0] * CARD_MM[1]), rng),
                         orientation="", variant="the table only", expect={"documentFound": False, "textLines": 0}))
+
+    # --- M4: an expired passport, and one whose print disagrees with its code lines ---------------
+    # Drawn last (see the top of this file). Both are Cameroonian passports laid out as above.
+    for file, document, person, code_surname in (
+        ("passport-expired.jpg", "passport_expired",
+         {"surname": "PÉRIMÉ", "given": "JEAN ESSAI", "number": "SP1122334", "sex": "M", "birth": ("800312", "12 MARS/MAR 1980"),
+          "issue": ("2014-02-10", "10 FÉVR/FEB 2014"), "expiry": ("190209", "09 FÉVR/FEB 2019")}, None),
+        ("passport-mismatch.jpg", "passport_mismatch",
+         {"surname": "DIFFÉRENT", "given": "PAUL TEST", "number": "SP5566778", "sex": "M", "birth": ("870923", "23 SEPT/SEP 1987"),
+          "issue": ("2024-01-15", "15 JANV/JAN 2024"), "expiry": ("290114", "14 JANV/JAN 2029")}, "MODELE"),
+    ):
+        page, lines = cmr_passport(person, code_surname)
+        printed = {"surname": person["surname"], "givenNames": person["given"], "documentNumber": person["number"],
+                   "issueDate": person["issue"][0], "birthDate": _iso_yymmdd(person["birth"][0], birth=True),
+                   "expiryDate": _iso_yymmdd(person["expiry"][0])}
+        photos.append(Photo(file, document, "document_front", "passport", "passport", "mrz", capture(page, rng),
+                            mrz={"format": "TD3", "lines": lines}, printed=printed, expect_fields=expected(printed, True),
+                            never=["VILLE-TEST", "DGSN TEST", "CAMEROUNAISE"]))
     return photos
+
+
+def cmr_passport(person: dict, code_surname: str | None = None) -> tuple[Image.Image, list[str]]:
+    """A Cameroonian passport data page like the one above, for the M4 specimens. `code_surname`: the
+    surname written in the code lines when it should differ from the printed one."""
+    pp = Side(TD3_MM, (226, 238, 228), (120, 170, 130))
+    pp.band(0, 9, (120, 170, 130))
+    pp.header(REPUBLIC, y=3.8, cap=1.5)
+    pp.text(62.5, 13.6, "PASSEPORT / PASSPORT", cap_mm=2.0, bold=True, anchor="ms")
+    pp.photo(5, 17, 30, 40)
+    pp.field(40, 18, "TYPE", "P")
+    pp.field(49, 18, "CODE DU PAYS / COUNTRY CODE", "CMR")
+    pp.field(86, 18, "N° DE PASSEPORT / PASSPORT No", person["number"])
+    pp.field(40, 24.6, "NOM / SURNAME", person["surname"])
+    pp.field(40, 31.2, "PRÉNOMS / GIVEN NAMES", person["given"])
+    pp.field(40, 37.8, "NATIONALITÉ / NATIONALITY", "CAMEROUNAISE")
+    pp.field(84, 37.8, "SEXE / SEX", person["sex"])
+    pp.field(40, 44.4, "DATE DE NAISSANCE / DATE OF BIRTH", person["birth"][1])
+    pp.field(84, 44.4, "LIEU DE NAISSANCE / PLACE OF BIRTH", "VILLE-TEST")
+    pp.field(40, 51.0, "DATE DE DÉLIVRANCE / DATE OF ISSUE", person["issue"][1])
+    pp.field(84, 51.0, "DATE D'EXPIRATION / DATE OF EXPIRY", person["expiry"][1])
+    pp.field(40, 57.6, "AUTORITÉ / AUTHORITY", "DGSN TEST")
+    pp.stamp(100, 63, cap_mm=3.0, angle=8)
+    lines = td3("CMR", person["number"], "CMR", person["birth"][0], person["sex"], person["expiry"][0],
+                code_surname or person["surname"], person["given"])
+    pp.mrz(lines, TD3_MRZ)
+    return pp.img, lines
+
+
+# The consistency the server should find on whole documents (supabase/functions/worker/consistency.ts),
+# on TODAY. worker/tests/test_specimens_ocr.py runs the server's own code on what the worker read.
+CONSISTENCY_TODAY = "2026-10-15T09:00:00Z"
+NOTHING = {"flags": [], "provisional": [], "basis": "mrz", "mismatches": []}
+CASES = [
+    {"declaredDocument": "cni_biometric", "photos": ["cni-new-front.jpg", "cni-new-back.jpg"], "consistency": NOTHING},
+    {"declaredDocument": "passport", "photos": ["passport-cmr.jpg"], "consistency": NOTHING},
+    {"declaredDocument": "passport", "photos": ["passport-uto.jpg"], "consistency": NOTHING},
+    {"declaredDocument": "residence_permit", "photos": ["sejour-new-front.jpg", "sejour-new-back.jpg"], "consistency": NOTHING},
+    {"declaredDocument": "cni_legacy", "photos": ["cni-old-front.jpg", "cni-old-back.jpg"],
+     "consistency": {"flags": [], "provisional": [], "basis": "printed", "mismatches": []}},
+    # The old blue permit expired in January 2026: printed only, so provisional (the rider is not told).
+    {"declaredDocument": "residence_permit", "photos": ["permit-old-front.jpg", "permit-old-back.jpg"],
+     "consistency": {"flags": [], "provisional": ["document_expired"], "basis": "printed", "mismatches": []}},
+    {"declaredDocument": "passport", "photos": ["passport-expired.jpg"],
+     "consistency": {"flags": ["document_expired"], "provisional": [], "basis": "mrz", "mismatches": []}},
+    {"declaredDocument": "passport", "photos": ["passport-mismatch.jpg"],
+     "consistency": {"flags": ["mrz_print_mismatch"], "provisional": [], "basis": "mrz", "mismatches": ["name"]}},
+]
 
 
 def _iso(printed: str) -> str:
     d, m, y = printed.split(".")
     return f"{y}-{m}-{d}"
+
+
+def _iso_yymmdd(value: str, birth: bool = False) -> str:
+    """A code-line date (YYMMDD) as ISO: births in the 1900s, other dates in the 2000s (the specimens' range)."""
+    century = "19" if birth else "20"
+    return f"{century}{value[:2]}-{value[2:4]}-{value[4:]}"
 
 
 def _small(img: Image.Image, long_side: int) -> Image.Image:
@@ -644,6 +722,8 @@ def main() -> None:
                  "All data is fake; these images test the plumbing, not accuracy on real documents. Do not edit by hand.",
         "fonts": ["scripts/fonts/inter/Inter-Regular.ttf", "scripts/fonts/inter/Inter-Bold.ttf", "scripts/fonts/ocr-b/OCRB.otf"],
         "photos": [],
+        "consistencyToday": CONSISTENCY_TODAY,
+        "cases": CASES,
     }
     total = 0
     for p in photos:
