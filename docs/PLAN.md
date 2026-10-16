@@ -257,6 +257,12 @@ Details: `docs/M4_SPEC.md`.
 12. With the lawyer: data-processing agreements with Supabase, Netlify and Vercel (Vercel Inc. is a US company; the worker runs in its Paris region), the EU region vs Cameroon data law, consent wording, retention and deletion (including backups), and registration with the data-protection authority.
 13. Incident response plan if ID images leak.
 
+### Decisions for the remaining milestones (2026-10-16)
+1. **Order and sessions.** M4 is finished in the current session. The remaining milestones (M5–M14) continue in a new session, which starts from `docs/HANDOFF.md`.
+2. **Face model (M7): research first, then you decide.** Most good public face models, and the datasets they were trained on, are non-commercial (InsightFace, the published ArcFace weights, VGGFace2). We will find the best option that is licensed for commercial use, or a plan to train our own. We document its licence and its accuracy limits, and show you before anything is built on it. The rest of M5–M7 is built around it in the meantime.
+3. **Hosting: Vercel Hobby, test sessions only, for now.** Liveness and face checks run only on test sessions, under the daily cap. Moving to Vercel Pro (with its DPA) or to another host is decided before the pilot.
+4. **Product decisions during the build: the safest default, recorded.** We pick the conservative option (more staff review, less automatic), record it in this file and list it at each milestone's ping for you to review. Anything legal, financial or licence-related still waits for you.
+
 ---
 
 ## Verification
