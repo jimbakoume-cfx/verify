@@ -81,12 +81,12 @@ def test_nothing_read_is_still_a_valid_result():
     assert result["classification"]["orientation"] is None
 
 
-def test_document_without_code_lines_reads_more_fields():
+def test_documents_with_and_without_code_lines_read_the_same_fields():
+    # Since M4: the server compares the printed number and dates with the code lines.
     texts = ["NOM / SURNAME", "EXEMPLE", "DATE DE NAISSANCE / DATE OF BIRTH", "07.11.1984"]
     with_mrz = run(texts, file="cni-old-front.jpg", declared="cni_biometric", side="document_front")
     without = run(texts, file="cni-old-front.jpg", declared="cni_legacy", side="document_front")
-    assert "birthDate" not in with_mrz["fields"]
-    assert without["fields"] == {"surname": "EXEMPLE", "birthDate": "1984-11-07"}
+    assert with_mrz["fields"] == without["fields"] == {"surname": "EXEMPLE", "birthDate": "1984-11-07"}
 
 
 def test_one_stray_code_like_row_does_not_make_a_document_with_code_lines():

@@ -28,9 +28,9 @@ jobs:
         run: >-
           npx deno check supabase/functions/flow/index.ts supabase/functions/admin/index.ts
           supabase/functions/worker/index.ts supabase/functions/*/*.test.ts
-          worker/tests/tools/server_mrz.ts worker/tests/tools/server_worker.ts
+          worker/tests/tools/server_mrz.ts worker/tests/tools/server_worker.ts worker/tests/tools/server_consistency.ts
       - name: Edge Functions lint (Deno)
-        run: npx deno lint supabase/functions worker/tests/tools/server_mrz.ts worker/tests/tools/server_worker.ts
+        run: npx deno lint supabase/functions worker/tests/tools/server_mrz.ts worker/tests/tools/server_worker.ts worker/tests/tools/server_consistency.ts
       - run: npm test
       - run: npm run build
 

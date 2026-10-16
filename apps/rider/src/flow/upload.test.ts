@@ -122,6 +122,7 @@ function read(status: MrzReadStatus, overrides: Partial<MrzReadResult> = {}): Mr
     rawText: "P<UTOERIKSS0N",
     charHeight: 15,
     rotated: false,
+    engine: "tesseract.js-7.0.0/mrz-1",
     ...overrides,
   };
 }
@@ -532,6 +533,13 @@ describe("mrzReport", () => {
       engine: OCR_ASSETS.engine,
     });
     expect(mrzReport(read("unavailable"), 1, ID)).toMatchObject({ result: "unreadable", reason: "reader_unavailable" });
+  });
+
+  it("names the model that read (M4: our own on test sessions), so the server records it", () => {
+    expect(mrzReport(read("valid", { engine: "tesseract.js-7.0.0/mrz-2" }), 1, ID).engine).toBe("tesseract.js-7.0.0/mrz-2");
+    expect(mrzReport(read("not_found", { engine: "tesseract.js-7.0.0/mrz-2" }), 1, ID).engine).toBe("tesseract.js-7.0.0/mrz-2");
+    // A result without one (never, as built) still sends the default model's label.
+    expect(mrzReport(read("valid", { engine: "" }), 1, ID).engine).toBe(OCR_ASSETS.engine);
   });
 
   it("keeps every number within the server's limits", () => {

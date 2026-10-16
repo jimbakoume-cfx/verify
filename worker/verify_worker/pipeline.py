@@ -24,7 +24,9 @@ def _enough_code_lines(candidates: list[str]) -> bool:
 
 
 def _has_code_lines(declared: str, side: str, mrz_expectation: dict[str, Any] | None, candidates: list[str], page: OcrPage) -> bool:
-    """Whether the document carries code lines, which limits the printed fields read (fields.py).
+    """Whether the document carries code lines, which chose the printed fields read (fields.py). Since
+    M4 the same fields are read either way (the server compares them with the code lines); the choice
+    stays so that the two lists can differ again.
 
     The photo first: enough code-line candidates for an MRZ on this side (one stray row is not an
     MRZ), or a front that reads upright as a portrait card (the new models), mean a document with

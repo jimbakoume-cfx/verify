@@ -67,12 +67,16 @@ Requirements: Node 22 and `python3` (standard library only).
     passing, so the tests do not depend on the clock. A newer photo of a side replaces the older one
     as the database trigger does: the old object is erased, its job superseded, and a report for it
     is refused. `checksOverride` plays a server that breaks its own rules, to check the app's limits;
-    `failChecks` makes the route answer an error;
+    `failChecks` makes the route answer an error. M4: `expiredDocuments` lists the declared documents
+    whose code lines the server finds expired; `GET /checks` then says `expired` through the real
+    rules, once the side with the code lines is checked;
   - the signed storage upload;
   - the health check.
 
   It records every request (with its time), every MRZ report and every answer of `GET /checks`,
-  and can expire the session or fail uploads. Each
+  and can expire the session or fail uploads. Its session is a test session (`isTest`, as the
+  dashboard's test links), so the app reads the code lines with our own model (`mrz-2`) unless a
+  test sets `backend.isTest = false`. Each
   test also fails on any of these:
   - a request the real backend would refuse;
   - an unknown request;
@@ -91,7 +95,7 @@ Requirements: Node 22 and `python3` (standard library only).
 | File | What it proves |
 |---|---|
 | `capture-card.spec.ts` | Happy path (old CNI, no code lines, so nothing is read): the token leaves the address bar; consent; both sides auto-captured within 10 s; upload; the server's checks; submit. The uploaded JPEGs are under 300 KB, start with `FFD8`, have no APP1 (EXIF) segment and meet the minimum long side (720 px); `quality.source` is `auto`. Also: an upload failing three times, then a manual retry that reuses the signed upload; an expired link; a session expiring mid-flow; French by default, then switching to English mid-flow while keeping the state. |
-| `capture-cni-biometric.spec.ts` | New CNI (2025): the back goes through the reading screen; the rider sees only "Code lines read ✓" (no fields); `POST /mrz` follows the back's capture with exactly the printed lines, and the server's verdict is "pass". Also: with the OCR engine's `worker.min.js` blocked, the rider goes on as usual and the report says `reader_unavailable` (flagged). |
+| `capture-cni-biometric.spec.ts` | New CNI (2025): the back goes through the reading screen; the rider sees only "Code lines read ✓" (no fields); `POST /mrz` follows the back's capture with exactly the printed lines, and the server's verdict is "pass". Also: with the OCR engine's `worker.min.js` blocked, the rider goes on as usual and the report says `reader_unavailable` (flagged). M4: a test session downloads only our own model (`/ocr/mrz-2/`); a real session only Doubango's, and its report names `mrz-1`. |
 | `capture-passport.spec.ts` | Passport: the photo page only, no "turn over" step; its code lines read, with ✅ for every check digit (personal number included) and the parsed fields in the `?debug=1` panel, which is marked `translate="no"`; the lines reach the server ("pass"). |
 | `capture-mrz-smudged.spec.ts` | New CNI with smudged code lines: the warning with tips and Retake as the main button, three tries, then "Continue anyway"; the report (unreadable, or lines failing their check digits) is flagged. Retakes never reach the server. |
 | `capture-blurred.spec.ts` | The "blurry" hint, no auto-capture, the shutter after about 8 s, a refused manual photo, and Retake. |
@@ -99,6 +103,7 @@ Requirements: Node 22 and `python3` (standard library only).
 | `capture-low-resolution.spec.ts` | A 720p camera: the "too little detail" message at once, no auto-capture, and a manual photo that offers only Retake (no upload). |
 | `camera-denied.spec.ts` | A clear "camera blocked" message in a focused dialog, Retry, and Back. |
 | `server-checks.spec.ts` | The server's check of the photos (M3), card camera. "Checking your photos…" with the photos sent, `GET /checks` at once then every 2 s, the submit once every side is checked. A retake of the front (no "turn over", the side named and the reason, only that photo sent again, the replaced one erased); both sides (in English: the front first, then "turn over" titled "Back: please take this photo again"); the code-lines side of the new CNI (read again on the phone, a second report with `attempts: 2`); never a retake when the phone read every check digit right, even if the server asked; the limit of one server retake per side, on the server and on the phone; the real 20 s time-out with the worker down; `unchecked` (out of budget, ring failed) submitted at once; the route answering 503 (with the `?debug=1&checksWaitMs=` override). No error is ever shown for the checks. |
+| `server-checks-expired.spec.ts` | An expired document (M4), new CNI: "Checking your photos…" stops asking and says "This document has expired". "Continue anyway": asked once more, then submitted. "Use another document" (in English): back to the list, the old CNI chosen, both sides photographed again (the new photos replace the old ones), then submitted. |
 | `server-checks-passport.spec.ts` | A passport photo page retaken after the server's check: its camera names the "Photo page", and the new photo is read and reported again. |
 
 ## Settings

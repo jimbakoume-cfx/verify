@@ -30,8 +30,9 @@ import {
   routePath,
 } from "../_shared/http.ts";
 import { consoleLogger, type Logger } from "../_shared/log.ts";
-import { CASE_WRITE_ROUNDS, type CaseChecksPayload, caseChecksPayload, type CaseSnapshot } from "./case.ts";
-import { type CaptureCheck, type CaptureEvidence, decideCapture, decideCase } from "./decide.ts";
+import { CASE_WRITE_ROUNDS, type CaseChecksPayload, type CaseSnapshot, decideCaseChecks } from "./case.ts";
+import type { SideDocumentData } from "./consistency.ts";
+import { type CaptureCheck, type CaptureEvidence, decideCapture } from "./decide.ts";
 import {
   base64UrlDecode,
   canonicalString,
@@ -225,10 +226,21 @@ export function createWorkerHandler(deps: WorkerDeps): Handler {
       if (job.status === "done") return resultResponse("already_done");
       if (job.status === "superseded" || !job.captureLive) throw new HttpError(410, "image_gone");
 
-      const capture = decideCapture(result, job.kind, snapshot.declaredDocument, now());
+      const today = now();
+      const capture = decideCapture(result, job.kind, snapshot.declaredDocument, today);
       const sides = snapshot.sides.map((side) =>
         side.captureId === job.captureId ? { ...side, evidence: capture.evidence } : side
       );
+      // M4: this photo's values come from the request (the database has not stored them yet); the
+      // other photos' from the snapshot. Never the card sub-type: consistency does not use it.
+      const { subtype: _subtype, ...printed } = result.fields;
+      const read: SideDocumentData = {
+        kind: job.kind,
+        captureId: job.captureId,
+        mrzLines: capture.mrzLines ? capture.mrzLines.split("\n") : null,
+        fields: Object.keys(printed).length > 0 ? printed : null,
+      };
+      const documentData = [...snapshot.documentData.filter((d) => d.captureId !== job.captureId), read];
       const status = await repo.recordResult({
         kid,
         jobId: result.jobId,
@@ -236,7 +248,7 @@ export function createWorkerHandler(deps: WorkerDeps): Handler {
         fingerprint: snapshot.fingerprint,
         checks: capture.checks,
         evidence: capture.evidence,
-        caseChecks: caseChecksPayload(decideCase(snapshot.declaredDocument, sides)),
+        caseChecks: decideCaseChecks({ declaredDocument: snapshot.declaredDocument, sides, documentData }, today),
         mrzLines: capture.mrzLines,
         mrzFormat: capture.mrzFormat,
         fields: capture.fields,

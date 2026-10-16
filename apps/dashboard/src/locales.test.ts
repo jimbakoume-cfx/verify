@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   CAPTURE_SIDES,
+  CONSISTENCY_FLAGS,
   DECLARED_DOCUMENTS,
   DETECTED_DOCUMENT_TYPES,
   type MrzServerDetails,
   parseMrz,
+  MISMATCH_KINDS,
   POLICY_REASONS,
   RETAKE_REASONS,
 } from "@verify/shared";
@@ -12,7 +14,7 @@ import { KNOWN_SUBTYPES } from "./lib/documentData";
 import { mrzCheckLines, mrzFields, serverMrzCheckLines } from "./lib/mrz";
 import { CAPTURE_KINDS, CHECK_OUTCOMES, PRINTED_FIELDS, VERIFICATION_STATUSES } from "./lib/records";
 import { STAFF_ROLES } from "./lib/roles";
-import { SERVER_FOCUS_LABEL } from "./lib/serverChecks";
+import { CONSISTENCY_BASIS_KEY, SERVER_FOCUS_LABEL } from "./lib/serverChecks";
 import en from "./locales/en.json";
 import fr from "./locales/fr.json";
 
@@ -93,6 +95,22 @@ describe("FR/EN locales", () => {
       ...mrzFields(passport).map((field) => `mrz.fields.${field.key}`),
     ];
     expect(lines).toHaveLength(8);
+    for (const key of keys) {
+      expect(FR.has(key), `fr: ${key}`).toBe(true);
+      expect(EN.has(key), `en: ${key}`).toBe(true);
+    }
+  });
+
+  it("label everything the consistency check can show (M4)", () => {
+    const keys = [
+      ...CONSISTENCY_FLAGS.flatMap((code) => [`serverChecks.reasons.label.${code}`, `serverChecks.reasons.body.${code}`]),
+      ...MISMATCH_KINDS.map((kind) => `serverChecks.consistency.kind.${kind}`),
+      ...Object.values(CONSISTENCY_BASIS_KEY),
+      "serverChecks.hardFlag",
+      ...["title", "pending", "none", "nothing", "mismatches", "provisionalTitle", "provisionalBody"].map(
+        (key) => `serverChecks.consistency.${key}`,
+      ),
+    ];
     for (const key of keys) {
       expect(FR.has(key), `fr: ${key}`).toBe(true);
       expect(EN.has(key), `en: ${key}`).toBe(true);

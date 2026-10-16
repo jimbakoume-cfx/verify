@@ -1,0 +1,263 @@
+{
+ "model": {
+  "run": "scratch",
+  "checkpoint": "mrz_0.863_22490_139500.checkpoint",
+  "exported": "2026-10-15T08:31:56Z",
+  "integer": {
+   "file": "mrz.traineddata",
+   "bytes": 390329,
+   "sha256": "2f535e65551345676656c82d44629c8e2d65570135a8828ae32c2b1cc2cffbd7"
+  },
+  "integerGz": {
+   "file": "mrz.traineddata.gz",
+   "bytes": 354816,
+   "sha256": "a0ad48677eb2dd2df8e5009c067c651ce0d9f65bd1e35c8c7856f831b0734358"
+  },
+  "float": {
+   "file": "mrz_float.traineddata",
+   "bytes": 2979488,
+   "sha256": "69a4f4253b41e2289bc5074c871cf71508d51ac06a341d9a640087c459c41777"
+  },
+  "protoModelSha256": "35147bb70670bffc3ca5344eae7ff96381b3137bf9909d52d6dfb4187980106e",
+  "training": {
+   "mode": "scratch",
+   "maxIterations": 150000,
+   "learningRate": 0.002,
+   "netSpec": "[1,36,0,1 Ct3,3,16 Mp3,3 Lfys48 Lfx96 Lrx96 Lfx192 O1c###]",
+   "threads": 3,
+   "targetErrorRate": 0.01,
+   "resumed": "no",
+   "started": "2026-10-14T22:43:02Z",
+   "repoCommit": "ad921b1f152c38bbbac1a8fa7ca4e3f54d58e556",
+   "data": {
+    "train": 78116,
+    "eval": 3255,
+    "unicharset": 40,
+    "protoModelSha256": "35147bb70670bffc3ca5344eae7ff96381b3137bf9909d52d6dfb4187980106e"
+   },
+   "tesseract": "tesseract 5.3.4"
+  }
+ },
+ "passed": false,
+ "checks": [
+  {
+   "gate": "G1",
+   "check": "clean: CER %",
+   "value": 0.036,
+   "limit": "<= 0.5",
+   "result": "pass"
+  },
+  {
+   "gate": "G1",
+   "check": "clean: lines exact %",
+   "value": 98.83,
+   "limit": ">= 98",
+   "result": "pass"
+  },
+  {
+   "gate": "G1",
+   "check": "clean: CER % vs Doubango",
+   "value": 0.036,
+   "limit": "<= 0.014",
+   "result": "fail"
+  },
+  {
+   "gate": "G1",
+   "check": "lowres: CER %",
+   "value": 0.61,
+   "limit": "<= 1.0",
+   "result": "pass"
+  },
+  {
+   "gate": "G1",
+   "check": "lowres: CER % vs Doubango",
+   "value": 0.61,
+   "limit": "<= 0.922",
+   "result": "pass"
+  },
+  {
+   "gate": "G1",
+   "check": "degraded: CER %",
+   "value": 3.982,
+   "limit": "<= 10.0",
+   "result": "pass"
+  },
+  {
+   "gate": "G1",
+   "check": "degraded: CER % vs Doubango",
+   "value": 3.982,
+   "limit": "<= 5.457",
+   "result": "pass"
+  },
+  {
+   "gate": "G2",
+   "check": "documents read",
+   "value": 1000,
+   "limit": ">= 1000",
+   "result": "pass"
+  },
+  {
+   "gate": "G2",
+   "check": "wrong but valid, the model's own",
+   "value": 3,
+   "limit": "<= 0",
+   "result": "fail"
+  },
+  {
+   "gate": "info",
+   "check": "wrong but valid, made wrong by the correction step",
+   "value": 3,
+   "limit": "-",
+   "result": "info"
+  },
+  {
+   "gate": "G3",
+   "check": "valid and exact %",
+   "value": 98.8,
+   "limit": ">= 97",
+   "result": "pass"
+  },
+  {
+   "gate": "G3",
+   "check": "names line exact %",
+   "value": 99.7,
+   "limit": ">= 99",
+   "result": "pass"
+  },
+  {
+   "gate": "G3",
+   "check": "validExactRate vs Doubango",
+   "value": 98.8,
+   "limit": ">= 98",
+   "result": "pass"
+  },
+  {
+   "gate": "G3",
+   "check": "validWrong vs Doubango",
+   "value": 6,
+   "limit": "<= 5",
+   "result": "fail"
+  },
+  {
+   "gate": "fixtures",
+   "check": "repository fixtures failed",
+   "value": 0,
+   "limit": "<= 0",
+   "result": "pass"
+  },
+  {
+   "gate": "size",
+   "check": "integer model, gzipped (bytes)",
+   "value": 354816,
+   "limit": "<= 1500000",
+   "result": "pass"
+  },
+  {
+   "gate": "G4",
+   "check": "the PM's own photos (manual, offline)",
+   "value": null,
+   "limit": "see gates.json",
+   "result": "missing"
+  }
+ ],
+ "lstmeval": {
+  "int clean": 0.019,
+  "int degraded": 5.109,
+  "int lowres": 0.968,
+  "float clean": 0.019,
+  "float degraded": 5.141,
+  "float lowres": 0.954
+ },
+ "docbench": {
+  "n": 1000,
+  "validExact": 988,
+  "validWrong": 6,
+  "validWrongFromCorrection": 3,
+  "invalid": 5,
+  "notFound": 1,
+  "unavailable": 0,
+  "nameExact": 997,
+  "firstCharWrong": 1,
+  "chars": 89000,
+  "errors": 101,
+  "ms": 289167,
+  "cer": 0.113,
+  "validExactRate": 98.8,
+  "nameExactRate": 99.7,
+  "msPerStill": 289
+ },
+ "docbenchGroups": {
+  "TD1-clean": {
+   "n": 250,
+   "validExact": 246,
+   "validWrong": 2,
+   "validWrongFromCorrection": 1,
+   "invalid": 1,
+   "notFound": 1,
+   "unavailable": 0,
+   "nameExact": 248,
+   "firstCharWrong": 0,
+   "chars": 22500,
+   "errors": 93,
+   "ms": 73921,
+   "cer": 0.413,
+   "validExactRate": 98.4,
+   "nameExactRate": 99.2,
+   "msPerStill": 296
+  },
+  "TD1-degraded": {
+   "n": 250,
+   "validExact": 246,
+   "validWrong": 3,
+   "validWrongFromCorrection": 2,
+   "invalid": 1,
+   "notFound": 0,
+   "unavailable": 0,
+   "nameExact": 249,
+   "firstCharWrong": 0,
+   "chars": 22500,
+   "errors": 4,
+   "ms": 72465,
+   "cer": 0.018,
+   "validExactRate": 98.4,
+   "nameExactRate": 99.6,
+   "msPerStill": 290
+  },
+  "TD3-clean": {
+   "n": 250,
+   "validExact": 247,
+   "validWrong": 1,
+   "validWrongFromCorrection": 0,
+   "invalid": 2,
+   "notFound": 0,
+   "unavailable": 0,
+   "nameExact": 250,
+   "firstCharWrong": 0,
+   "chars": 22000,
+   "errors": 3,
+   "ms": 70570,
+   "cer": 0.014,
+   "validExactRate": 98.8,
+   "nameExactRate": 100,
+   "msPerStill": 282
+  },
+  "TD3-degraded": {
+   "n": 250,
+   "validExact": 249,
+   "validWrong": 0,
+   "validWrongFromCorrection": 0,
+   "invalid": 1,
+   "notFound": 0,
+   "unavailable": 0,
+   "nameExact": 250,
+   "firstCharWrong": 1,
+   "chars": 22000,
+   "errors": 1,
+   "ms": 72211,
+   "cer": 0.005,
+   "validExactRate": 99.6,
+   "nameExactRate": 100,
+   "msPerStill": 289
+  }
+ }
+}

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { MrzExpectation } from "@verify/shared";
 import { READER_LOAD_TIMEOUT_MS, type ReaderModule, createLazyMrzReader, unavailableRead } from "./lazyReader";
-import type { MrzReadResult, MrzReader } from "./types";
+import { MRZ_MODELS, type MrzReadResult, type MrzReader } from "./types";
 
 const EXPECTATION: MrzExpectation = { side: "document_front", format: "TD3", required: true };
 const IMAGE = { width: 4, height: 2, data: new Uint8Array(8) };
@@ -25,6 +25,18 @@ afterEach(() => {
 });
 
 describe("createLazyMrzReader", () => {
+  it("makes the real reader with the model it was given (M4), and names it when it cannot read", async () => {
+    const real = fakeReader();
+    const create = vi.fn<ReaderModule["createMrzReader"]>(() => real);
+    const own = MRZ_MODELS["mrz-2"];
+    const reader = createLazyMrzReader(async () => ({ createMrzReader: create }), READER_LOAD_TIMEOUT_MS, own);
+    await reader.read(IMAGE, EXPECTATION);
+    expect(create).toHaveBeenCalledWith({ model: own });
+    reader.dispose();
+    expect(await reader.read(IMAGE, EXPECTATION)).toEqual(unavailableRead("TD3", own.engine));
+    expect(unavailableRead("TD3").engine).toBe(MRZ_MODELS["mrz-1"].engine);
+  });
+
   it("loads the reader once, on the first warm-up, then reads with it", async () => {
     const real = fakeReader();
     const load = vi.fn(async () => module(real));

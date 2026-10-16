@@ -6,6 +6,7 @@ decision. Images stay in memory; raw OCR text never leaves this process. See REA
 """
 
 # Worker build, sent with every result (WorkerResultRequest.engine, at most 60 characters).
-WORKER_VERSION = "worker-1"
+# worker-2 (M4): reads the number and the birth and expiry dates on documents with code lines too.
+WORKER_VERSION = "worker-2"
 OCR_LABEL = "rapidocr-3.9.2/ppocrv6-small"
 ENGINE = f"{WORKER_VERSION}/{OCR_LABEL}"

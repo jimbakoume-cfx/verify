@@ -2,7 +2,7 @@
 // when a document with code lines is chosen, so the first page stays small and riders with another
 // document never fetch it. tesseract.js itself is loaded later still, by the reader's engine.
 import type { MrzFormat } from "@verify/shared";
-import type { MrzReadResult, MrzReader } from "./types";
+import { type MrzModel, type MrzReadResult, type MrzReader, OCR_ASSETS } from "./types";
 
 /**
  * The reader's code is a small chunk (about 15 KB): a download still pending after this long has
@@ -11,7 +11,7 @@ import type { MrzReadResult, MrzReader } from "./types";
 export const READER_LOAD_TIMEOUT_MS = 30_000;
 
 /** The result of a read that could not run. It never blocks the rider. */
-export function unavailableRead(format: MrzFormat): MrzReadResult {
+export function unavailableRead(format: MrzFormat, engine: string = OCR_ASSETS.engine): MrzReadResult {
   return {
     status: "unavailable",
     format,
@@ -22,20 +22,24 @@ export function unavailableRead(format: MrzFormat): MrzReadResult {
     rawText: "",
     charHeight: null,
     rotated: false,
+    engine,
   };
 }
 
-export type ReaderModule = { createMrzReader: () => MrzReader };
+export type ReaderModule = { createMrzReader: (deps?: { model?: MrzModel }) => MrzReader };
 
 /**
  * A reader that loads the real one on first use. A failed or stalled download (bad network) is
  * tried again on the next warm-up or read; until then reads come back "unavailable", which never
- * blocks the rider. A cancelled read returns at once, without waiting for the download.
+ * blocks the rider. A cancelled read returns at once, without waiting for the download. `model`:
+ * the reading model (mrzModelFor; default: the one for real sessions).
  */
 export function createLazyMrzReader(
   load: () => Promise<ReaderModule> = () => import("./reader"),
   loadTimeoutMs = READER_LOAD_TIMEOUT_MS,
+  model: MrzModel = OCR_ASSETS,
 ): MrzReader {
+  const unavailable = (format: MrzFormat) => unavailableRead(format, model.engine);
   let loading: Promise<MrzReader> | null = null;
   let disposed = false;
 
@@ -43,7 +47,7 @@ export function createLazyMrzReader(
     if (!loading) {
       // Without the timeout a stalled download would never settle, and every read (each retake
       // too) would wait on it: the rider would never get past the reading screen.
-      const attempt = withTimeout(load(), loadTimeoutMs).then(({ createMrzReader }) => createMrzReader());
+      const attempt = withTimeout(load(), loadTimeoutMs).then(({ createMrzReader }) => createMrzReader({ model }));
       loading = attempt;
       attempt.catch(() => {
         if (loading === attempt) loading = null;
@@ -64,13 +68,13 @@ export function createLazyMrzReader(
     },
     async read(image, expectation, options) {
       const signal = options?.signal;
-      if (disposed || signal?.aborted) return unavailableRead(expectation.format);
+      if (disposed || signal?.aborted) return unavailable(expectation.format);
       try {
         const reader = await untilAborted(get(), signal);
-        if (!reader || disposed) return unavailableRead(expectation.format);
+        if (!reader || disposed) return unavailable(expectation.format);
         return await reader.read(image, expectation, options);
       } catch {
-        return unavailableRead(expectation.format);
+        return unavailable(expectation.format);
       }
     },
     dispose() {

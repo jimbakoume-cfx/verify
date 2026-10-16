@@ -1,4 +1,4 @@
-# @verify/rider: rider verification flow (M1: ID capture, M2: MRZ reading, M3: server checks)
+# @verify/rider: rider verification flow (M1: ID capture, M2: MRZ reading, M3: server checks, M4: expired documents)
 
 The page a rider opens from the Confiance app: consent → choose the document → photograph the
 front (and back) → read the code lines (MRZ), for documents that have them → review → upload →
@@ -67,6 +67,12 @@ apart ("3 lines of <<< on the back").
   "Try again", a lasting refusal is dropped, and it never holds back the submit (staff then see
   "not received"). The server re-checks every check digit itself.
 - The lines are never logged or stored on the phone; the raw OCR text is shown only in `?debug=1`.
+- **Two reading models (M4).** Test sessions (`FlowSession.isTest`) read with our own model,
+  `mrz-2` (`public/ocr/mrz-2/`, cache key `ocr-mrz-2`); every other session with Doubango's `mrz-1`
+  (`MRZ_MODELS` and `mrzModelFor` in `src/mrz/types.ts`). Only the chosen model is downloaded. The
+  report's `engine` names the model that read (`tesseract.js-7.0.0/mrz-2`), and `?debug=1` shows it
+  ("Model"). Both models are pinned by `src/mrz/model.test.ts` and read every fixture in
+  `reader.fixtures.test.ts`.
 
 ## Server checks (M3)
 
@@ -93,6 +99,21 @@ screen waits, and `submit()` runs only after it.
   report still missing for the old photo is dropped (the server erases that photo).
 - Back does nothing on this screen, and leaving the page asks first, as during the upload. A submit
   that fails is retried on its own ("Try again"), without checking again.
+
+### An expired document (M4)
+
+`GET /flow/checks` also says `expired: true` when the server's code lines (every check digit right)
+give an expiry date before today. The screen then stops asking, keeps the photos without the scan
+line, and shows "This document has expired / Please use another, valid ID document." with:
+
+- **"Use another document"** (`expired/another`): back to the document list. Every photo of this
+  document is forgotten on the phone, so whatever is chosen next, the same type included, starts
+  with new photos; they replace the old ones on the server. The server's retakes stay counted.
+- **"Continue anyway"** (`expired/continue`): the wait starts again as usual (a retake may still be
+  asked), then the case is submitted; staff see the hard flag. The rider is not asked again.
+
+The message comes before any retake. An answer without `expired` (a server not yet updated) counts
+as `false`. Dev preview: `?screen=checking-expired`.
 
 ## Testing on a phone
 

@@ -258,6 +258,13 @@ class MemoryFlowRepo implements FlowRepo {
     return this.workerEnabled;
   }
 
+  /** M4: the firm flags of each case's consistency check. */
+  flags = new Map<string, string[]>();
+
+  async consistencyFlags(verificationId: string) {
+    return this.flags.get(verificationId) ?? [];
+  }
+
   /** What the worker function does when the server has checked a photo. */
   finishJob(captureId: string, verdict: string) {
     this.jobs.get(captureId)!.status = "done";
@@ -288,7 +295,7 @@ class MemoryCases implements CaseStore {
 
   async snapshot(verificationId: string): Promise<CaseSnapshot | null> {
     if (this.fail) throw new Error("snapshot failed");
-    return { verificationId, declaredDocument: null, sides: [], fingerprint: "0".repeat(32), job: null };
+    return { verificationId, declaredDocument: null, sides: [], documentData: [], fingerprint: "0".repeat(32), job: null };
   }
 
   async write(verificationId: string, _fingerprint: string, checks: CaseChecksPayload | null) {
@@ -666,6 +673,26 @@ describe("POST /document-type", () => {
     const { token } = await seed({ status: "in_progress" }, { consent: true });
     const session: FlowSession = await (await call("/document-type", token, { body: { declaredDocument } })).json();
     expect(session).toMatchObject({ declaredDocument, requiredSides: ["document_front", "document_back"] });
+  });
+
+  it("M4: decides the case's server checks again when the document changes, not when it stays", async () => {
+    const { call, seed, cases } = setup();
+    const { id, token } = await seed({ status: "in_progress" }, { consent: true });
+    await call("/document-type", token, { body: { declaredDocument: "cni_biometric" } });
+    expect(cases.writes).toEqual([]);
+    await call("/document-type", token, { body: { declaredDocument: "cni_biometric" } });
+    expect(cases.writes).toEqual([]);
+    await call("/document-type", token, { body: { declaredDocument: "passport" } });
+    expect(cases.writes).toEqual([{ verificationId: id, checks: null }]);
+  });
+
+  it("M4: a failed refresh after a new document is logged, never shown to the rider", async () => {
+    const { call, seed, cases, log } = setup();
+    const { token } = await seed({ status: "in_progress", declaredDocument: "cni_biometric" }, { consent: true });
+    cases.fail = true;
+    const res = await call("/document-type", token, { body: { declaredDocument: "passport" } });
+    expect(res.status).toBe(200);
+    expect(log.error).toHaveBeenCalledWith("flow.case_refresh_failed", expect.any(Error));
   });
 
   it("declares the document, audits, and may change it before submit", async () => {
@@ -1604,7 +1631,7 @@ describe("ringing the worker (M3)", () => {
     expect(ring.rings).toEqual([]);
     expect(repo.jobs.get(res.captureId as string)).toMatchObject({ status: "failed", errorCode: "ineligible" });
     const checks = await readJson(await call("/checks", token, { method: "GET" }));
-    expect(checks).toEqual({ done: true, sides: [{ kind: "document_front", captureId: res.captureId, state: "unchecked", reason: null }] });
+    expect(checks).toEqual({ done: true, sides: [{ kind: "document_front", captureId: res.captureId, state: "unchecked", reason: null }], expired: false });
   });
 
   it("rings for a real session once the switch is on", async () => {
@@ -1690,12 +1717,46 @@ describe("GET /checks", () => {
         { kind: "document_front", captureId: front, state: "pending", reason: null },
         { kind: "document_back", captureId: back, state: "pending", reason: null },
       ],
+      expired: false,
     });
     h.repo.finishJob(front, "ok");
     h.repo.jobs.get(back)!.status = "claimed";
     expect(await readJson(await get(h, token))).toMatchObject({ done: false, sides: [{ state: "ok" }, { state: "pending" }] });
     h.repo.finishJob(back, "poor");
     expect(await readJson(await get(h, token))).toMatchObject({ done: true, sides: [{ state: "ok" }, { state: "ok" }] });
+  });
+
+  it("M4: says the document expired once the side with the code lines is checked", async () => {
+    const h = setup();
+    const { id, token, front, back } = await cni(h);
+    h.repo.flags.set(id, ["document_expired", "mrz_print_mismatch"]);
+    expect(await readJson(await get(h, token))).toMatchObject({ done: false, expired: false });
+    h.repo.finishJob(back, "ok");
+    expect(await readJson(await get(h, token))).toMatchObject({ done: false, expired: true });
+    h.repo.finishJob(front, "ok");
+    expect(await readJson(await get(h, token))).toMatchObject({ done: true, expired: true });
+    // Other flags never reach the rider.
+    h.repo.flags.set(id, ["under_18", "mrz_print_mismatch", "date_logic"]);
+    expect(await readJson(await get(h, token))).toEqual({
+      done: true,
+      sides: [
+        { kind: "document_front", captureId: front, state: "ok", reason: null },
+        { kind: "document_back", captureId: back, state: "ok", reason: null },
+      ],
+      expired: false,
+    });
+  });
+
+  it("M4: never says expired for a document without code lines", async () => {
+    const h = setup();
+    const { id, token } = await h.ready({ declaredDocument: "cni_legacy" });
+    const front = (await readJson(await h.complete(token, "document_front"))).captureId as string;
+    const back = (await readJson(await h.complete(token, "document_back", buildJpeg({ width: 1600, height: 1009, padTo: 61_000 }))))
+      .captureId as string;
+    h.repo.finishJob(front, "ok");
+    h.repo.finishJob(back, "ok");
+    h.repo.flags.set(id, ["document_expired"]);
+    expect(await readJson(await get(h, token))).toMatchObject({ done: true, expired: false });
   });
 
   it("asks for one retake of an unusable photo, then follows the new photo", async () => {
@@ -1742,7 +1803,7 @@ describe("GET /checks", () => {
     h.repo.finishJob(front, "ok");
     h.repo.finishJob(back, "unreadable");
     const body = await readJson(await get(h, token));
-    expect(Object.keys(body).sort()).toEqual(["done", "sides"]);
+    expect(Object.keys(body).sort()).toEqual(["done", "expired", "sides"]);
     for (const side of body.sides as Record<string, unknown>[]) {
       expect(Object.keys(side).sort()).toEqual(["captureId", "kind", "reason", "state"]);
     }

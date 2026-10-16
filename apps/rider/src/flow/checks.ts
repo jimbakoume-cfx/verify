@@ -54,12 +54,16 @@ export interface ChecksWaitOptions<T> {
 /** How the wait ended: decided from an answer, or not in time ("timeout", also after an error). */
 export type ChecksWait<T> = { type: "decided"; decision: T } | { type: "timeout" };
 
-/** An answer shaped like FlowChecks. Anything else counts as an error (the wait ends). */
+/**
+ * An answer shaped like FlowChecks. Anything else counts as an error (the wait ends). `expired` (M4)
+ * may be missing, from a server not yet updated: it then counts as false.
+ */
 export function isFlowChecks(value: unknown): value is FlowChecks {
   if (value === null || typeof value !== "object") return false;
-  const { done, sides } = value as Partial<FlowChecks>;
+  const { done, sides, expired } = value as Partial<FlowChecks>;
   return (
     typeof done === "boolean" &&
+    (expired === undefined || typeof expired === "boolean") &&
     Array.isArray(sides) &&
     sides.every(
       (side: unknown) =>

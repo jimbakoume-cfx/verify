@@ -160,7 +160,15 @@ export function FlowView({ state, actions, debug }: { state: FlowState; actions:
     case "upload":
       return <UploadScreen upload={state.upload} error={state.error} onRetry={actions.retryUpload} />;
     case "checking":
-      return <CheckingScreen shots={sideShots(state)} document={state.document} />;
+      return (
+        <CheckingScreen
+          shots={sideShots(state)}
+          document={state.document}
+          expired={state.expiredNotice === "shown"}
+          onAnotherDocument={actions.chooseAnotherDocument}
+          onContinueAnyway={actions.continueExpired}
+        />
+      );
     case "done":
       return <DoneScreen />;
     case "sessionError":

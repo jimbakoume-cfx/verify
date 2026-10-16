@@ -1,7 +1,7 @@
 // Camera: the sharp ID card (as in capture-card.spec.ts), declared as the new CNI (2025), whose back
 // carries 3 code lines (TD1). The fake card prints real OCR-B specimen lines with valid check digits
 // (e2e/fixtures/mrz), and the real OCR engine reads them in the browser.
-import { OCR_ASSETS } from "../apps/rider/src/mrz/types";
+import { MRZ_MODELS, OCR_ASSETS, mrzModelFor } from "../apps/rider/src/mrz/types";
 import { MRZ_LINES } from "./support/camera";
 import { NEW_CNI_FLOW, expectCleanPhoto } from "./support/expectations";
 import { expect, test } from "./support/fixtures";
@@ -46,7 +46,7 @@ test("new CNI: the code lines on the back are read, the rider only sees 'Code li
     lines: MRZ_LINES.td1,
     attempts: 1,
     corrections: expect.any(Number),
-    engine: OCR_ASSETS.engine,
+    engine: mrzModelFor(true).engine,
     ms: expect.any(Number),
   });
   // The server's own verdict: every check digit right, the dates real, "I" fits an ID card.
@@ -92,9 +92,47 @@ test("OCR engine blocked: the rider is not held up, and the server is told the r
   expect(backend.routes).toEqual(NEW_CNI_FLOW);
   const backCapture = backend.captures.find((c) => c.kind === "document_back")!;
   expect(backend.mrzReports.map((r) => r.body)).toEqual([
-    { captureId: backCapture.captureId, result: "unreadable", reason: "reader_unavailable", attempts: 1, engine: OCR_ASSETS.engine },
+    { captureId: backCapture.captureId, result: "unreadable", reason: "reader_unavailable", attempts: 1, engine: mrzModelFor(true).engine },
   ]);
   // Staff are asked to look at it.
   expect(backend.mrzReports[0].outcome).toBe("flag");
   expect(backend.status).toBe("submitted");
+});
+
+test("M4: the model follows the session: ours for a test session, Doubango's for any other", async ({ page, rider, backend }) => {
+  const models: string[] = [];
+  page.on("request", (request) => {
+    const path = new URL(request.url()).pathname;
+    if (path.endsWith(".traineddata.gz")) models.push(path);
+  });
+  backend.isTest = false;
+  await rider.begin("cni_biometric");
+  await rider.autoCapture("cni_biometric", "document_front");
+  await rider.usePhoto();
+  await rider.turnOver();
+  await rider.autoCapture("cni_biometric", "document_back");
+  await expect(rider.mrzRead).toHaveText(rider.t("mrz.read"));
+  await rider.usePhoto();
+  await expect(rider.heading("done.title")).toBeVisible({ timeout: 20_000 });
+
+  // Only Doubango's file was fetched, and the report names it.
+  expect(new Set(models)).toEqual(new Set([`${MRZ_MODELS["mrz-1"].langPath}/${OCR_ASSETS.language}.traineddata.gz`]));
+  expect(backend.mrzReports.map((r) => [r.body.engine, r.outcome])).toEqual([[MRZ_MODELS["mrz-1"].engine, "pass"]]);
+  expect(mrzModelFor(false)).toBe(MRZ_MODELS["mrz-1"]);
+});
+
+test("M4: a test session fetches our own model only", async ({ page, rider, backend }) => {
+  const models: string[] = [];
+  page.on("request", (request) => {
+    const path = new URL(request.url()).pathname;
+    if (path.endsWith(".traineddata.gz")) models.push(path);
+  });
+  await rider.begin("cni_biometric");
+  await rider.autoCapture("cni_biometric", "document_front");
+  await rider.usePhoto();
+  await rider.turnOver();
+  await rider.autoCapture("cni_biometric", "document_back");
+  await expect(rider.mrzRead).toHaveText(rider.t("mrz.read"));
+  expect(new Set(models)).toEqual(new Set([`${MRZ_MODELS["mrz-2"].langPath}/${OCR_ASSETS.language}.traineddata.gz`]));
+  expect(backend.session().isTest).toBe(true);
 });

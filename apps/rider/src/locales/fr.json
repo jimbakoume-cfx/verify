@@ -169,7 +169,13 @@
     "body": "Nous vérifions que vos photos sont nettes et lisibles. Cela prend quelques secondes.",
     "keepOpen": "Gardez cette page ouverte.",
     "retake": "{{side}} : photo à reprendre",
-    "unreadable": "Texte illisible : évitez le flou et les reflets"
+    "unreadable": "Texte illisible : évitez le flou et les reflets",
+    "expired": {
+      "title": "Ce document a expiré",
+      "body": "Utilisez une autre pièce d'identité, en cours de validité.",
+      "another": "Utiliser une autre pièce",
+      "continue": "Continuer quand même"
+    }
   },
   "done": {
     "title": "Photos reçues",
@@ -245,6 +251,7 @@
     "attempts": "essais",
     "mrz": {
       "title": "Lignes de code (MRZ)",
+      "model": "modèle",
       "status": "résultat",
       "format": "format",
       "charHeight": "hauteur des caractères",

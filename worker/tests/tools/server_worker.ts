@@ -13,6 +13,7 @@
 import type { AuditEntry } from "../../../supabase/functions/_shared/audit.ts";
 import type { CaptureSide, DeclaredDocument } from "../../../supabase/functions/_shared/contract.ts";
 import type { CaseSnapshot, JobStatus } from "../../../supabase/functions/worker/case.ts";
+import type { SideDocumentData } from "../../../supabase/functions/worker/consistency.ts";
 import type { CaptureEvidence } from "../../../supabase/functions/worker/decide.ts";
 import {
   type ClaimedJob,
@@ -48,10 +49,12 @@ interface Job extends JobConfig {
   status: JobStatus;
   attempts: number;
   evidence: CaptureEvidence | null;
+  /** What the database would decrypt for the snapshot (M4): code lines and fields, no sub-type. */
+  data: SideDocumentData | null;
 }
 
 const config = JSON.parse(await Deno.readTextFile(Deno.args[0])) as Config;
-const jobs: Job[] = config.jobs.map((job) => ({ ...job, status: "pending", attempts: 0, evidence: null }));
+const jobs: Job[] = config.jobs.map((job) => ({ ...job, status: "pending", attempts: 0, evidence: null, data: null }));
 const nonces = new Set<string>();
 // Bumped by every recorded result: the snapshot's fingerprint, as the database's changes when a case does.
 let version = 0;
@@ -107,6 +110,7 @@ const repo: WorkerRepo = {
       verificationId: job.verificationId,
       declaredDocument: job.declaredDocument,
       sides: ofCase.map((j) => ({ kind: j.kind, captureId: j.captureId, evidence: j.evidence })),
+      documentData: ofCase.flatMap((j) => (j.data ? [j.data] : [])),
       fingerprint: `v${version}`,
       job: {
         id: job.jobId,
@@ -125,6 +129,15 @@ const repo: WorkerRepo = {
     if (record.fingerprint !== `v${version}`) return Promise.resolve("stale");
     job.status = "done";
     job.evidence = record.evidence;
+    if (record.mrzLines !== null || record.fields !== null) {
+      const { subtype: _subtype, ...fields } = record.fields === null ? {} : JSON.parse(record.fields);
+      job.data = {
+        kind: job.kind,
+        captureId: job.captureId,
+        mrzLines: record.mrzLines === null ? null : record.mrzLines.split("\n"),
+        fields: record.fields === null ? null : fields,
+      };
+    }
     version += 1;
     emit({
       event: "result",

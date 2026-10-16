@@ -7,8 +7,8 @@ function side(kind: FlowCheckSide["kind"], state: FlowCheckSide["state"]): FlowC
   return { kind, captureId: `capture-${kind}`, state, reason: state === "retake" ? "unreadable" : null };
 }
 
-const pending: FlowChecks = { done: false, sides: [side("document_front", "pending")] };
-const ok: FlowChecks = { done: true, sides: [side("document_front", "ok")] };
+const pending: FlowChecks = { done: false, sides: [side("document_front", "pending")], expired: false };
+const ok: FlowChecks = { done: true, sides: [side("document_front", "ok")], expired: false };
 
 /** decide() as the flow uses it: settled once nothing is pending. */
 const decide = (checks: FlowChecks) => (checks.done ? "submit" : null);
@@ -132,6 +132,13 @@ describe("isFlowChecks", () => {
     expect(isFlowChecks({ done: true })).toBe(false);
     expect(isFlowChecks({ done: true, sides: [{ kind: "document_front", state: "maybe" }] })).toBe(false);
     expect(isFlowChecks({ done: true, sides: [null] })).toBe(false);
+  });
+
+  it("takes `expired` (M4) as a boolean, or missing (a server not yet updated)", () => {
+    expect(isFlowChecks({ ...ok, expired: true })).toBe(true);
+    expect(isFlowChecks({ done: true, sides: [] })).toBe(true);
+    expect(isFlowChecks({ ...ok, expired: "yes" })).toBe(false);
+    expect(isFlowChecks({ ...ok, expired: null })).toBe(false);
   });
 });
 

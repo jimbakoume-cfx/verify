@@ -24,7 +24,9 @@
         "subtype": null,
         "fields": {
           "surname": "SPECIMEN",
-          "givenNames": "HELENE TEST"
+          "givenNames": "HELENE TEST",
+          "birthDate": "1990-02-15",
+          "expiryDate": "2035-03-02"
         }
       },
       "printed": {
@@ -224,12 +226,16 @@
         "fields": {
           "surname": "ECHANTILLON",
           "givenNames": "FRANCOIS ESSAI",
-          "issueDate": "2023-06-30"
+          "documentNumber": "SP7654321",
+          "issueDate": "2023-06-30",
+          "birthDate": "1985-07-04",
+          "expiryDate": "2028-06-30"
         }
       },
       "printed": {
         "surname": "ÉCHANTILLON",
         "givenNames": "FRANÇOIS ESSAI",
+        "documentNumber": "SP7654321",
         "issueDate": "2023-06-30",
         "birthDate": "1985-07-04",
         "expiryDate": "2028-06-30"
@@ -268,6 +274,7 @@
       "printed": {
         "surname": "ÉCHANTILLON",
         "givenNames": "FRANÇOIS ESSAI",
+        "documentNumber": "SP7654321",
         "issueDate": "2023-06-30",
         "birthDate": "1985-07-04",
         "expiryDate": "2028-06-30"
@@ -299,12 +306,16 @@
         "fields": {
           "surname": "MODEL",
           "givenNames": "ALEX SAMPLE",
-          "issueDate": "2022-09-01"
+          "documentNumber": "UT1234567",
+          "issueDate": "2022-09-01",
+          "birthDate": "1979-03-12",
+          "expiryDate": "2032-08-31"
         }
       },
       "printed": {
         "surname": "MODEL",
         "givenNames": "ALEX SAMPLE",
+        "documentNumber": "UT1234567",
         "issueDate": "2022-09-01",
         "birthDate": "1979-03-12",
         "expiryDate": "2032-08-31"
@@ -336,12 +347,16 @@
         "fields": {
           "surname": "MODEL",
           "givenNames": "ALEX SAMPLE",
-          "issueDate": "2022-09-01"
+          "documentNumber": "UT1234567",
+          "issueDate": "2022-09-01",
+          "birthDate": "1979-03-12",
+          "expiryDate": "2032-08-31"
         }
       },
       "printed": {
         "surname": "MODEL",
         "givenNames": "ALEX SAMPLE",
+        "documentNumber": "UT1234567",
         "issueDate": "2022-09-01",
         "birthDate": "1979-03-12",
         "expiryDate": "2032-08-31"
@@ -366,7 +381,9 @@
         "subtype": "carte_de_sejour",
         "fields": {
           "surname": "DEMO",
-          "givenNames": "AICHA ESSAI"
+          "givenNames": "AICHA ESSAI",
+          "birthDate": "1988-05-21",
+          "expiryDate": "2027-04-15"
         }
       },
       "printed": {
@@ -433,7 +450,9 @@
         "subtype": "carte_de_resident",
         "fields": {
           "surname": "FICTIF",
-          "givenNames": "OMAR TEST"
+          "givenNames": "OMAR TEST",
+          "birthDate": "1976-09-30",
+          "expiryDate": "2035-06-01"
         }
       },
       "printed": {
@@ -500,7 +519,9 @@
         "subtype": "refugee",
         "fields": {
           "surname": "ESSAI",
-          "givenNames": "GRACE EXEMPLE"
+          "givenNames": "GRACE EXEMPLE",
+          "birthDate": "1995-01-17",
+          "expiryDate": "2027-09-10"
         }
       },
       "printed": {
@@ -869,6 +890,207 @@
       },
       "printed": {},
       "never": []
+    },
+    {
+      "file": "passport-expired.jpg",
+      "document": "passport_expired",
+      "side": "document_front",
+      "declaredDocument": "passport",
+      "width": 1280,
+      "height": 901,
+      "variant": "clean",
+      "expected": {
+        "family": "passport",
+        "basis": "mrz",
+        "rotation": 0,
+        "orientation": "landscape",
+        "mrz": {
+          "format": "TD3",
+          "lines": [
+            "P<CMRPERIME<<JEAN<ESSAI<<<<<<<<<<<<<<<<<<<<<",
+            "SP11223341CMR8003122M1902097<<<<<<<<<<<<<<02"
+          ]
+        },
+        "qr": false,
+        "subtype": null,
+        "fields": {
+          "surname": "PERIME",
+          "givenNames": "JEAN ESSAI",
+          "documentNumber": "SP1122334",
+          "issueDate": "2014-02-10",
+          "birthDate": "1980-03-12",
+          "expiryDate": "2019-02-09"
+        }
+      },
+      "printed": {
+        "surname": "PÉRIMÉ",
+        "givenNames": "JEAN ESSAI",
+        "documentNumber": "SP1122334",
+        "issueDate": "2014-02-10",
+        "birthDate": "1980-03-12",
+        "expiryDate": "2019-02-09"
+      },
+      "never": [
+        "VILLE-TEST",
+        "DGSN TEST",
+        "CAMEROUNAISE"
+      ]
+    },
+    {
+      "file": "passport-mismatch.jpg",
+      "document": "passport_mismatch",
+      "side": "document_front",
+      "declaredDocument": "passport",
+      "width": 1280,
+      "height": 901,
+      "variant": "clean",
+      "expected": {
+        "family": "passport",
+        "basis": "mrz",
+        "rotation": 0,
+        "orientation": "landscape",
+        "mrz": {
+          "format": "TD3",
+          "lines": [
+            "P<CMRMODELE<<PAUL<TEST<<<<<<<<<<<<<<<<<<<<<<",
+            "SP55667783CMR8709239M2901145<<<<<<<<<<<<<<02"
+          ]
+        },
+        "qr": false,
+        "subtype": null,
+        "fields": {
+          "surname": "DIFFERENT",
+          "givenNames": "PAUL TEST",
+          "documentNumber": "SP5566778",
+          "issueDate": "2024-01-15",
+          "birthDate": "1987-09-23",
+          "expiryDate": "2029-01-14"
+        }
+      },
+      "printed": {
+        "surname": "DIFFÉRENT",
+        "givenNames": "PAUL TEST",
+        "documentNumber": "SP5566778",
+        "issueDate": "2024-01-15",
+        "birthDate": "1987-09-23",
+        "expiryDate": "2029-01-14"
+      },
+      "never": [
+        "VILLE-TEST",
+        "DGSN TEST",
+        "CAMEROUNAISE"
+      ]
+    }
+  ],
+  "consistencyToday": "2026-10-15T09:00:00Z",
+  "cases": [
+    {
+      "declaredDocument": "cni_biometric",
+      "photos": [
+        "cni-new-front.jpg",
+        "cni-new-back.jpg"
+      ],
+      "consistency": {
+        "flags": [],
+        "provisional": [],
+        "basis": "mrz",
+        "mismatches": []
+      }
+    },
+    {
+      "declaredDocument": "passport",
+      "photos": [
+        "passport-cmr.jpg"
+      ],
+      "consistency": {
+        "flags": [],
+        "provisional": [],
+        "basis": "mrz",
+        "mismatches": []
+      }
+    },
+    {
+      "declaredDocument": "passport",
+      "photos": [
+        "passport-uto.jpg"
+      ],
+      "consistency": {
+        "flags": [],
+        "provisional": [],
+        "basis": "mrz",
+        "mismatches": []
+      }
+    },
+    {
+      "declaredDocument": "residence_permit",
+      "photos": [
+        "sejour-new-front.jpg",
+        "sejour-new-back.jpg"
+      ],
+      "consistency": {
+        "flags": [],
+        "provisional": [],
+        "basis": "mrz",
+        "mismatches": []
+      }
+    },
+    {
+      "declaredDocument": "cni_legacy",
+      "photos": [
+        "cni-old-front.jpg",
+        "cni-old-back.jpg"
+      ],
+      "consistency": {
+        "flags": [],
+        "provisional": [],
+        "basis": "printed",
+        "mismatches": []
+      }
+    },
+    {
+      "declaredDocument": "residence_permit",
+      "photos": [
+        "permit-old-front.jpg",
+        "permit-old-back.jpg"
+      ],
+      "consistency": {
+        "flags": [],
+        "provisional": [
+          "document_expired"
+        ],
+        "basis": "printed",
+        "mismatches": []
+      }
+    },
+    {
+      "declaredDocument": "passport",
+      "photos": [
+        "passport-expired.jpg"
+      ],
+      "consistency": {
+        "flags": [
+          "document_expired"
+        ],
+        "provisional": [],
+        "basis": "mrz",
+        "mismatches": []
+      }
+    },
+    {
+      "declaredDocument": "passport",
+      "photos": [
+        "passport-mismatch.jpg"
+      ],
+      "consistency": {
+        "flags": [
+          "mrz_print_mismatch"
+        ],
+        "provisional": [],
+        "basis": "mrz",
+        "mismatches": [
+          "name"
+        ]
+      }
     }
   ]
 }

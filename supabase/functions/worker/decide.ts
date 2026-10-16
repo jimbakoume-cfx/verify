@@ -21,6 +21,7 @@ import {
   type OcrFieldsDetails,
   type PolicyReason,
   type QualityServerDetails,
+  REQUIRED_SIDES,
   type RetakeReason,
   SERVER_CHECK_NAMES,
   type WorkerFields,
@@ -367,12 +368,15 @@ function keywordFamily(sides: readonly CaseSide[]): { detected: DetectedDocument
 }
 
 /**
- * The case-level checks from the newest live photo of each side, or null while no photo has a
- * server result. Code lines decide the family firmly (the side that carries them first); otherwise
- * keywords decide provisionally (shown as such, never a retake or a decision on their own).
+ * The case-level checks from the newest live photo of each side the declared document needs, or null
+ * while no such photo has a server result. A photo of another side (left from an earlier choice of
+ * document, M4) does not count. Code lines decide the family firmly (the side that carries them
+ * first); otherwise keywords decide provisionally (shown as such, never a retake or a decision on
+ * their own).
  */
 export function decideCase(declared: DeclaredDocument | null, sides: readonly CaseSide[]): CaseDecision | null {
-  const known = sides.filter((s) => s.evidence !== null);
+  const required: readonly CaptureSide[] | null = declared ? REQUIRED_SIDES[declared] : null;
+  const known = sides.filter((s) => s.evidence !== null && (!required || required.includes(s.kind)));
   if (known.length === 0) return null;
   const expectation = declared ? MRZ_EXPECTATION[declared] : null;
 

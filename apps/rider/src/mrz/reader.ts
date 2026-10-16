@@ -17,10 +17,12 @@ import {
 } from "@verify/capture";
 import { type MrzExpectation, correctMrz, parseMrz } from "@verify/shared";
 import { type OcrEngine, createOcrEngine } from "./ocrEngine";
-import type { MrzReadOptions, MrzReadResult, MrzReadStatus, MrzReader } from "./types";
+import { type MrzModel, type MrzReadOptions, type MrzReadResult, type MrzReadStatus, type MrzReader, OCR_ASSETS } from "./types";
 
 export interface MrzReaderDeps {
-  /** Default: the tesseract.js engine with the self-hosted files (OCR_ASSETS). */
+  /** The reading model (default: the one for real sessions, OCR_ASSETS). */
+  model?: MrzModel;
+  /** Default: the tesseract.js engine with the self-hosted files (OCR_ASSETS) and `model`. */
   engine?: OcrEngine;
   /** Clock for `ms`. */
   now?: () => number;
@@ -42,7 +44,8 @@ interface Pass {
 const RANK: Record<MrzReadStatus, number> = { valid: 3, invalid: 2, not_found: 1, unavailable: 0 };
 
 export function createMrzReader(deps: MrzReaderDeps = {}): MrzReader {
-  const engine = deps.engine ?? createOcrEngine();
+  const model = deps.model ?? OCR_ASSETS;
+  const engine = deps.engine ?? createOcrEngine({ langPath: model.langPath, cachePath: model.cachePath });
   const now = deps.now ?? (() => performance.now());
   const today = deps.today ?? (() => new Date());
 
@@ -61,6 +64,7 @@ export function createMrzReader(deps: MrzReaderDeps = {}): MrzReader {
         rawText: pass?.rawText ?? "",
         charHeight: pass?.charHeight ?? null,
         rotated: pass?.rotated ?? false,
+        engine: model.engine,
       };
     };
 

@@ -221,6 +221,9 @@ a:hover { color: var(--brand-hover); }
 .dash-reasons { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
 .dash-reasons li { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .dash-reasons code { font-size: 0.8rem; color: var(--text-3); }
+/* M4: a hard flag (expired document, under 18) is never approved automatically: red, set apart. */
+.dash-reasons li.hard { border-left: 4px solid var(--bad); padding-left: 8px; }
+.dash-reasons li.hard strong { color: var(--bad); }
 
 .dash-footer { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; }
 

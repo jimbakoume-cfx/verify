@@ -201,7 +201,12 @@
         "mrz_unreadable_server": "Code lines not read by the server",
         "phone_report_missing": "Phone report missing",
         "provisional_classification": "Type recognised provisionally",
-        "server_unchecked": "Photo not checked by the server"
+        "server_unchecked": "Photo not checked by the server",
+        "document_expired": "Document expired",
+        "under_18": "Under 18",
+        "mrz_print_mismatch": "Printed text differs from the code lines",
+        "date_logic": "Dates contradict each other",
+        "number_format": "Unexpected number format"
       },
       "body": {
         "manual_review_document": "This kind of document is always reviewed by a person: it has no code lines the server can check (old ID card, driving licence, voter card), or it is a residence permit or refugee card.",
@@ -213,7 +218,12 @@
         "mrz_unreadable_server": "The server could not read code lines of the expected format on the photo.",
         "phone_report_missing": "The phone's reading of the code lines was not received, so the server's reading could not be compared with it.",
         "provisional_classification": "The document type was recognised from printed words only, not from code lines. This is provisional until tuned on real documents.",
-        "server_unchecked": "The server could not check at least one photo (worker unavailable, daily budget reached, or only test sessions processed for now)."
+        "server_unchecked": "The server could not check at least one photo (worker unavailable, daily budget reached, or only test sessions processed for now).",
+        "document_expired": "The expiry date read from the code lines (or, without them, the printed one) has passed. Hard flag: never approved automatically.",
+        "under_18": "From the birth date (code lines, otherwise printed), the holder is under 18 today. Hard flag: never approved automatically.",
+        "mrz_print_mismatch": "A printed field does not match the code lines, after a tolerant comparison (accents, spaces, truncated names, look-alike characters). Compare with \"Show data read\".",
+        "date_logic": "The code lines' dates contradict each other (birth after expiry).",
+        "number_format": "The document number does not follow the format known for this document."
       }
     },
     "verdict": {
@@ -259,6 +269,27 @@
       "title": "Printed text read",
       "found": "Fields found: {{fields}}. Their values are behind “Show data read”.",
       "none": "No field read."
+    },
+    "hardFlag": "Hard flag",
+    "consistency": {
+      "title": "Consistency",
+      "pending": "No server result yet.",
+      "basis": {
+        "mrz": "From the code lines (firm), compared with the printed text.",
+        "printed": "From the printed text only (provisional).",
+        "none": "Nothing to compare: no code lines or printed text read."
+      },
+      "none": "Nothing inconsistent.",
+      "nothing": "Nothing to compare.",
+      "mismatches": "Fields that differ: {{kinds}}",
+      "kind": {
+        "name": "Name",
+        "number": "Number",
+        "birth_date": "Birth date",
+        "expiry_date": "Expiry date"
+      },
+      "provisionalTitle": "Provisional notes",
+      "provisionalBody": "From the printed text, whose formats are not yet checked on real documents: for information, they decide nothing."
     }
   },
   "mrz": {

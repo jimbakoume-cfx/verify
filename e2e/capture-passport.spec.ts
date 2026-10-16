@@ -1,6 +1,6 @@
 // Camera: a sharp passport data page, as a Full HD phone held upright sees it. The page prints real
 // OCR-B specimen code lines (TD3, valid check digits; e2e/fixtures/mrz), read in the browser.
-import { OCR_ASSETS } from "../apps/rider/src/mrz/types";
+import { OCR_ASSETS, mrzModelFor } from "../apps/rider/src/mrz/types";
 import { MRZ_LINES } from "./support/camera";
 import { PASSPORT_FLOW, expectAutoQuality, expectCleanPhoto } from "./support/expectations";
 import { expect, test } from "./support/fixtures";
@@ -23,6 +23,8 @@ test("passport: only the photo page is taken, its code lines are read (every che
   await expect(rider.mrzDebug.locator("ul.mrz-checks li")).toHaveText(checks.map((key) => `✅ ${rider.t(`debug.mrz.check.${key}`)}`));
   const values = await rider.debugValues("still");
   expect(values[rider.t("debug.mrz.status")]).toBe("valid");
+  // M4: a test session reads with our own model, and the panel says which model read the lines.
+  expect(values[rider.t("debug.mrz.model")]).toBe(mrzModelFor(true).engine);
   expect(values[rider.t("debug.mrz.format")]).toBe("TD3");
   expect(values[rider.t("debug.mrz.field.documentCode")]).toBe("P ✅");
   expect(values[rider.t("debug.mrz.field.issuingState")]).toBe("UTO");
@@ -50,7 +52,7 @@ test("passport: only the photo page is taken, its code lines are read (every che
     result: "read",
     lines: MRZ_LINES.td3,
     attempts: 1,
-    engine: OCR_ASSETS.engine,
+    engine: mrzModelFor(true).engine,
   });
   expect(report.outcome).toBe("pass");
   expect(report.details.checks).toEqual({

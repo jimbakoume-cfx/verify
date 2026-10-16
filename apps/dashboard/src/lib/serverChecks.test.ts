@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { MrzServerDetails, OcrFieldsDetails, QualityServerDetails } from "@verify/shared";
+import type { DocumentPolicyDetails, MrzServerDetails, OcrFieldsDetails, PolicyReason, QualityServerDetails } from "@verify/shared";
 import type { CaptureRecord, CheckRecord, ServerChecks, ServerJobState } from "./records";
-import { declaredMatch, mayHaveDocumentData, serverOverview, VERDICT_TONE } from "./serverChecks";
+import { declaredMatch, isHardFlag, mayHaveDocumentData, serverOverview, VERDICT_TONE } from "./serverChecks";
 
 function capture(id: string, kind: string, createdAt: string, deleted = false): CaptureRecord {
   return { id, kind, createdAt, deleted, supersededBy: null } as CaptureRecord;
@@ -37,7 +37,15 @@ const MRZ: MrzServerDetails = {
   phone: "agrees",
 };
 const FIELDS: OcrFieldsDetails = { found: ["surname"], provisional: true };
-const NONE: ServerChecks = { quality: [], mrz: [], fields: [], classification: null, policy: null, jobs: new Map() };
+const NONE: ServerChecks = {
+  quality: [],
+  mrz: [],
+  fields: [],
+  classification: null,
+  policy: null,
+  consistency: null,
+  jobs: new Map(),
+};
 const withJobs = (checks: ServerChecks, ...entries: [string, ServerJobState][]): ServerChecks => ({ ...checks, jobs: new Map(entries) });
 
 const FRONT = capture("front-1", "document_front", "2026-10-14T08:00:00Z");
@@ -165,5 +173,30 @@ describe("mayHaveDocumentData", () => {
     expect(mayHaveDocumentData(false, { ...NONE, policy: check(null, { reasons: ["server_unchecked" as const] }) })).toBe(
       false,
     );
+  });
+});
+
+describe("M4: consistency and hard flags", () => {
+  it("passes the consistency check through, and counts it as the server having started", () => {
+    const consistency = check(null, { flags: ["document_expired" as const], provisional: [], basis: "mrz" as const, mismatches: [] }, "flag");
+    const overview = serverOverview("passport", [], { ...NONE, consistency });
+    expect(overview.consistency).toBe(consistency);
+    expect(overview.started).toBe(true);
+    expect(serverOverview("passport", [], NONE).started).toBe(false);
+  });
+
+  it("lists the reasons in the contract's order, the hard flags first", () => {
+    const reasons: PolicyReason[] = ["type_mismatch", "under_18", "mrz_print_mismatch", "document_expired"];
+    const policy = check<DocumentPolicyDetails>(null, { reasons }, "flag");
+    expect(serverOverview("passport", [], { ...NONE, policy }).reasons)
+      .toEqual(["document_expired", "under_18", "mrz_print_mismatch", "type_mismatch"]);
+  });
+
+  it("knows the hard flags, and only those", () => {
+    expect(isHardFlag("document_expired")).toBe(true);
+    expect(isHardFlag("under_18")).toBe(true);
+    for (const code of ["mrz_print_mismatch", "date_logic", "number_format", "manual_review_document", "type_mismatch"]) {
+      expect(isHardFlag(code)).toBe(false);
+    }
   });
 });
