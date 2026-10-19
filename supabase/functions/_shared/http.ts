@@ -31,6 +31,11 @@ const DEFAULT_MESSAGES: Record<ErrorCode, string> = {
   audit_failed: "The access could not be recorded, so it was refused.",
   invalid_invite: "The email or invite code is not valid.",
   weak_password: "The password does not meet the requirements.",
+  already_decided: "This verification has already been decided.",
+  not_submitted: "This verification has not been submitted yet.",
+  note_required: "A note is required for this decision.",
+  invalid_reason: "Unknown or inactive reason code.",
+  stale_version: "The thresholds changed meanwhile; reload and try again.",
   server_error: "Something went wrong. Please try again.",
 };
 

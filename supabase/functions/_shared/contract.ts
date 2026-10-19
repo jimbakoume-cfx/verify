@@ -653,6 +653,7 @@ export interface DocumentPolicyDetails {
 //   POST /admin/test-sessions  TestSessionRequest -> TestSessionResponse   (staff token; supervisor or admin)
 //   POST /admin/captures/view  CaptureViewRequest -> CaptureViewResponse   (staff token; supervisor, or the assigned reviewer; never admin)
 //   POST /admin/document-data  DocumentDataRequest -> DocumentDataResponse (staff token; supervisor, or the assigned reviewer; never admin; M2)
+//   POST /admin/decisions, POST /admin/thresholds (M8): see "Decisions and thresholds" below.
 // Staff token = `Authorization: Bearer <access token>` from supabase.auth.signInWithPassword.
 // ---------------------------------------------------------------------------
 
@@ -726,6 +727,62 @@ export interface DocumentDataResponse {
 }
 
 // ---------------------------------------------------------------------------
+// Decisions and thresholds (M8). Edge Function "admin". The score, the thresholds and the rules are
+// in risk.ts; the database computes and stores each case's assessment.
+//   POST /admin/decisions   DecisionRequest -> DecisionResponse                 (staff token; supervisor, or the assigned reviewer; never admin)
+//   POST /admin/thresholds  ThresholdVersionRequest -> ThresholdVersionResponse (staff token; admin only)
+// ---------------------------------------------------------------------------
+/** The database enum decision_outcome. A staff member decides approve or reject; review is the system's. */
+export const DECISION_OUTCOMES = ["approve", "reject", "review"] as const;
+export type DecisionOutcome = (typeof DECISION_OUTCOMES)[number];
+export const STAFF_DECISIONS = ["approve", "reject"] as const;
+export type StaffDecision = (typeof STAFF_DECISIONS)[number];
+
+/** Staff-only note kept with a decision (never shown to the rider). */
+export const DECISION_NOTE_MAX_LENGTH = 1000;
+
+export interface DecisionRequest {
+  verificationId: string;
+  outcome: StaffDecision;
+  /** A reject's rider-facing reason (reason_code table, active); null for an approval. */
+  reasonCode: string | null;
+  /**
+   * Required when the decision goes against the recommendation, and when approving a case with a
+   * hard flag (note_required otherwise).
+   */
+  note: string | null;
+}
+
+export interface DecisionResponse {
+  decisionId: string;
+  status: "approved" | "rejected";
+  /** The recommendation shown when the decision was taken, and the threshold version behind it. */
+  recommendation: DecisionOutcome | null;
+  /** Null when the recommendation was review (or the case had none). Kept for the calibration (M12). */
+  agreesWithRecommendation: boolean | null;
+  thresholdVersion: number | null;
+}
+
+export const THRESHOLD_NOTE_MIN_LENGTH = 5;
+export const THRESHOLD_NOTE_MAX_LENGTH = 500;
+
+export interface ThresholdVersionRequest {
+  /** The active version the new one was edited from: refused with stale_version if it is no longer active. */
+  baseVersion: number;
+  /** A ThresholdConfig (risk.ts), checked by thresholdConfigErrors here and again by the database. */
+  config: Record<string, unknown>;
+  /** Why (THRESHOLD_NOTE_MIN_LENGTH to THRESHOLD_NOTE_MAX_LENGTH characters). */
+  note: string;
+}
+
+export interface ThresholdVersionResponse {
+  /** The new active version. */
+  version: number;
+  /** Submitted, undecided cases whose assessment changed with it. */
+  rescored: number;
+}
+
+// ---------------------------------------------------------------------------
 // Errors: every non-2xx response body is { error: { code, message } }.
 // ---------------------------------------------------------------------------
 export const ERROR_CODES = [
@@ -754,6 +811,12 @@ export const ERROR_CODES = [
   "audit_failed",
   "invalid_invite",
   "weak_password",
+  // M8
+  "already_decided",
+  "not_submitted",
+  "note_required",
+  "invalid_reason",
+  "stale_version",
   "server_error",
 ] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number];
