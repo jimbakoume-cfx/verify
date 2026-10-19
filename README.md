@@ -32,8 +32,9 @@ In-house identity verification (KYC) for Confiance riders. It is a standalone we
 | M1: ID capture | Done |
 | M2: MRZ reading | Done |
 | M3: AI worker (the server re-checks the photos, re-reads the code lines from the image, recognises the document, reads printed text; our own MRZ model's training) | Done |
-| **M4**: consistency checks and first risk flags (expired document, under 18, printed data vs code lines, date logic); our own MRZ model on test sessions | In review |
-| M5: active liveness capture | Next |
+| M4: consistency checks and first risk flags (expired document, under 18, printed data vs code lines, date logic); our own MRZ model on test sessions | Done |
+| **M5**: active liveness capture (face check after the document photos: a random challenge, 13 small frames, recorded and shown on the dashboard; not evaluated yet) | In review (`docs/M5_SPEC.md`) |
+| M6: server-side liveness evaluation and passive anti-spoofing | Next |
 
 ## Before you test (once)
 1. An administrator creates your invite (see the comment at the top of `supabase/migrations/20261014000000_m1_capture.sql`) and gives you the one-time code. Use the role **supervisor**: admins cannot open ID photos or the data read from them, by design.
