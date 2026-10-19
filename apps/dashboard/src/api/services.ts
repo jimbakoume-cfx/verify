@@ -15,6 +15,7 @@ import {
   type ThresholdVersionResponse,
 } from "@verify/shared";
 import { ClientError } from "../lib/errors";
+import { FACE_CHECK_NAMES, FACE_JOB_COLUMNS, type FaceChecks, toFaceChecks } from "../lib/faceChecks";
 import { type LivenessCheckRecord, toLivenessCheck } from "../lib/liveness";
 import {
   CAPTURE_COLUMNS,
@@ -63,6 +64,8 @@ export interface DashboardServices {
   serverChecks(verificationId: string): Promise<ServerChecks>;
   /** M5: the face check's liveness_capture check; null when the case has none. Codes, counts and timings only. */
   livenessCheck(verificationId: string): Promise<LivenessCheckRecord | null>;
+  /** M6/M7: the face worker's liveness and face_match checks and each face job's status. Codes and scores only. */
+  faceChecks(verificationId: string): Promise<FaceChecks>;
   createTestSession(request: TestSessionRequest): Promise<TestSessionResponse>;
   viewCapture(captureId: string): Promise<CaptureViewResponse>;
   /**
@@ -184,6 +187,22 @@ export function createSupabaseServices(supabase: Supabase): DashboardServices {
         .maybeSingle();
       if (error) throw dbError(error);
       return data ? toLivenessCheck(data) : null;
+    },
+
+    async faceChecks(verificationId) {
+      const [checks, jobs] = await Promise.all([
+        supabase
+          .from("check_result")
+          .select(CHECK_COLUMNS)
+          .eq("verification_id", verificationId)
+          .in("check_name", [...FACE_CHECK_NAMES])
+          .is("capture_id", null),
+        // Each face job's kind and status only (the other columns are not granted).
+        supabase.from("face_job").select(FACE_JOB_COLUMNS).eq("verification_id", verificationId),
+      ]);
+      if (checks.error) throw dbError(checks.error);
+      if (jobs.error) throw dbError(jobs.error);
+      return toFaceChecks(checks.data ?? [], jobs.data ?? []);
     },
 
     async createTestSession(request) {

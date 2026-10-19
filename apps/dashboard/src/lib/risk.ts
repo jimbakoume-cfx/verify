@@ -79,6 +79,7 @@ export function toRiskAssessment(value: unknown): RiskAssessment | null {
   const reasons = strings(d.reasons);
   const hardFlags = strings(d.hardFlags);
   const missing = strings(d.missing);
+  const reviewOnly = strings(d.reviewOnly);
   return {
     recommendation: d.recommendation,
     band: d.band,
@@ -88,6 +89,8 @@ export function toRiskAssessment(value: unknown): RiskAssessment | null {
     contributions: RISK_SIGNALS.flatMap((signal) => contributions.find((c) => c.signal === signal) ?? []),
     hardFlags: RISK_SIGNALS.filter((signal) => hardFlags.includes(signal)),
     missing: [...REQUIRED_CHECKS.filter((check) => missing.includes(check)), ...missing.filter((m) => !(REQUIRED_CHECKS as readonly string[]).includes(m))],
+    // M7: assessments stored before M6/M7 have no reviewOnly: none.
+    reviewOnly: [...REQUIRED_CHECKS.filter((check) => reviewOnly.includes(check)), ...reviewOnly.filter((m) => !(REQUIRED_CHECKS as readonly string[]).includes(m))],
     unknownSignals: strings(d.unknownSignals),
     rejectReasonCode: str(d.rejectReasonCode),
     approveMax,

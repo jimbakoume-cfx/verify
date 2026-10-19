@@ -5,6 +5,10 @@ import {
   CONSISTENCY_FLAGS,
   DECISION_OUTCOMES,
   DECLARED_DOCUMENTS,
+  FACE_MATCH_PROBLEMS,
+  FLAT_PLANE_RESULTS,
+  LIVENESS_ACTION_RESULTS,
+  LIVENESS_EVAL_PROBLEMS,
   DETECTED_DOCUMENT_TYPES,
   type MrzServerDetails,
   parseMrz,
@@ -223,6 +227,27 @@ describe("FR/EN locales", () => {
       // Its threshold is named, so "poor" (under 5) can be read against it.
       expect(server).toContain("5");
     }
+  });
+
+  it("label everything the server face checks can show (M6/M7)", () => {
+    const keys = [
+      ...LIVENESS_EVAL_PROBLEMS.flatMap((p) => [`face.problems.${p}.title`, `face.problems.${p}.body`]),
+      ...FACE_MATCH_PROBLEMS.flatMap((p) => [`face.matchProblems.${p}.title`, `face.matchProblems.${p}.body`]),
+      ...FLAT_PLANE_RESULTS.map((r) => `face.flatPlaneResult.${r}`),
+      ...LIVENESS_ACTION_RESULTS.map((r) => `face.actionResult.${r}`),
+      ...["liveness", "faceMatch"].flatMap((k) => [`face.notChecked.${k}`, `face.none.${k}`]),
+      "risk.reviewOnlyTitle",
+      "risk.reviewOnly.face_match",
+    ];
+    for (const key of keys) {
+      expect(FR.has(key), `fr: ${key}`).toBe(true);
+      expect(EN.has(key), `en: ${key}`).toBe(true);
+    }
+  });
+
+  it("always say the face match is uncalibrated and never approves (M7)", () => {
+    expect(EN.get("face.uncalibratedBody")).toMatch(/never approves/);
+    expect(FR.get("face.uncalibratedBody")).toMatch(/jamais approuver/);
   });
 
   it("keep the shared ServerStatus keys", () => {

@@ -181,6 +181,20 @@ export function RiskSummary({ risk, status }: { risk: CaseRisk; status: Verifica
           </table>
         )}
 
+      {a.reviewOnly.length > 0 && (
+        <>
+          <h4 className="dash-risk-h4">{t("risk.reviewOnlyTitle")}</h4>
+          <ul className="dash-reasons">
+            {a.reviewOnly.map((check) => (
+              <li key={check}>
+                <strong>{t(`risk.reviewOnly.${check}`, { defaultValue: check })}</strong>
+                <code className="mono muted">{check}</code>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+
       {a.missing.length > 0 && (
         <>
           <h4 className="dash-risk-h4">{t("risk.missingTitle")}</h4>

@@ -22,6 +22,7 @@ import { photoAccess } from "../lib/roles";
 import { mayHaveDocumentData } from "../lib/serverChecks";
 import { isLivenessFrame } from "../lib/liveness";
 import { DocumentDataSection } from "./CaseData";
+import { FaceChecksSection } from "./CaseFace";
 import { LivenessSection } from "./CaseLiveness";
 import { MrzSection } from "./CaseMrz";
 import { RiskSection } from "./CaseRisk";
@@ -50,11 +51,13 @@ export function CaseView({ id, profile, initialPhotos, initialDocumentData }: Ca
   const mrz = useAsync(() => services.mrzChecks(id), `mrz:${id}`);
   const server = useAsync(() => services.serverChecks(id), `server:${id}`);
   const liveness = useAsync(() => services.livenessCheck(id), `liveness:${id}`);
+  const face = useAsync(() => services.faceChecks(id), `face:${id}`);
   const reloadAll = () => {
     state.reload();
     mrz.reload();
     server.reload();
     liveness.reload();
+    face.reload();
   };
   // M5: the face check's frames have their own section; the photo list keeps the document photos.
   const documentPhotos = useMemo(() => state.data?.captures.filter((c) => !isLivenessFrame(c)) ?? [], [state.data]);
@@ -121,6 +124,15 @@ export function CaseView({ id, profile, initialPhotos, initialDocumentData }: Ca
             check={liveness.data}
             error={liveness.error}
             loading={liveness.loading}
+            profile={profile}
+            onReload={reloadAll}
+            initialPhotos={initialPhotos}
+          />
+          <FaceChecksSection
+            checks={face.data}
+            captures={state.data.captures}
+            error={face.error}
+            loading={face.loading}
             profile={profile}
             onReload={reloadAll}
             initialPhotos={initialPhotos}

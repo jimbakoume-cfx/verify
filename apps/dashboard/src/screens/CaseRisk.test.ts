@@ -49,8 +49,8 @@ describe("RiskSummary", () => {
     expect(html).toContain("Version 3");
     expect(html).toContain("Low score");
     expect(html).toContain("Checks missing");
-    expect(html).toContain("Liveness check (from M6)");
-    expect(html).toContain("Face match (from M7)");
+    expect(html).toContain("Liveness check (server)");
+    expect(html).toContain("Face match");
     expect(html).toContain("No signal: nothing adds to the score.");
     expect(html).toContain("Approve up to 0.15");
   });

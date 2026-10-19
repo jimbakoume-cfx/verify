@@ -134,10 +134,10 @@ describe("livenessOverview", () => {
 describe("LivenessSection", () => {
   const props = { error: null, loading: false, onReload: () => {} };
 
-  it("shows the challenge in order, its code, the timings and every frame, not evaluated yet", () => {
+  it("shows the challenge in order, its code, the timings and every frame, a capture check only", () => {
     const html = render(createElement(LivenessSection, { ...props, captures: frames(), check: toLivenessCheck(checkRow()), profile: SUPERVISOR }));
     expect(html).toContain("Face check");
-    expect(html).toContain("Not evaluated yet");
+    expect(html).toContain("Capture only");
     expect(html).toMatch(/Look straight at the camera.*Blink.*Turn the head left.*Smile/s);
     expect(html).toContain("482 913");
     expect(html).toContain("9.9 s");

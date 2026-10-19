@@ -411,10 +411,10 @@
   },
   "liveness": {
     "title": "Vérification du visage",
-    "intro": "Le défi aléatoire donné par le serveur et les images prises par la caméra avant du passager. Rien n'a encore jugé si le passager a fait les actions (prochaine étape) : regardez les images.",
+    "intro": "Le défi aléatoire donné par le serveur et les images prises par la caméra avant du passager, avec le contrôle de la capture (les images sont-elles arrivées complètes et à temps). L'évaluation des actions par le serveur est dans « Contrôles du visage par le serveur » ci-dessous.",
     "none": "Aucune vérification du visage enregistrée pour l'instant.",
     "challenge": "Défi",
-    "notEvaluated": "Pas encore évalué",
+    "notEvaluated": "Capture seulement",
     "step0": "Regarder droit vers la caméra",
     "actions": {
       "turn_left": "Tourner la tête à gauche",
@@ -472,6 +472,133 @@
         "body": "Le fichier d'une image a déjà été envoyé dans une autre vérification."
       }
     }
+  },
+  "face": {
+    "title": "Contrôles du visage par le serveur",
+    "intro": "L'évaluation de la vérification du visage par le service visage (sessions de test ; test de présence des vraies sessions une fois l'interrupteur visage activé) et la comparaison du portrait de la pièce avec la meilleure image (sessions de test seulement). Tous les seuils sont des premières estimations : une personne décide.",
+    "livenessTitle": "Test de présence (actions revérifiées par le serveur)",
+    "matchTitle": "Comparaison : portrait de la pièce et vérification du visage",
+    "provisional": "Provisoire",
+    "uncalibrated": "Non calibré",
+    "reviewOnly": "Consultatif",
+    "uncalibratedBody": "Le seuil est une première estimation, pas encore fixé sur des visages camerounais (les fausses correspondances sont bien plus fréquentes pour les Africains de l'Ouest à seuil fixe). Ce score ne fait jamais approuver un dossier : comparez vous-même les visages.",
+    "waiting": "En attente du service visage. Actualisez dans un instant.",
+    "notChecked": {
+      "liveness": "Non vérifié par le serveur (les vraies sessions attendent l'interrupteur visage, ou le plafond quotidien ou les tentatives sont épuisés).",
+      "faceMatch": "Non comparé : la comparaison ne tourne que sur les sessions de test, ou le serveur a abandonné."
+    },
+    "none": {
+      "liveness": "Pas encore évalué (aucune vérification du visage enregistrée).",
+      "faceMatch": "Pas encore comparé (il faut la vérification du visage et le recto du document)."
+    },
+    "unreadable": "Les détails de ce contrôle ne peuvent pas être lus par cette version du tableau de bord.",
+    "action": "Action demandée",
+    "result": "Vue",
+    "peak": "Maximum",
+    "framesWithFace": "Images avec un visage",
+    "actionResult": {
+      "pass": "Faite",
+      "fail": "Non faite",
+      "unclear": "Impossible à dire"
+    },
+    "degrees": "{{value}}°",
+    "flatPlane": "Relief en mouvement",
+    "flatPlaneResult": {
+      "depth": "Relief réel vu",
+      "flat": "A bougé comme une image plate",
+      "not_measured": "Non mesuré (la tête a peu bougé)"
+    },
+    "framesWithFaceTotal": "Images avec un visage",
+    "framesOf": "{{n}} sur {{total}}",
+    "processing": "Temps de traitement",
+    "coldStart": "modèles chargés d'abord",
+    "engine": "Moteur",
+    "livenessClean": "Chaque action vue dans son étape ; rien d'autre à signaler.",
+    "problems": {
+      "action_not_done": {
+        "title": "Action non vue.",
+        "body": "Le visage était visible pendant l'étape, mais ne faisait pas ce qui était demandé."
+      },
+      "wrong_direction": {
+        "title": "Mauvais sens.",
+        "body": "La tête a tourné ou s'est inclinée dans l'autre sens que demandé."
+      },
+      "action_unclear": {
+        "title": "Pas de visage pour une action.",
+        "body": "Aucune image d'une étape ne montre exactement un visage : l'action n'a pas pu être jugée."
+      },
+      "no_reference": {
+        "title": "Pas d'image de départ.",
+        "body": "Aucune image avant les actions ne montre exactement un visage : les rotations sont mesurées depuis zéro."
+      },
+      "face_missing": {
+        "title": "Visage absent.",
+        "body": "Certaines images ne montrent aucun visage."
+      },
+      "multiple_faces": {
+        "title": "Plusieurs visages.",
+        "body": "Certaines images montrent plus d'un visage."
+      },
+      "face_jump": {
+        "title": "Coupure possible.",
+        "body": "Le visage a sauté entre deux images (position ou taille) : les images peuvent venir d'enregistrements différents."
+      },
+      "flat_plane": {
+        "title": "Visage plat.",
+        "body": "Quand la tête a tourné ou s'est inclinée, le visage a bougé comme une image plate (un tirage ou un écran)."
+      },
+      "shape_change": {
+        "title": "Forme du visage changée.",
+        "body": "La forme 3D du visage diffère de celle de la première image : peut-être un autre visage."
+      },
+      "moire": {
+        "title": "Motif d'écran.",
+        "body": "Un motif fin et régulier, comme quand on filme un écran."
+      },
+      "screen_glare": {
+        "title": "Reflet sur le visage.",
+        "body": "Une partie du visage est brûlée en blanc, comme avec un tirage brillant ou un écran."
+      },
+      "low_detail": {
+        "title": "Peu de détails.",
+        "body": "Le visage est anormalement lisse, comme avec un tirage photographié."
+      }
+    },
+    "similarity": "Similarité",
+    "notCompared": "Non comparé",
+    "threshold": "Seuil",
+    "lowThreshold": "différent sous {{value}}",
+    "model": "Modèle",
+    "matchProblems": {
+      "portrait_not_found": {
+        "title": "Pas de portrait trouvé.",
+        "body": "Aucun visage n'a été trouvé sur la photo du document : rien n'a été comparé."
+      },
+      "selfie_not_found": {
+        "title": "Pas d'image utilisable.",
+        "body": "Aucune image de la vérification du visage ne montre exactement un visage : rien n'a été comparé."
+      },
+      "portrait_small": {
+        "title": "Petit portrait.",
+        "body": "Le portrait du document est très petit : le score est moins fiable."
+      },
+      "detector_alignment": {
+        "title": "Alignement approximatif.",
+        "body": "Le portrait a été aligné sans le maillage du visage : le score est moins fiable."
+      },
+      "selfie_not_frontal": {
+        "title": "Image de biais.",
+        "body": "La meilleure image ne fait pas face à la caméra : le score est moins fiable."
+      }
+    },
+    "sideBySideNote": "Seuls les visages sont montrés ; chaque photo s'ouvre 60 secondes et chaque affichage est journalisé.",
+    "showBoth": "Afficher le portrait et l'image (2 affichages)",
+    "portrait": "Portrait de la pièce (recto)",
+    "portraitAlt": "Portrait sur la pièce d'identité",
+    "selfie": "Vérification du visage, image {{n}}",
+    "selfieAlt": "Meilleure image de la vérification du visage",
+    "noSelfie": "Aucune image à montrer.",
+    "photosGone": "La photo du document a été remplacée ou effacée."
   },
   "capture": {
     "size": "Taille",
@@ -574,7 +701,8 @@
         "provisional_signals": "Score élevé dû à des signaux provisoires",
         "score_between": "Score entre les seuils",
         "score_low": "Score faible",
-        "missing_checks": "Vérifications manquantes"
+        "missing_checks": "Vérifications manquantes",
+        "review_only_check": "Contrôle consultatif"
       },
       "body": {
         "hard_flag": "Un signal bloquant est présent : une personne décide, quel que soit le score.",
@@ -584,7 +712,8 @@
         "provisional_signals": "Le score n'atteint {{rejectMin}} qu'avec des signaux provisoires, qui ne refusent jamais : une personne décide.",
         "score_between": "Le score est au-dessus de {{approveMax}} et sous {{rejectMin}} : une personne décide.",
         "score_low": "Le score est de {{approveMax}} ou moins : assez faible pour approuver.",
-        "missing_checks": "Des vérifications manquent (liste ci-dessous) : pas d'approbation tant qu'elles n'existent pas."
+        "missing_checks": "Des vérifications manquent (liste ci-dessous) : pas d'approbation tant qu'elles n'existent pas.",
+        "review_only_check": "La comparaison des visages n'est pas encore calibrée : son résultat ne peut jamais faire approuver un dossier (voir ci-dessous)."
       }
     },
     "rejectReason": "Motif donné à l'usager en cas de refus : {{code}}",
@@ -621,8 +750,12 @@
     "missingTitle": "Vérifications manquantes",
     "missing": {
       "server_checks": "Vérification des photos par le serveur (en attente, ou impossible)",
-      "liveness": "Test de présence (à partir de M6)",
-      "face_match": "Comparaison des visages (à partir de M7)"
+      "liveness": "Test de présence (serveur)",
+      "face_match": "Comparaison des visages"
+    },
+    "reviewOnlyTitle": "Consultatif : ne fait jamais approuver",
+    "reviewOnly": {
+      "face_match": "Comparaison des visages (seuil non calibré)"
     },
     "approveUpTo": "Approuver jusqu'à {{value}}",
     "rejectFrom": "Refuser à partir de {{value}} (signaux fermes)"

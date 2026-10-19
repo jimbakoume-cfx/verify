@@ -301,3 +301,15 @@ a:hover { color: var(--brand-hover); }
 /* M5: the face check (CaseLiveness). */
 .dash-liveness-actions { margin: 8px 0 12px; padding-left: 1.4em; display: grid; gap: 4px; }
 .dash-frames { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+
+/* M6/M7: server face checks. The ID portrait and the best frame side by side, each showing only the
+   face: the whole photo is loaded (audited viewer) and scaled and shifted inside a box of the face's
+   aspect ratio; nothing is cropped out or stored. */
+.dash-alert.warn { color: var(--warn); background: #fffaeb; border-color: #fedf89; }
+.dash-face-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: start; margin-top: 8px; }
+.dash-face-pair-foot { grid-column: 1 / -1; display: flex; gap: 12px; align-items: center; justify-content: space-between; }
+.dash-face-crop { margin: 0; }
+.dash-face-crop-box { position: relative; overflow: hidden; width: 100%; max-width: 280px; border-radius: 8px; background: var(--surface-2); }
+.dash-face-crop-box img { position: absolute; max-width: none; }
+@media (max-width: 560px) { .dash-face-pair { grid-template-columns: 1fr; } }
+.dash-inline-badge { margin-left: 6px; vertical-align: 1px; }

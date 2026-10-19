@@ -20,6 +20,7 @@ import { type DashboardServices, ServicesContext } from "../api/services";
 import type { OpenDocumentData } from "../components/DocumentDataViewer";
 import type { OpenPhoto } from "../components/PhotoViewer";
 import type { LivenessCheckRecord } from "../lib/liveness";
+import type { FaceChecks } from "../lib/faceChecks";
 import type {
   CaptureRecord,
   CheckRecord,
@@ -309,6 +310,56 @@ const LIVENESS_CHECK: LivenessCheckRecord = {
     problems: [],
   },
 };
+
+// M6/M7: the face worker's evaluation of that face check (one action not seen) and its face match.
+const FACE_CHECKS: FaceChecks = {
+  liveness: {
+    id: "f8888888-8888-4888-8888-888888888888",
+    captureId: null,
+    checkVersion: "liveness-eval-v1",
+    outcome: "fail",
+    createdAt: minutes(-2),
+    details: {
+      evaluated: true,
+      provisional: true,
+      challengeId: CHALLENGE_ID,
+      engine: "face-1/mediapipe-fl-v1/auraface-v1",
+      actions: [
+        { action: "blink", result: "pass", framesWithFace: 4, peak: 0.82 },
+        { action: "turn_left", result: "pass", framesWithFace: 4, peak: 23.4 },
+        { action: "smile", result: "fail", framesWithFace: 4, peak: 0.21 },
+      ],
+      frames: 13,
+      framesWithFace: 13,
+      flatPlane: "depth",
+      flatPlaneScore: 0.061,
+      problems: ["action_not_done", "moire"],
+      timing: { ms: 412, cold: false },
+    },
+  },
+  faceMatch: {
+    id: "f9999999-9999-4999-8999-999999999999",
+    captureId: null,
+    checkVersion: "face-match-v1",
+    outcome: "pass",
+    createdAt: minutes(-2),
+    details: {
+      model: "auraface-v1/glintr100",
+      engine: "face-1/mediapipe-fl-v1/auraface-v1",
+      similarity: 0.512,
+      threshold: 0.35,
+      lowThreshold: 0.15,
+      calibrated: false,
+      reviewOnly: true,
+      problems: [],
+      portrait: { captureId: CAPTURES[0].id, box: [0.07, 0.24, 0.17, 0.33] },
+      selfie: { captureId: LIVENESS_FRAMES[0].id, box: [0.25, 0.2, 0.5, 0.42] },
+      timing: { ms: 1180, cold: true },
+    },
+  },
+  jobs: { liveness: "done", face_match: "done" },
+};
+const NO_FACE_CHECKS: FaceChecks = { liveness: null, faceMatch: null, jobs: { liveness: "none", face_match: "none" } };
 
 const PASSPORT_CAPTURES: CaptureRecord[] = [
   {
@@ -782,6 +833,7 @@ function fakeServices(): DashboardServices {
     mrzChecks: async (id) => MRZ_CHECKS[id] ?? [],
     serverChecks: async (id) => SERVER_CHECKS[id] ?? NO_SERVER_CHECKS,
     livenessCheck: async (id) => (id === CASE_ID ? LIVENESS_CHECK : null),
+    faceChecks: async (id) => (id === CASE_ID ? FACE_CHECKS : NO_FACE_CHECKS),
     createTestSession: async () => testSession(),
     viewCapture: async () => view(),
     documentData: async (id) => documentData(id),

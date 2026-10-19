@@ -411,10 +411,10 @@
   },
   "liveness": {
     "title": "Face check",
-    "intro": "The random challenge the server gave the rider and the frames their front camera took. Nothing has judged yet whether the rider did the actions (next milestone): look at the frames.",
+    "intro": "The random challenge the server gave the rider and the frames their front camera took, with the capture check (whether the frames arrived complete and on time). The server's evaluation of the actions is in \"Server face checks\" below.",
     "none": "No face check recorded yet.",
     "challenge": "Challenge",
-    "notEvaluated": "Not evaluated yet",
+    "notEvaluated": "Capture only",
     "step0": "Look straight at the camera",
     "actions": {
       "turn_left": "Turn the head left",
@@ -472,6 +472,133 @@
         "body": "A frame's file was already sent in another verification."
       }
     }
+  },
+  "face": {
+    "title": "Server face checks",
+    "intro": "The face worker's evaluation of the face check (test sessions; liveness on real sessions once the face switch is on) and the comparison of the ID portrait with the best frame (test sessions only). Every cut-off is a first guess: a person decides.",
+    "livenessTitle": "Liveness (actions re-checked on the server)",
+    "matchTitle": "Face match: ID portrait and face check",
+    "provisional": "Provisional",
+    "uncalibrated": "Uncalibrated",
+    "reviewOnly": "Review only",
+    "uncalibratedBody": "The threshold is a first guess, not yet set on Cameroonian faces (false matches are much more frequent for West Africans at a fixed threshold). This score never approves a case: compare the faces yourself.",
+    "waiting": "Waiting for the face worker. Refresh in a moment.",
+    "notChecked": {
+      "liveness": "Not checked by the server (real sessions wait for the face switch, or the daily cap or the attempts ran out).",
+      "faceMatch": "Not compared: the face match runs on test sessions only, or the server gave up."
+    },
+    "none": {
+      "liveness": "Not evaluated yet (no face check recorded).",
+      "faceMatch": "Not compared yet (needs a face check and the document front)."
+    },
+    "unreadable": "The details of this check cannot be read by this version of the dashboard.",
+    "action": "Action asked",
+    "result": "Seen",
+    "peak": "Strongest",
+    "framesWithFace": "Frames with one face",
+    "actionResult": {
+      "pass": "Done",
+      "fail": "Not done",
+      "unclear": "Cannot tell"
+    },
+    "degrees": "{{value}}°",
+    "flatPlane": "Depth when moving",
+    "flatPlaneResult": {
+      "depth": "Real depth seen",
+      "flat": "Moved like a flat picture",
+      "not_measured": "Not measured (the head barely moved)"
+    },
+    "framesWithFaceTotal": "Frames with one face",
+    "framesOf": "{{n}} of {{total}}",
+    "processing": "Processing time",
+    "coldStart": "models loaded first",
+    "engine": "Engine",
+    "livenessClean": "Every action seen in its own step; nothing else to note.",
+    "problems": {
+      "action_not_done": {
+        "title": "Action not seen.",
+        "body": "The face was seen during the step, but not doing what was asked."
+      },
+      "wrong_direction": {
+        "title": "Wrong way.",
+        "body": "The head turned or tilted the other way than asked."
+      },
+      "action_unclear": {
+        "title": "No face for an action.",
+        "body": "No frame of a step showed exactly one face: the action could not be judged."
+      },
+      "no_reference": {
+        "title": "No starting frame.",
+        "body": "No frame before the actions showed exactly one face: turns are measured from zero."
+      },
+      "face_missing": {
+        "title": "Face missing.",
+        "body": "Some frames show no face."
+      },
+      "multiple_faces": {
+        "title": "Several faces.",
+        "body": "Some frames show more than one face."
+      },
+      "face_jump": {
+        "title": "Possible cut.",
+        "body": "The face jumped between two frames (position or size): frames may come from different recordings."
+      },
+      "flat_plane": {
+        "title": "Flat face.",
+        "body": "When the head turned or tilted, the face moved like one flat picture (a print or a screen)."
+      },
+      "shape_change": {
+        "title": "Face shape changed.",
+        "body": "The face's 3-D shape differs from the first frame's: possibly another face."
+      },
+      "moire": {
+        "title": "Screen pattern.",
+        "body": "A fine periodic pattern, as when a screen is filmed."
+      },
+      "screen_glare": {
+        "title": "Glare on the face.",
+        "body": "Part of the face is blown out white, as with a glossy print or a screen."
+      },
+      "low_detail": {
+        "title": "Little detail.",
+        "body": "The face is unusually smooth, as with a re-photographed print."
+      }
+    },
+    "similarity": "Similarity",
+    "notCompared": "Not compared",
+    "threshold": "Threshold",
+    "lowThreshold": "different under {{value}}",
+    "model": "Model",
+    "matchProblems": {
+      "portrait_not_found": {
+        "title": "No portrait found.",
+        "body": "No face was found on the document photo: nothing was compared."
+      },
+      "selfie_not_found": {
+        "title": "No usable frame.",
+        "body": "No frame of the face check showed exactly one face: nothing was compared."
+      },
+      "portrait_small": {
+        "title": "Small portrait.",
+        "body": "The portrait on the document is very small: the score is less reliable."
+      },
+      "detector_alignment": {
+        "title": "Rough alignment.",
+        "body": "The portrait was aligned without the face mesh: the score is less reliable."
+      },
+      "selfie_not_frontal": {
+        "title": "Frame not straight.",
+        "body": "The best frame does not face the camera: the score is less reliable."
+      }
+    },
+    "sideBySideNote": "Only the faces are shown; each photo opens for 60 seconds and each view is logged.",
+    "showBoth": "Show the portrait and the frame (2 views)",
+    "portrait": "ID portrait (document front)",
+    "portraitAlt": "Portrait on the identity document",
+    "selfie": "Face check, frame {{n}}",
+    "selfieAlt": "Best frame of the face check",
+    "noSelfie": "No frame to show.",
+    "photosGone": "The document photo was replaced or erased."
   },
   "capture": {
     "size": "Size",
@@ -574,7 +701,8 @@
         "provisional_signals": "High score from provisional signals",
         "score_between": "Score between the cut-offs",
         "score_low": "Low score",
-        "missing_checks": "Checks missing"
+        "missing_checks": "Checks missing",
+        "review_only_check": "Review-only check"
       },
       "body": {
         "hard_flag": "A hard flag is present: a person decides, whatever the score.",
@@ -584,7 +712,8 @@
         "provisional_signals": "The score reaches {{rejectMin}} only with provisional signals, which never reject: a person decides.",
         "score_between": "The score is above {{approveMax}} and under {{rejectMin}}: a person decides.",
         "score_low": "The score is {{approveMax}} or less: low enough to approve.",
-        "missing_checks": "Some checks are missing (listed below): no approval until they exist."
+        "missing_checks": "Some checks are missing (listed below): no approval until they exist.",
+        "review_only_check": "The face match is not calibrated yet: its result can never approve a case (listed below)."
       }
     },
     "rejectReason": "Rider reason if rejected: {{code}}",
@@ -621,8 +750,12 @@
     "missingTitle": "Checks missing",
     "missing": {
       "server_checks": "Server checks of the photos (waiting, or not possible)",
-      "liveness": "Liveness check (from M6)",
-      "face_match": "Face match (from M7)"
+      "liveness": "Liveness check (server)",
+      "face_match": "Face match"
+    },
+    "reviewOnlyTitle": "Review only: never helps approve",
+    "reviewOnly": {
+      "face_match": "Face match (uncalibrated threshold)"
     },
     "approveUpTo": "Approve up to {{value}}",
     "rejectFrom": "Reject from {{value}} (firm signals)"
