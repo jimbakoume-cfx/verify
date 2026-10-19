@@ -196,6 +196,8 @@ export interface FlowRepo {
   consistencyFlags(verificationId: string): Promise<string[]>;
   /** M3: worker_settings.enabled_for_real_sessions (off until Vercel Pro and its DPA). */
   workerEnabledForRealSessions(): Promise<boolean>;
+  /** M6/M7: a face job of this case waits for the face worker (flow_face_jobs_pending). */
+  faceJobsPending(verificationId: string): Promise<boolean>;
   /** M5: flow_issue_liveness_challenge (replaces an unused earlier challenge; audited, never the code). */
   issueLivenessChallenge(issue: {
     verificationId: string;
@@ -229,6 +231,8 @@ export interface FlowDeps {
   allowedOrigins: ReadonlySet<string>;
   /** The AI worker's doorbell (M3); default: never rung. */
   ring?: WorkerRing;
+  /** The face worker's doorbell (M6/M7), rung after a face check is recorded; default: never rung (the face sweep rings each minute). */
+  faceRing?: WorkerRing;
   /** Rewrites a case's server checks after a photo is replaced (M3); default: left to the next result. */
   cases?: CaseStore;
   now?: () => Date;
@@ -245,6 +249,7 @@ const MAX_USER_AGENT = 512;
 export function createFlowHandler(deps: FlowDeps): Handler {
   const { repo, storage } = deps;
   const ring = deps.ring ?? noRing;
+  const faceRing = deps.faceRing ?? noRing;
   const now = deps.now ?? (() => new Date());
   const randomUUID = deps.randomUUID ?? (() => crypto.randomUUID());
   const randomInt = deps.randomInt ?? cryptoRandomInt;
@@ -621,6 +626,13 @@ export function createFlowHandler(deps: FlowDeps): Handler {
         // The older face check's frames are erased; their files go too (best effort, logged).
         for (const path of recorded.supersededPaths) {
           await storage.remove(path).catch((err) => log.error("flow.superseded_remove_failed", err));
+        }
+        // M6/M7: the database created the face jobs with the frames; ring the face worker when one may
+        // run (a test session, or liveness on a real one once the face switch is on). Never fails the rider.
+        try {
+          if (await repo.faceJobsPending(v.id)) faceRing("face_check");
+        } catch (err) {
+          log.error("flow.face_ring_check_failed", err);
         }
         const response: LivenessCaptureResponse = { recorded: true };
         return jsonResponse(200, response);

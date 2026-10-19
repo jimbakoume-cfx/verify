@@ -40,7 +40,11 @@ export function readSignatureHeaders(headers: Headers): SignatureHeaders | null 
   return { kid, timestamp, nonce, signature };
 }
 
-/** The signed line: `v1|confiance-verify/worker|kid|METHOD|path|timestamp|nonce|sha256hex(body)`. */
+/**
+ * The signed line: `v1|<audience>|kid|METHOD|path|timestamp|nonce|sha256hex(body)`. The audience is
+ * WORKER_AUDIENCE for the AI worker, FACE_WORKER_AUDIENCE for the face worker (M6/M7): a signature made
+ * for one function is never valid for the other.
+ */
 export function canonicalString(parts: {
   kid: string;
   method: string;
@@ -48,10 +52,11 @@ export function canonicalString(parts: {
   timestamp: string;
   nonce: string;
   bodySha256: string;
+  audience?: string;
 }): string {
   return [
     WORKER_SIGNATURE_VERSION,
-    WORKER_AUDIENCE,
+    parts.audience ?? WORKER_AUDIENCE,
     parts.kid,
     parts.method,
     parts.path,

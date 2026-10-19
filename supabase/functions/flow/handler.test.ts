@@ -274,6 +274,11 @@ class MemoryFlowRepo implements FlowRepo {
     });
   }
 
+  facePending = false;
+  async faceJobsPending(_verificationId: string) {
+    return this.facePending;
+  }
+
   async workerEnabledForRealSessions() {
     return this.workerEnabled;
   }
@@ -477,6 +482,7 @@ function setup(overrides: Partial<FlowDeps> = {}) {
   const repo = new MemoryFlowRepo();
   const storage = new MemoryStorage();
   const ring = new MemoryRing();
+  const faceRing = new MemoryRing();
   const cases = new MemoryCases();
   const log = { error: vi.fn() };
   let clock = NOW;
@@ -485,6 +491,7 @@ function setup(overrides: Partial<FlowDeps> = {}) {
     storage,
     allowedOrigins: new Set([ALLOWED_ORIGIN]),
     ring: ring.ring,
+    faceRing: faceRing.ring,
     cases,
     now: () => clock,
     log,
@@ -580,6 +587,7 @@ function setup(overrides: Partial<FlowDeps> = {}) {
     repo,
     storage,
     ring,
+    faceRing,
     cases,
     log,
     handler,
@@ -2113,6 +2121,33 @@ describe("POST /liveness/challenge", () => {
 });
 
 describe("POST /liveness/captures", () => {
+  it("M6/M7: rings the face worker when the recorded face check left a face job waiting", async () => {
+    const { ready, passLiveness, repo, faceRing, ring } = setup();
+    const { token } = await ready();
+    repo.facePending = true;
+    await passLiveness(token);
+    expect(faceRing.rings).toEqual(["face_check"]);
+    // The AI worker's doorbell is not the face worker's.
+    expect(ring.rings).not.toContain("face_check");
+  });
+
+  it("M6/M7: no face ring when no face job may run (a real session while the face switch is off)", async () => {
+    const { ready, passLiveness, repo, faceRing } = setup();
+    const { token } = await ready({ isTest: false });
+    repo.facePending = false;
+    await passLiveness(token);
+    expect(faceRing.rings).toEqual([]);
+  });
+
+  it("M6/M7: a failed check for face jobs is logged, never the rider's problem", async () => {
+    const { ready, passLiveness, repo, faceRing, log } = setup();
+    const { token } = await ready();
+    vi.spyOn(repo, "faceJobsPending").mockRejectedValue(new Error("db down"));
+    await passLiveness(token);
+    expect(faceRing.rings).toEqual([]);
+    expect(log.error).toHaveBeenCalledWith("flow.face_ring_check_failed", expect.any(Error));
+  });
+
   it("records the frames, their check and the challenge as used; the response says nothing more", async () => {
     const { ready, challenge, frames, call, repo } = setup();
     const { id, token } = await ready();

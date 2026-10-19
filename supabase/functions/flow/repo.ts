@@ -340,6 +340,12 @@ export function createFlowRepo(db: SupabaseClient): FlowRepo {
       return data.length > 0;
     },
 
+    async faceJobsPending(verificationId) {
+      const { data, error } = await db.rpc("flow_face_jobs_pending", { p_verification: verificationId });
+      if (error) throw dbError("rpc.flow_face_jobs_pending", error);
+      return data === true;
+    },
+
     async workerEnabledForRealSessions() {
       const { data, error } = await db.from("worker_settings").select("enabled_for_real_sessions").limit(1)
         .maybeSingle<{ enabled_for_real_sessions: boolean }>();

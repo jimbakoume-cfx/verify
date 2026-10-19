@@ -805,6 +805,285 @@ export interface DocumentPolicyDetails {
 }
 
 // ---------------------------------------------------------------------------
+// Face worker API (M6/M7). Edge Function "face", called only by the face worker (Vercel project
+// confiance-verify-face, worker-face/), which signs every request exactly as the AI worker does (see
+// "Worker API" above) but for its own audience and with a key of scope "face":
+//   POST /face/claim   {}                  -> FaceClaimResponse, or 204 when there is no job
+//   POST /face/image   FaceImageRequest    -> the JPEG bytes of one of the job's inputs (410 when gone)
+//   POST /face/result  FaceResultRequest   -> FaceResultResponse
+// Two kinds of job: "liveness" (M6: the face check's frames, re-checked on the server) and "face_match"
+// (M7: the ID portrait against the best frame). The worker only measures; the Edge Function decides
+// and records the case-level checks "liveness" and "face_match" (the names M8 counts).
+// ---------------------------------------------------------------------------
+export const FACE_WORKER_AUDIENCE = "confiance-verify/face";
+export const FACE_JOB_KINDS = ["liveness", "face_match"] as const;
+export type FaceJobKind = (typeof FACE_JOB_KINDS)[number];
+
+/** One image a face job may read: a face-check frame, or the document's front (face_match only). */
+export interface FaceClaimInput {
+  captureId: string;
+  role: "frame" | "document";
+  /** Frames only: position, step (0: before the actions; n: during actions[n - 1]) and time. */
+  index: number | null;
+  step: number | null;
+  atMs: number | null;
+  /** The worker checks the downloaded bytes against these. */
+  sha256: string;
+  byteSize: number;
+  width: number;
+  height: number;
+}
+
+export interface FaceClaimResponse {
+  jobId: string;
+  attempt: number;
+  kind: FaceJobKind;
+  /** A test session (the switch decides for real sessions; face_match is test-only, PM 2026-10-19). */
+  testSession: boolean;
+  declaredDocument: DeclaredDocument | null;
+  /** The face check's actions, in order. */
+  actions: LivenessAction[];
+  /** Frames in index order, then (face_match) the document's front. */
+  inputs: FaceClaimInput[];
+}
+
+export interface FaceImageRequest {
+  jobId: string;
+  attempt: number;
+  captureId: string;
+}
+
+/**
+ * What the face worker measured on one frame (FaceLivenessEvidence.frames). Numbers only: no
+ * landmark, no crop and no pixel leaves the worker. Every measure is null when no face was found.
+ * yaw is in degrees, positive when the nose points to the image's right: the frames are the camera's
+ * own picture (the app mirrors only its preview), so a rider turning to their own left gives a
+ * positive yaw. pitch: degrees, positive looking up. roll: degrees.
+ */
+export interface FaceFrameMeasure {
+  index: number;
+  /** Faces found: 0, 1, or 2 for "two or more". */
+  faces: number;
+  yaw: number | null;
+  pitch: number | null;
+  roll: number | null;
+  /** MediaPipe's eyeBlink blendshapes, both eyes averaged (0 open, 1 closed). */
+  blink: number | null;
+  /** Eye aspect ratio from the mesh (about 0.25-0.35 open, under 0.15 closed). */
+  eyeOpenness: number | null;
+  /** MediaPipe's mouthSmile blendshapes, averaged (0..1). */
+  smile: number | null;
+  /** Mouth corners' distance over the interocular distance. */
+  mouthWidth: number | null;
+  /** Interocular distance over the frame's width. */
+  faceSize: number | null;
+  /** The face box's centre, as fractions of the frame. */
+  centerX: number | null;
+  centerY: number | null;
+  /** Flat-plane test against the reference frame: homography RMS error / interocular distance. */
+  planarResidual: number | null;
+  /** Same-face test against the reference frame: 3-D similarity RMS error / interocular distance. */
+  shapeDistance: number | null;
+  /** Provisional passive cues on the face area (worker-face/verify_face/spoof.py). */
+  moire: number | null;
+  glare: number | null;
+  detail: number | null;
+}
+
+export interface FaceLivenessEvidence {
+  /** The frame the geometry tests compare with (first single face before the actions); null if none. */
+  referenceIndex: number | null;
+  frames: FaceFrameMeasure[];
+}
+
+export interface FaceMatchEvidence {
+  portrait: {
+    found: boolean;
+    /** Confident faces on the document (a second, smaller "ghost" portrait is normal on new cards). */
+    faces: number;
+    /** [x, y, width, height] as fractions of the document photo. */
+    box: number[] | null;
+    /** Distance between the eyes, in pixels of the photo. */
+    faceSize: number | null;
+    /** How the face was aligned: the face mesh, or the detector's keypoints when the mesh did not take. */
+    method: "mesh" | "detector" | null;
+    detectionScore: number | null;
+  };
+  selfie: {
+    /** The frame used (the best one: one face, straight, eyes open, largest). */
+    captureId: string | null;
+    frameIndex: number | null;
+    found: boolean;
+    box: number[] | null;
+    faceSize: number | null;
+    yaw: number | null;
+    pitch: number | null;
+  };
+  /** Cosine similarity of the two AuraFace embeddings (-1..1); null when one face is missing. */
+  similarity: number | null;
+}
+
+export interface FaceResultRequest {
+  jobId: string;
+  attempt: number;
+  kind: FaceJobKind;
+  /** Face worker build and models, e.g. "face-1/mediapipe-fl-v1/auraface-v1". */
+  engine: string;
+  /** Set for a liveness job, null otherwise. */
+  liveness: FaceLivenessEvidence | null;
+  /** Set for a face_match job, null otherwise. */
+  faceMatch: FaceMatchEvidence | null;
+  timing: { ms: number; cold: boolean };
+}
+
+export interface FaceResultResponse {
+  status: "recorded" | "already_done";
+}
+
+export const FACE_LIMITS = {
+  maxBodyBytes: 32 * 1024,
+  /** Inputs of one job: the frames (LIVENESS_LIMITS.maxFrames) and the document's front. */
+  maxInputs: 16,
+  maxEngineLength: 60,
+} as const;
+
+/** check_result.check_name of the server's liveness evaluation (M6) and of the face match (M7). */
+export const LIVENESS_EVAL_CHECK_NAME = "liveness";
+export const FACE_MATCH_CHECK_NAME = "face_match";
+
+/** Per action: seen in its step, not seen (or the other way), or no face to tell. */
+export const LIVENESS_ACTION_RESULTS = ["pass", "fail", "unclear"] as const;
+export type LivenessActionResult = (typeof LIVENESS_ACTION_RESULTS)[number];
+
+export interface LivenessActionDetails {
+  action: LivenessAction;
+  result: LivenessActionResult;
+  /** Frames of this action's step with exactly one face. */
+  framesWithFace: number;
+  /**
+   * The measure that decided, at its strongest in the step: the head's turn or tilt from the
+   * reference (degrees, in the asked direction), or the blink or smile score (0..1).
+   */
+  peak: number | null;
+}
+
+/** depth: the face showed depth when it moved. flat: it moved as one flat plane. not_measured: it never moved enough. */
+export const FLAT_PLANE_RESULTS = ["depth", "flat", "not_measured"] as const;
+export type FlatPlaneResult = (typeof FLAT_PLANE_RESULTS)[number];
+
+/**
+ * Why the liveness check did not pass, in display order. action_not_done, wrong_direction: an action
+ * was not seen in its step, or the head turned or tilted the other way (outcome "fail"). Every other
+ * code is "flag". no_reference: no frame before the actions had exactly one face. face_missing: some
+ * frames had no face. multiple_faces: some frames had two. face_jump: the face jumped between two
+ * frames (a cut). Provisional (PROVISIONAL_LIVENESS_PROBLEMS): flat_plane, shape_change (the face's 3-D
+ * shape changed, another face?), moire, screen_glare, low_detail.
+ */
+export const LIVENESS_EVAL_PROBLEMS = [
+  "action_not_done",
+  "wrong_direction",
+  "action_unclear",
+  "no_reference",
+  "face_missing",
+  "multiple_faces",
+  "face_jump",
+  "flat_plane",
+  "shape_change",
+  "moire",
+  "screen_glare",
+  "low_detail",
+] as const;
+export type LivenessEvalProblem = (typeof LIVENESS_EVAL_PROBLEMS)[number];
+
+/** Heuristics with cut-offs not yet measured on real riders and attacks: shown as provisional. */
+export const PROVISIONAL_LIVENESS_PROBLEMS: readonly LivenessEvalProblem[] = [
+  "flat_plane",
+  "shape_change",
+  "moire",
+  "screen_glare",
+  "low_detail",
+];
+
+/** check_result.details of "liveness" (M6). Codes and scores only; the database refuses any other key. */
+export interface LivenessDetails {
+  evaluated: true;
+  /** Every cut-off is a first guess until measured on real riders and attacks (APCER/BPCER). */
+  provisional: true;
+  challengeId: string;
+  engine: string;
+  actions: LivenessActionDetails[];
+  frames: number;
+  framesWithFace: number;
+  flatPlane: FlatPlaneResult;
+  /** Median planar residual over the frames that moved enough; null when not measured. */
+  flatPlaneScore: number | null;
+  problems: LivenessEvalProblem[];
+  timing: { ms: number; cold: boolean };
+}
+
+export const LIVENESS_EVAL_DETAIL_KEYS = [
+  "evaluated",
+  "provisional",
+  "challengeId",
+  "engine",
+  "actions",
+  "frames",
+  "framesWithFace",
+  "flatPlane",
+  "flatPlaneScore",
+  "problems",
+  "timing",
+] as const satisfies readonly (keyof LivenessDetails)[];
+
+/**
+ * Why a face match could not be trusted, in display order: portrait_not_found, selfie_not_found (no
+ * comparison), portrait_small (the portrait's eyes are under FACE_MATCH_MIN_PORTRAIT_EYES pixels
+ * apart), detector_alignment (aligned without the face mesh), selfie_not_frontal.
+ */
+export const FACE_MATCH_PROBLEMS = [
+  "portrait_not_found",
+  "selfie_not_found",
+  "portrait_small",
+  "detector_alignment",
+  "selfie_not_frontal",
+] as const;
+export type FaceMatchProblem = (typeof FACE_MATCH_PROBLEMS)[number];
+
+/**
+ * check_result.details of "face_match" (M7). The similarity and where each face is (boxes as fractions
+ * of their photo, so the dashboard can show both crops through the audited viewer). Never an embedding.
+ * calibrated and reviewOnly are fixed: until the threshold is set on Cameroonian impostor pairs, no
+ * face match may ever approve a case (the database enforces it, see risk.ts REVIEW_ONLY_CHECKS).
+ */
+export interface FaceMatchDetails {
+  model: string;
+  engine: string;
+  similarity: number | null;
+  threshold: number;
+  lowThreshold: number;
+  calibrated: false;
+  reviewOnly: true;
+  problems: FaceMatchProblem[];
+  portrait: { captureId: string; box: number[] | null };
+  selfie: { captureId: string | null; box: number[] | null };
+  timing: { ms: number; cold: boolean };
+}
+
+export const FACE_MATCH_DETAIL_KEYS = [
+  "model",
+  "engine",
+  "similarity",
+  "threshold",
+  "lowThreshold",
+  "calibrated",
+  "reviewOnly",
+  "problems",
+  "portrait",
+  "selfie",
+  "timing",
+] as const satisfies readonly (keyof FaceMatchDetails)[];
+
+// ---------------------------------------------------------------------------
 // Admin API (staff dashboard). Edge Function "admin".
 //   POST /admin/enroll         EnrollRequest -> EnrollResponse             (public: proves possession of a one-time invite code)
 //   POST /admin/test-sessions  TestSessionRequest -> TestSessionResponse   (staff token; supervisor or admin)

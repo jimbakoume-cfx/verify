@@ -23,6 +23,8 @@ export interface FunctionConfig {
   testSessionTtlMinutes: number;
   /** The AI worker's doorbell (M3); null when unset or invalid (the sweep still rings each minute). */
   workerRingUrl: string | null;
+  /** The face worker's doorbell (M6/M7); null when unset or invalid (the face sweep rings each minute). */
+  faceRingUrl: string | null;
 }
 
 /** Reads `get`, falling back to `defaults` for variables that are unset or blank. */
@@ -39,13 +41,14 @@ export function readConfig(get: EnvReader): FunctionConfig {
     riderAppUrl: parseRiderAppUrl(get("RIDER_APP_URL")),
     testSessionTtlMinutes: parseTtlMinutes(get("TEST_SESSION_TTL_MINUTES")),
     workerRingUrl: parseWorkerRingUrl(get("WORKER_RING_URL")),
+    faceRingUrl: parseWorkerRingUrl(get("FACE_RING_URL")),
   };
 }
 
 /** Settings that make the function refuse work. They fail closed, so they are reported at startup. */
 export function configProblems(
   config: FunctionConfig,
-  { needsRiderAppUrl = false, needsWorkerRingUrl = false } = {},
+  { needsRiderAppUrl = false, needsWorkerRingUrl = false, needsFaceRingUrl = false } = {},
 ): string[] {
   const problems: string[] = [];
   if (config.allowedOrigins.size === 0) {
@@ -56,6 +59,9 @@ export function configProblems(
   }
   if (needsWorkerRingUrl && !config.workerRingUrl) {
     problems.push("WORKER_RING_URL is missing or invalid: photos wait for the sweep (up to a minute) before the worker sees them");
+  }
+  if (needsFaceRingUrl && !config.faceRingUrl) {
+    problems.push("FACE_RING_URL is missing or invalid: face checks wait for the face sweep (up to a minute)");
   }
   return problems;
 }

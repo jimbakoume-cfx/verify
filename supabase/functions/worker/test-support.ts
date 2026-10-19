@@ -42,6 +42,8 @@ export interface SignOptions {
   nonce?: string;
   /** Changes what is signed without changing what is sent. */
   tamper?: (canonical: string) => string;
+  /** The function's audience (the face worker's since M6/M7); default: the AI worker's. */
+  audience?: string;
 }
 
 /** The signature headers for a request, as the Python worker builds them. */
@@ -54,6 +56,7 @@ export async function signedHeaders(key: TestKey, options: SignOptions): Promise
     timestamp: options.timestamp,
     nonce,
     bodySha256: await sha256Hex(options.body),
+    audience: options.audience,
   });
   return {
     [WORKER_HEADERS.keyId]: key.kid,
