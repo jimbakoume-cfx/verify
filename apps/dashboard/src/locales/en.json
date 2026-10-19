@@ -11,7 +11,8 @@
   "nav": {
     "home": "Verify Ops home",
     "signOut": "Sign out",
-    "signingOut": "Signing out…"
+    "signingOut": "Signing out…",
+    "thresholds": "Thresholds"
   },
   "roles": {
     "reviewer": "Reviewer",
@@ -95,7 +96,12 @@
     "empty": "No verifications yet.",
     "noDocument": "Document not chosen yet",
     "photos_one": "{{count}} photo",
-    "photos_other": "{{count}} photos"
+    "photos_other": "{{count}} photos",
+    "sortLabel": "Sort",
+    "sort": {
+      "newest": "Newest first",
+      "recommendation": "By recommendation"
+    }
   },
   "badges": {
     "test": "Test",
@@ -457,6 +463,209 @@
     "photoNotFound": "This photo is no longer available, or this case is not assigned to you.",
     "adminNoDataAccess": "Administrators have no routine access to data read from ID documents. A supervisor or the assigned reviewer can show it.",
     "documentDataNotFound": "This case is no longer available, or it is not assigned to you.",
-    "documentDataAuditFailed": "The access could not be recorded in the audit log, so the data is not shown. Try again in a moment."
+    "documentDataAuditFailed": "The access could not be recorded in the audit log, so the data is not shown. Try again in a moment.",
+    "already_decided": "This case has already been decided. Reload the page.",
+    "not_submitted": "This case cannot be decided before the rider submits.",
+    "note_required": "A note is required for this decision.",
+    "invalid_reason": "Choose a reason for a reject (and none for an approval).",
+    "stale_version": "Someone saved a new version meanwhile. Reload the page and check the changes again.",
+    "decisionRole": "Your role does not allow deciding this case.",
+    "thresholdsRole": "Only administrators can change the thresholds.",
+    "thresholdsBadRequest": "The server refused these settings, or they are the same as the active version."
+  },
+  "risk": {
+    "title": "Risk and decision",
+    "intro": "What the rules recommend from the checks, with every signal and its weight, and the threshold version used. Today a person decides every case.",
+    "notAssessedBadge": "Not assessed",
+    "recommendation": {
+      "approve": "Recommend: approve",
+      "review": "Recommend: review",
+      "reject": "Recommend: reject"
+    },
+    "decision": {
+      "approve": "Approved",
+      "review": "Review",
+      "reject": "Rejected"
+    },
+    "notYet": "Assessed when the rider submits.",
+    "notAssessed": "Not assessed yet. Reload in a moment.",
+    "unknownShape": "This assessment was stored by a newer version of the rules. Reload the page.",
+    "score": "Score",
+    "firmScore": "Firm signals only",
+    "band": "Score band",
+    "version": "Threshold version",
+    "versionNumber": "Version {{version}}",
+    "assessedAt": "Assessed",
+    "reasons": {
+      "label": {
+        "hard_flag": "Hard flag",
+        "unknown_signal": "Unknown signal",
+        "always_review_document": "Always decided by a person",
+        "firm_score_high": "Firm signals reach the reject cut-off",
+        "provisional_signals": "High score from provisional signals",
+        "score_between": "Score between the cut-offs",
+        "score_low": "Low score",
+        "missing_checks": "Checks missing"
+      },
+      "body": {
+        "hard_flag": "A hard flag is present: a person decides, whatever the score.",
+        "unknown_signal": "A signal this version of the rules does not know: a person decides.",
+        "always_review_document": "This kind of document is always decided by a person.",
+        "firm_score_high": "The firm signals alone add up to {{rejectMin}} or more: the rules recommend a reject.",
+        "provisional_signals": "The score reaches {{rejectMin}} only with provisional signals, which never reject: a person decides.",
+        "score_between": "The score is above {{approveMax}} and under {{rejectMin}}: a person decides.",
+        "score_low": "The score is {{approveMax}} or less: low enough to approve.",
+        "missing_checks": "Some checks are missing (listed below): no approval until they exist."
+      }
+    },
+    "rejectReason": "Rider reason if rejected: {{code}}",
+    "signalsTitle": "Signals",
+    "noSignals": "No signal: nothing adds to the score.",
+    "signal": "Signal",
+    "weight": "Weight",
+    "kind": "Kind",
+    "notCounted": "Switched off",
+    "firm": "Firm",
+    "provisional": "Provisional",
+    "unknownSignal": "Unknown signal",
+    "signals": {
+      "document_expired": "Document expired",
+      "under_18": "Under 18",
+      "image_reused": "Photo already used in another verification",
+      "unsupported_document": "Document not accepted",
+      "mrz_disagreement": "Code lines differ (phone vs server)",
+      "mrz_invalid_server": "Code lines fail their checks",
+      "mrz_print_mismatch": "Printed text differs from the code lines",
+      "type_mismatch": "Not the declared document",
+      "date_logic": "Dates contradict each other",
+      "number_format": "Unexpected number format",
+      "manual_review_document": "Always checked by a person",
+      "unrecognised_document": "Document not recognised",
+      "mrz_unreadable_server": "Code lines not read by the server",
+      "mrz_phone_flag": "Phone's reading of the code lines flagged",
+      "phone_report_missing": "Phone report missing",
+      "provisional_classification": "Type recognised provisionally",
+      "quality_poor": "Poor photo (server)",
+      "liveness_flag": "Liveness check not passed",
+      "face_match_flag": "Face match not passed"
+    },
+    "missingTitle": "Checks missing",
+    "missing": {
+      "server_checks": "Server checks of the photos (waiting, or not possible)",
+      "liveness": "Liveness check (from M6)",
+      "face_match": "Face match (from M7)"
+    },
+    "approveUpTo": "Approve up to {{value}}",
+    "rejectFrom": "Reject from {{value}} (firm signals)"
+  },
+  "decision": {
+    "title": "Decision",
+    "adminNoDecision": "Administrators do not decide cases: a supervisor or the assigned reviewer does.",
+    "noRecord": "No decision record for this case.",
+    "notSubmitted": "Can be decided once the rider has submitted.",
+    "outcome": {
+      "approve": "Approve",
+      "reject": "Reject"
+    },
+    "automatic": "Automatic",
+    "by": "By",
+    "bySystem": "The rules (automatic decision)",
+    "byYou": "You",
+    "byStaff": "Staff member {{id}}",
+    "at": "When",
+    "recommendationShown": "Recommendation shown",
+    "agreement": {
+      "agrees": "Agreed with the recommendation.",
+      "disagrees": "Went against the recommendation.",
+      "none": "The recommendation was review: nothing to agree with."
+    },
+    "riderReason": "Reason given to the rider",
+    "riderReasonHint": "Shown to the rider in their language.",
+    "note": "Note:",
+    "choose": "Your decision",
+    "chooseReason": "Choose a reason",
+    "preview": {
+      "agrees": "This follows the recommendation.",
+      "disagrees": "This goes against the recommendation: say why in the note.",
+      "none": "The rules leave this case to you."
+    },
+    "noteRequired": "Note (required)",
+    "noteOptional": "Note (optional)",
+    "noteHint": "For staff only, never shown to the rider. Required against the recommendation, or to approve a case with a hard flag. Do not copy data read from the document.",
+    "saving": "Recording…",
+    "submit": "Record the decision"
+  },
+  "thresholds": {
+    "title": "Decision thresholds",
+    "intro": "The rules' weights and cut-offs. A new version is active at once, without a redeploy: every case waiting for a decision is assessed again with it. Versions are never edited; each records who made it and why.",
+    "saved_one": "Version {{version}} is active. {{count}} case was assessed again.",
+    "saved_other": "Version {{version}} is active. {{count}} cases were assessed again.",
+    "activeUnknown": "The active version is in a format this dashboard does not know. Reload the page.",
+    "bySystem": "Set up with the system",
+    "createdAt": "Created",
+    "createdBy": "By",
+    "approveMax": "Approve cut-off",
+    "rejectMin": "Reject cut-off",
+    "autoDecide": "Automatic decisions",
+    "on": "on",
+    "off": "off",
+    "note": "Why",
+    "editTitle": "New version ({{version}})",
+    "editIntro": "Weights and cut-offs are numbers from 0 to 1 with at most 4 decimals. The score adds the weights of the signals present (capped at 1).",
+    "approveMaxHint": "A score at or under this can be approved (only when no check is missing).",
+    "rejectMinHint": "Firm signals adding up to this or more recommend a reject. Provisional signals never reject.",
+    "signalsCaption": "Signals: weight, whether it counts, and whether it is a hard flag (always a person).",
+    "counted": "Counts",
+    "weightOf": "Weight of {{signal}}",
+    "countedOf": "{{signal}} counts in the score",
+    "hardOf": "{{signal}} is a hard flag",
+    "mandatoryHard": "Required by a PM decision",
+    "alwaysReview": "Documents always decided by a person",
+    "mandatoryDocument": "(required by a PM decision)",
+    "autoDecideLabel": "Decide automatically when the rules are sure",
+    "autoDecideHint": "Off by default. Even on: test sessions only, and never an approval while liveness or face match is missing (until M6 and M7, no approval at all).",
+    "reason": "Why this change (required)",
+    "reasonHint": "{{min}} to {{max}} characters, kept with the version.",
+    "noteError": {
+      "short": "At least {{min}} characters.",
+      "long": "At most {{max}} characters."
+    },
+    "changesTitle": "Changes from version {{version}}",
+    "fixErrors_one": "Fix {{count}} problem above first.",
+    "fixErrors_other": "Fix {{count}} problems above first.",
+    "noChanges": "No change yet.",
+    "saving": "Saving…",
+    "save": "Make version {{version}} active",
+    "change": {
+      "approveMax": "Approve cut-off: {{from}} → {{to}}",
+      "rejectMin": "Reject cut-off: {{from}} → {{to}}",
+      "autoDecide": "Automatic decisions: {{from}} → {{to}}",
+      "weight": "Weight of “{{signal}}”: {{from}} → {{to}}",
+      "counted": "“{{signal}}” counts in the score again",
+      "notCounted": "“{{signal}}” no longer counts in the score",
+      "hard": "“{{signal}}” becomes a hard flag",
+      "notHard": "“{{signal}}” is no longer a hard flag",
+      "alwaysReview": "“{{document}}” always decided by a person",
+      "notAlwaysReview": "“{{document}}” no longer always decided by a person"
+    },
+    "historyTitle": "All versions",
+    "active": "Active",
+    "earlierFormat": "Earlier format (before M8): every case went to a person.",
+    "firstOfFormat": "First version of the M8 rules.",
+    "errors": {
+      "not_object": "Not valid.",
+      "unknown_key": "Unknown setting.",
+      "missing_key": "Missing.",
+      "schema": "Wrong format version.",
+      "not_number": "Enter a number, e.g. 0.25.",
+      "out_of_range": "Between 0 and 1.",
+      "too_precise": "At most 4 decimals.",
+      "not_boolean": "Not valid.",
+      "not_array": "Not valid.",
+      "unknown_value": "Unknown value.",
+      "duplicate": "Listed twice.",
+      "mandatory": "A required item is missing.",
+      "order": "Must be above the approve cut-off."
+    }
   }
 }

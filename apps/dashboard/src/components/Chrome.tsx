@@ -1,6 +1,8 @@
 import { useTranslation } from "react-i18next";
 import { Brand, LanguageToggle, ServerStatus } from "@verify/shared";
 import type { StaffProfile } from "../lib/records";
+import { canEditThresholds } from "../lib/roles";
+import { thresholdsPath } from "../lib/routes";
 import { Link } from "./Link";
 
 export function TopBar({ profile, onSignOut }: { profile?: StaffProfile; onSignOut?: () => void }) {
@@ -16,6 +18,11 @@ export function TopBar({ profile, onSignOut }: { profile?: StaffProfile; onSignO
             <span className="dash-user-name">{profile.fullName}</span>
             <span className="badge">{t(`roles.${profile.role}`)}</span>
           </span>
+        )}
+        {profile && canEditThresholds(profile.role) && (
+          <Link href={thresholdsPath} className="dash-nav-link">
+            {t("nav.thresholds")}
+          </Link>
         )}
         <LanguageToggle />
         {onSignOut && (

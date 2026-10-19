@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { casePath, parseRoute } from "./routes";
+import { casePath, parseRoute, thresholdsPath } from "./routes";
 
 const ID = "7d0c1a52-3f0e-4c8e-9a51-2b6f4f1d9e10";
 
@@ -14,6 +14,12 @@ describe("parseRoute", () => {
     for (const path of ["/", "", "/case", "/case/not-a-uuid", `/case/${ID}/extra`, `/cases/${ID}`]) {
       expect(parseRoute(path)).toEqual({ name: "home" });
     }
+  });
+
+  it("reads the thresholds page (M8)", () => {
+    expect(parseRoute(thresholdsPath)).toEqual({ name: "thresholds" });
+    expect(parseRoute("/thresholds/")).toEqual({ name: "thresholds" });
+    expect(parseRoute("/thresholds/2")).toEqual({ name: "home" });
   });
 
   it("builds the path parseRoute reads", () => {

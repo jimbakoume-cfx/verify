@@ -23,6 +23,7 @@ import {
   type WorkerFields,
   type WorkerQuality,
 } from "@verify/shared";
+import { type CaseRisk, RISK_COLUMNS, toCaseRisk } from "./risk";
 import { isStaffRole, type StaffRole } from "./roles";
 
 export interface StaffProfile {
@@ -40,6 +41,8 @@ export interface VerificationSummary {
   createdAt: string;
   submittedAt: string | null;
   sessionExpiresAt: string | null;
+  /** M8: the risk assessment and the threshold version behind it. */
+  risk: CaseRisk;
 }
 
 export interface VerificationListItem extends VerificationSummary {
@@ -139,7 +142,7 @@ export const CAPTURE_KINDS = ["document_front", "document_back", "selfie", "live
 
 /** Columns each query asks for, kept next to the code that reads them. */
 export const STAFF_PROFILE_COLUMNS = "user_id, role, full_name, active";
-export const VERIFICATION_COLUMNS = "id, status, declared_document, is_test, created_at, submitted_at, session_expires_at";
+export const VERIFICATION_COLUMNS = `id, status, declared_document, is_test, created_at, submitted_at, session_expires_at, ${RISK_COLUMNS}`;
 export const CAPTURE_COLUMNS =
   "id, verification_id, kind, byte_size, width, height, quality, created_at, sha256, deleted_at, superseded_by";
 export const CHECK_COLUMNS = "id, capture_id, check_name, check_version, outcome, details, created_at";
@@ -198,6 +201,7 @@ export function toVerification(value: unknown): VerificationSummary | null {
     createdAt,
     submittedAt: str(row.submitted_at),
     sessionExpiresAt: str(row.session_expires_at),
+    risk: toCaseRisk(row),
   };
 }
 
