@@ -5,11 +5,13 @@ import {
   type CaptureViewResponse,
   type DocumentDataResponse,
   type getSupabase,
+  LIVENESS_CHECK_NAME,
   MRZ_CHECK_NAME,
   type TestSessionRequest,
   type TestSessionResponse,
 } from "@verify/shared";
 import { ClientError } from "../lib/errors";
+import { type LivenessCheckRecord, toLivenessCheck } from "../lib/liveness";
 import {
   CAPTURE_COLUMNS,
   type CaptureRecord,
@@ -44,6 +46,8 @@ export interface DashboardServices {
   mrzChecks(verificationId: string): Promise<MrzCheckRecord[]>;
   /** The server's checks (M3). Outcomes, generic codes and metrics only: no data read from the document. */
   serverChecks(verificationId: string): Promise<ServerChecks>;
+  /** M5: the face check's liveness_capture check; null when the case has none. Codes, counts and timings only. */
+  livenessCheck(verificationId: string): Promise<LivenessCheckRecord | null>;
   createTestSession(request: TestSessionRequest): Promise<TestSessionResponse>;
   viewCapture(captureId: string): Promise<CaptureViewResponse>;
   /**
@@ -143,6 +147,18 @@ export function createSupabaseServices(supabase: Supabase): DashboardServices {
       if (checks.error) throw dbError(checks.error);
       if (jobs.error) throw dbError(jobs.error);
       return toServerChecks(checks.data ?? [], jobs.data ?? []);
+    },
+
+    async livenessCheck(verificationId) {
+      const { data, error } = await supabase
+        .from("check_result")
+        .select(CHECK_COLUMNS)
+        .eq("verification_id", verificationId)
+        .eq("check_name", LIVENESS_CHECK_NAME)
+        .is("capture_id", null)
+        .maybeSingle();
+      if (error) throw dbError(error);
+      return data ? toLivenessCheck(data) : null;
     },
 
     async createTestSession(request) {

@@ -18,6 +18,7 @@ import { StaffPages } from "../App";
 import { type DashboardServices, ServicesContext } from "../api/services";
 import type { OpenDocumentData } from "../components/DocumentDataViewer";
 import type { OpenPhoto } from "../components/PhotoViewer";
+import type { LivenessCheckRecord } from "../lib/liveness";
 import type {
   CaptureRecord,
   CheckRecord,
@@ -183,6 +184,8 @@ const CAPTURES: CaptureRecord[] = [
     sha256: "9f2c4e1a7b3d5f60812a4c6e8b0d2f4a6c8e0b2d4f6a8c0e2b4d6f8a0c2e4b6d",
     deleted: false,
     supersededBy: null,
+    livenessChallengeId: null,
+    liveness: null,
     quality: {
       source: "auto",
       sharpness: 412.6,
@@ -205,6 +208,8 @@ const CAPTURES: CaptureRecord[] = [
     sha256: "1b3d5f7a9c0e2b4d6f8a0c2e4b6d8f0a2c4e6b8d0f2a4c6e8b0d2f4a6c8e0b2d",
     deleted: false,
     supersededBy: null,
+    livenessChallengeId: null,
+    liveness: null,
     quality: {
       source: "manual",
       sharpness: 168.9,
@@ -218,6 +223,46 @@ const CAPTURES: CaptureRecord[] = [
     },
   },
 ];
+
+// M5: a face check of 13 frames (1 before the actions, then 4 per action), as the rider app sends it.
+const CHALLENGE_ID = "f5555555-5555-4555-8555-555555555555";
+const LIVENESS_FRAMES: CaptureRecord[] = Array.from({ length: 13 }, (_, i) => {
+  const step = i === 0 ? 0 : Math.ceil(i / 4);
+  const atMs = i === 0 ? 900 : 1500 + (step - 1) * 3000 + (((i - 1) % 4) + 1) * 600;
+  return {
+    ...CAPTURES[0],
+    id: `f6666666-6666-4666-8666-${String(i).padStart(12, "0")}`,
+    kind: "liveness_frame",
+    byteSize: 31_000 + i * 211,
+    width: 360,
+    height: 480,
+    createdAt: minutes(-3),
+    sha256: `${String(i).padStart(2, "0")}${"ab".repeat(31)}`,
+    livenessChallengeId: CHALLENGE_ID,
+    liveness: { index: i, step, atMs },
+  };
+});
+
+const LIVENESS_CHECK: LivenessCheckRecord = {
+  id: "f7777777-7777-4777-8777-777777777777",
+  captureId: null,
+  checkVersion: "liveness-capture-v1",
+  outcome: "pass",
+  createdAt: minutes(-3),
+  details: {
+    evaluated: false,
+    challengeId: CHALLENGE_ID,
+    actions: ["blink", "turn_left", "smile"],
+    code: "482913",
+    frames: 13,
+    framesPerStep: [1, 4, 4, 4],
+    durationMs: 9_910,
+    serverElapsedMs: 21_400,
+    maxGapMs: 1_210,
+    startedWithWarning: false,
+    problems: [],
+  },
+};
 
 const PASSPORT_CAPTURES: CaptureRecord[] = [
   {
@@ -640,10 +685,12 @@ function fakeServices(): DashboardServices {
     verification: async (id) => VERIFICATIONS.find((v) => v.id === id) ?? null,
     captures: async (id) => {
       if ([PASSPORT_CASE_ID, PENDING_CASE_ID, EXPIRED_CASE_ID, PRINT_MISMATCH_CASE_ID].includes(id)) return PASSPORT_CAPTURES;
+      if (id === CASE_ID) return [...CAPTURES, ...LIVENESS_FRAMES];
       return id === UNREADABLE_CASE_ID ? RETAKEN_CAPTURES : CAPTURES;
     },
     mrzChecks: async (id) => MRZ_CHECKS[id] ?? [],
     serverChecks: async (id) => SERVER_CHECKS[id] ?? NO_SERVER_CHECKS,
+    livenessCheck: async (id) => (id === CASE_ID ? LIVENESS_CHECK : null),
     createTestSession: async () => testSession(),
     viewCapture: async () => view(),
     documentData: async (id) => documentData(id),
