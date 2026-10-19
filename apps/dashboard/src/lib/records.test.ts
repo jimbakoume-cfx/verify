@@ -66,6 +66,8 @@ describe("toVerification", () => {
       createdAt: row.created_at,
       submittedAt: row.submitted_at,
       sessionExpiresAt: row.session_expires_at,
+      // Not assessed yet (M8): the columns are null or absent.
+      risk: { score: null, recommendation: null, assessment: null, thresholdVersion: null, assessedAt: null, decidedAt: null },
     });
   });
 
@@ -192,6 +194,7 @@ describe("sessionOpen", () => {
     createdAt: "2026-10-13T08:00:00Z",
     submittedAt: null,
     sessionExpiresAt: "2026-10-13T08:30:00Z",
+    risk: { score: null, recommendation: null, assessment: null, thresholdVersion: null, assessedAt: null, decidedAt: null },
   };
   const at = (iso: string) => Date.parse(iso);
 

@@ -227,6 +227,49 @@ a:hover { color: var(--brand-hover); }
 
 .dash-footer { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; }
 
+/* M8: risk, decisions, thresholds */
+.dash-nav-link { display: inline-flex; align-items: center; min-height: 36px; padding: 0 6px; font-weight: 600; font-size: 0.9rem; }
+.dash-sort { display: inline-flex; align-items: center; gap: 6px; font-size: 0.875rem; color: var(--text-2); }
+.dash-sort select, .field select, .field textarea {
+  font: inherit;
+  font-weight: 400;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+}
+.dash-sort select { min-height: 36px; padding: 4px 8px; font-size: 0.875rem; }
+.field select, .field textarea { font-size: 1rem; width: 100%; min-height: 44px; padding: 10px 12px; }
+.field textarea { resize: vertical; }
+.dash-sort select:focus-visible, .field select:focus-visible, .field textarea:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; border-color: var(--focus); }
+.dash-row-risk { display: inline-flex; align-items: center; gap: 4px; }
+.dash-risk { display: flex; flex-direction: column; gap: 12px; }
+.dash-risk p { margin: 0; }
+.dash-risk-h3 { margin: 0; font-size: 1.05rem; }
+.dash-risk-h4 { margin: 0; font-size: 0.95rem; }
+.dash-subsection { margin-top: 12px; }
+.dash-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+.dash-table th, .dash-table td { text-align: left; vertical-align: top; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+.dash-table thead th { font-size: 0.8rem; color: var(--text-3); font-weight: 600; }
+.dash-table tbody th { font-weight: 500; }
+.dash-table tr.hard th { border-left: 4px solid var(--bad); }
+.dash-table-caption { text-align: left; font-size: 0.85rem; color: var(--text-2); padding-bottom: 6px; }
+.dash-weight { width: 7ch; min-height: 36px; padding: 4px 8px; font: inherit; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); }
+.dash-field-error { display: block; color: var(--bad); font-weight: 500; font-size: 0.85rem; }
+.dash-fieldset { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 12px; margin: 0; display: flex; flex-direction: column; gap: 2px; }
+.dash-fieldset legend { font-weight: 600; font-size: 0.9rem; padding: 0 4px; }
+.dash-threshold-cutoffs { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px 16px; }
+.dash-changes { margin: 0; padding-left: 1.2em; display: grid; gap: 4px; font-size: 0.95rem; }
+.dash-changes li.hard { color: var(--bad); font-weight: 600; }
+.dash-note { white-space: pre-wrap; overflow-wrap: anywhere; }
+.dash-score { display: flex; flex-direction: column; gap: 4px; }
+.dash-score-track { position: relative; height: 10px; border-radius: 5px; background: var(--surface-2); border: 1px solid var(--border); overflow: hidden; }
+.dash-score-zone { position: absolute; top: 0; bottom: 0; left: 0; }
+.dash-score-zone.approve { background: #d1fadf; }
+.dash-score-zone.reject { background: #fee4e2; }
+.dash-score-mark { position: absolute; top: -1px; bottom: -1px; width: 4px; margin-left: -2px; background: var(--text); border-radius: 2px; }
+.dash-score-legend { display: flex; justify-content: space-between; gap: 8px; }
+
 /* Tablets: the two QR codes take the full width, the link and buttons go underneath. */
 @media (max-width: 900px) {
   .dash-test-session { grid-template-columns: minmax(0, 1fr); }

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { TestSessionResponse } from "@verify/shared";
 import { useServices } from "../api/services";
@@ -11,9 +11,11 @@ import { useAsync, useNow } from "../hooks";
 import { formatDateTime, shortId, toLanguage } from "../lib/format";
 import { type StaffProfile, sessionOpen, type VerificationListItem } from "../lib/records";
 import { debugRiderUrl } from "../lib/riderLink";
+import { type QueueSort, sortQueue } from "../lib/risk";
 import { canCreateTestSessions, seesAllVerifications } from "../lib/roles";
 import { casePath } from "../lib/routes";
 import { parseTime } from "../lib/time";
+import { formatScore, RecommendationBadge } from "./CaseRisk";
 
 export interface HomeProps {
   profile: StaffProfile;
@@ -151,21 +153,33 @@ function RecentVerifications({
   const { t, i18n } = useTranslation();
   const lang = toLanguage(i18n.language);
   const now = useNow(30_000);
+  // M8: the queue sorted by the rules' recommendation (cases waiting for a decision first).
+  const [sort, setSort] = useState<QueueSort>("newest");
+  const sorted = useMemo(() => (items ? sortQueue(items, sort) : undefined), [items, sort]);
 
   return (
     <section className="card" aria-labelledby="recent-title" aria-busy={loading || undefined}>
       <div className="dash-section-head">
         <h2 id="recent-title">{t("recent.title")}</h2>
-        <button type="button" className="small" onClick={onReload} disabled={loading}>
-          {loading ? t("loading") : t("recent.refresh")}
-        </button>
+        <span className="dash-row-badges">
+          <label className="dash-sort">
+            <span>{t("recent.sortLabel")}</span>
+            <select value={sort} onChange={(e) => setSort(e.target.value === "recommendation" ? "recommendation" : "newest")}>
+              <option value="newest">{t("recent.sort.newest")}</option>
+              <option value="recommendation">{t("recent.sort.recommendation")}</option>
+            </select>
+          </label>
+          <button type="button" className="small" onClick={onReload} disabled={loading}>
+            {loading ? t("loading") : t("recent.refresh")}
+          </button>
+        </span>
       </div>
       {assignedOnly && <p className="muted">{t("recent.assignedOnly")}</p>}
       {error !== null && error !== undefined && <ErrorText error={error} />}
       {items && items.length === 0 && <p className="muted">{t("recent.empty")}</p>}
-      {items && items.length > 0 && (
+      {sorted && sorted.length > 0 && (
         <ul className="dash-list">
-          {items.map((v) => (
+          {sorted.map((v) => (
             <li key={v.id}>
               <Link href={casePath(v.id)} className="dash-row">
                 <span className="dash-row-main">
@@ -179,6 +193,12 @@ function RecentVerifications({
                 <span className="dash-row-badges">
                   <StatusBadge status={v.status} />
                   {v.isTest && <TestBadge />}
+                  {v.status === "submitted" && v.risk.recommendation && (
+                    <span className="dash-row-risk" title={t("risk.score")}>
+                      <RecommendationBadge outcome={v.risk.recommendation} />
+                      {v.risk.score !== null && <span className="muted dash-small">{formatScore(v.risk.score, lang)}</span>}
+                    </span>
+                  )}
                   {(v.status === "created" || v.status === "in_progress") && !sessionOpen(v, now) && (
                     <span className="badge neutral">{t("badges.linkExpired")}</span>
                   )}

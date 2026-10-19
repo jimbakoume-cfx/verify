@@ -15,6 +15,7 @@ import { EnrollScreen } from "./screens/Enroll";
 import { Home } from "./screens/Home";
 import { LoadingScreen, MessageScreen, NoAccessScreen, NotConfiguredScreen } from "./screens/Message";
 import { SignInScreen } from "./screens/SignIn";
+import { ThresholdsPage } from "./screens/Thresholds";
 
 export function App() {
   const supabase = getSupabase();
@@ -181,6 +182,8 @@ export function StaffPages({
       {children ??
         (route.name === "case" ? (
           <CaseView key={route.id} id={route.id} profile={profile} />
+        ) : route.name === "thresholds" ? (
+          <ThresholdsPage profile={profile} />
         ) : (
           <Home profile={profile} testSession={testSession} onTestSession={setTestSession} />
         ))}

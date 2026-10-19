@@ -1,7 +1,7 @@
 // Supabase implementation of AdminRepo, StaffAuth and SignedUrlStorage (service role).
 import { isAuthApiError, isAuthWeakPasswordError, type SupabaseClient } from "@supabase/supabase-js";
 import { ID_CAPTURES_BUCKET } from "../_shared/config.ts";
-import { MRZ_FORMATS, type WorkerFields } from "../_shared/contract.ts";
+import { DECISION_OUTCOMES, MRZ_FORMATS, type WorkerFields } from "../_shared/contract.ts";
 import { dbError, insertAudit } from "../_shared/db.ts";
 import { isOneOf, isPlainObject } from "../_shared/http.ts";
 import { InternalError } from "../_shared/log.ts";
@@ -15,6 +15,7 @@ import type {
   StaffAuth,
   StaffRole,
 } from "./handler.ts";
+import type { DecideResult, DecisionRepo, ThresholdResult } from "./decisions.ts";
 
 function toInviteResult(data: unknown): InviteResult {
   return data === "ok" ? "ok" : "invalid";
@@ -227,6 +228,89 @@ export function createSignedUrlStorage(db: SupabaseClient): SignedUrlStorage {
       const { data, error } = await db.storage.from(ID_CAPTURES_BUCKET).createSignedUrl(path, expiresIn);
       if (error) throw dbError("storage.create_signed_url", error);
       return data.signedUrl;
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// M8: decisions and threshold versions
+// ---------------------------------------------------------------------------
+/** PostgreSQL's insufficient_privilege: the database refused the staff member (role or assignment changed). */
+const INSUFFICIENT_PRIVILEGE = "42501";
+
+const isInteger = (value: unknown): value is number => typeof value === "number" && Number.isInteger(value);
+
+/** staff_decide's answer, checked field by field. */
+export function toDecideResult(value: unknown): DecideResult {
+  if (!isPlainObject(value)) throw new InternalError("rpc.staff_decide returned an unexpected value");
+  const { result } = value;
+  if (result === "ok") {
+    const { decisionId, status, recommendation, agreesWithRecommendation, thresholdVersion } = value;
+    if (
+      typeof decisionId !== "string" || (status !== "approved" && status !== "rejected") ||
+      (recommendation !== null && !isOneOf(DECISION_OUTCOMES, recommendation)) ||
+      (agreesWithRecommendation !== null && typeof agreesWithRecommendation !== "boolean") ||
+      (thresholdVersion !== null && !isInteger(thresholdVersion))
+    ) {
+      throw new InternalError("rpc.staff_decide returned an unexpected value");
+    }
+    return { result, decisionId, status, recommendation, agreesWithRecommendation, thresholdVersion };
+  }
+  if (
+    result === "not_found" || result === "already_decided" || result === "not_submitted" ||
+    result === "note_required" || result === "invalid_reason"
+  ) {
+    return { result };
+  }
+  throw new InternalError("rpc.staff_decide returned an unexpected value");
+}
+
+/** staff_create_threshold_version's answer, checked field by field. */
+export function toThresholdResult(value: unknown): ThresholdResult {
+  if (!isPlainObject(value)) throw new InternalError("rpc.staff_create_threshold_version returned an unexpected value");
+  const { result } = value;
+  if (result === "created" && isInteger(value.version) && isInteger(value.rescored)) {
+    return { result, version: value.version, rescored: value.rescored };
+  }
+  if (result === "stale" && isInteger(value.version)) return { result, version: value.version };
+  if (result === "invalid" && Array.isArray(value.errors) && value.errors.every((e) => typeof e === "string")) {
+    return { result, errors: value.errors as string[] };
+  }
+  if (result === "invalid_note" || result === "unchanged") return { result };
+  throw new InternalError("rpc.staff_create_threshold_version returned an unexpected value");
+}
+
+export function createDecisionRepo(db: SupabaseClient): DecisionRepo {
+  return {
+    async decide(input) {
+      // A POST call (supabase-js default), so PostgREST runs it read-write.
+      const { data, error } = await db.rpc("staff_decide", {
+        p_verification: input.verificationId,
+        p_actor: input.actorId,
+        p_role: input.role,
+        p_outcome: input.outcome,
+        p_reason_code: input.reasonCode,
+        p_note: input.note,
+      });
+      if (error) {
+        if (error.code === INSUFFICIENT_PRIVILEGE) return { result: "forbidden" };
+        throw dbError("rpc.staff_decide", error);
+      }
+      return toDecideResult(data);
+    },
+
+    async createThresholdVersion(input) {
+      const { data, error } = await db.rpc("staff_create_threshold_version", {
+        p_actor: input.actorId,
+        p_base_version: input.baseVersion,
+        p_config: input.config,
+        p_note: input.note,
+      });
+      if (error) {
+        if (error.code === INSUFFICIENT_PRIVILEGE) return { result: "forbidden" };
+        throw dbError("rpc.staff_create_threshold_version", error);
+      }
+      return toThresholdResult(data);
     },
   };
 }

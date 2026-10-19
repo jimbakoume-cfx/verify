@@ -3,11 +3,15 @@
 import { createContext, useContext } from "react";
 import {
   type CaptureViewResponse,
+  type DecisionRequest,
+  type DecisionResponse,
   type DocumentDataResponse,
   type getSupabase,
   MRZ_CHECK_NAME,
   type TestSessionRequest,
   type TestSessionResponse,
+  type ThresholdVersionRequest,
+  type ThresholdVersionResponse,
 } from "@verify/shared";
 import { ClientError } from "../lib/errors";
 import {
@@ -30,6 +34,17 @@ import {
   type VerificationListItem,
   type VerificationSummary,
 } from "../lib/records";
+import {
+  DECISION_COLUMNS,
+  type DecisionRecord,
+  REASON_CODE_COLUMNS,
+  type ReasonCodeRecord,
+  THRESHOLD_COLUMNS,
+  type ThresholdVersionRecord,
+  toDecision,
+  toReasonCode,
+  toThresholdVersion,
+} from "../lib/risk";
 import * as admin from "./admin";
 
 export type Supabase = NonNullable<ReturnType<typeof getSupabase>>;
@@ -51,6 +66,16 @@ export interface DashboardServices {
    * fields from the server (POST /admin/document-data, audited before decryption).
    */
   documentData(verificationId: string): Promise<DocumentDataResponse>;
+  /** M8: the decisions of a case, latest first. */
+  decisions(verificationId: string): Promise<DecisionRecord[]>;
+  /** M8: the rider reasons a reject can give (active ones). */
+  reasonCodes(): Promise<ReasonCodeRecord[]>;
+  decide(request: DecisionRequest): Promise<DecisionResponse>;
+  /** M8: every threshold version, newest first. */
+  thresholdVersions(): Promise<ThresholdVersionRecord[]>;
+  /** M8: staff names by user id (admins read every profile; others only their own). */
+  staffNames(): Promise<Map<string, string>>;
+  createThresholdVersion(request: ThresholdVersionRequest): Promise<ThresholdVersionResponse>;
 }
 
 export const RECENT_LIMIT = 20;
@@ -155,6 +180,46 @@ export function createSupabaseServices(supabase: Supabase): DashboardServices {
 
     async documentData(verificationId) {
       return admin.documentData(await accessToken(), { verificationId });
+    },
+
+    async decisions(verificationId) {
+      const { data, error } = await supabase
+        .from("decision")
+        .select(DECISION_COLUMNS)
+        .eq("verification_id", verificationId)
+        .order("created_at", { ascending: false });
+      if (error) throw dbError(error);
+      return (data ?? []).map(toDecision).filter((d): d is DecisionRecord => d !== null);
+    },
+
+    async reasonCodes() {
+      const { data, error } = await supabase.from("reason_code").select(REASON_CODE_COLUMNS).eq("active", true).order("code");
+      if (error) throw dbError(error);
+      return (data ?? []).map(toReasonCode).filter((r): r is ReasonCodeRecord => r !== null);
+    },
+
+    async decide(request) {
+      return admin.decide(await accessToken(), request);
+    },
+
+    async thresholdVersions() {
+      const { data, error } = await supabase.from("threshold_config").select(THRESHOLD_COLUMNS).order("version", { ascending: false });
+      if (error) throw dbError(error);
+      return (data ?? []).map(toThresholdVersion).filter((v): v is ThresholdVersionRecord => v !== null);
+    },
+
+    async staffNames() {
+      const { data, error } = await supabase.from("staff_profile").select("user_id, full_name");
+      if (error) throw dbError(error);
+      const names = new Map<string, string>();
+      for (const row of (data ?? []) as { user_id?: unknown; full_name?: unknown }[]) {
+        if (typeof row.user_id === "string" && typeof row.full_name === "string") names.set(row.user_id, row.full_name);
+      }
+      return names;
+    },
+
+    async createThresholdVersion(request) {
+      return admin.createThresholdVersion(await accessToken(), request);
     },
   };
 }

@@ -1,14 +1,20 @@
 import { describe, expect, it } from "vitest";
 import {
   CAPTURE_SIDES,
+  CONFIG_ERROR_CODES,
   CONSISTENCY_FLAGS,
+  DECISION_OUTCOMES,
   DECLARED_DOCUMENTS,
   DETECTED_DOCUMENT_TYPES,
   type MrzServerDetails,
   parseMrz,
   MISMATCH_KINDS,
   POLICY_REASONS,
+  REQUIRED_CHECKS,
   RETAKE_REASONS,
+  RISK_REASONS,
+  RISK_SIGNALS,
+  STAFF_DECISIONS,
 } from "@verify/shared";
 import { KNOWN_SUBTYPES } from "./lib/documentData";
 import { mrzCheckLines, mrzFields, serverMrzCheckLines } from "./lib/mrz";
@@ -110,6 +116,30 @@ describe("FR/EN locales", () => {
       ...["title", "pending", "none", "nothing", "mismatches", "provisionalTitle", "provisionalBody"].map(
         (key) => `serverChecks.consistency.${key}`,
       ),
+    ];
+    for (const key of keys) {
+      expect(FR.has(key), `fr: ${key}`).toBe(true);
+      expect(EN.has(key), `en: ${key}`).toBe(true);
+    }
+  });
+
+  it("label everything the risk section, the decision and the thresholds page can show (M8)", () => {
+    const keys = [
+      ...RISK_SIGNALS.map((code) => `risk.signals.${code}`),
+      ...RISK_REASONS.flatMap((reason) => [`risk.reasons.label.${reason}`, `risk.reasons.body.${reason}`]),
+      ...REQUIRED_CHECKS.map((check) => `risk.missing.${check}`),
+      ...DECISION_OUTCOMES.flatMap((outcome) => [`risk.recommendation.${outcome}`, `risk.decision.${outcome}`]),
+      ...STAFF_DECISIONS.map((outcome) => `decision.outcome.${outcome}`),
+      ...["agrees", "disagrees", "none"].flatMap((key) => [`decision.agreement.${key}`, `decision.preview.${key}`]),
+      ...CONFIG_ERROR_CODES.map((code) => `thresholds.errors.${code}`),
+      ...["approveMax", "rejectMin", "autoDecide", "weight", "counted", "notCounted", "hard", "notHard", "alwaysReview", "notAlwaysReview"].map(
+        (kind) => `thresholds.change.${kind}`,
+      ),
+      ...["short", "long"].map((key) => `thresholds.noteError.${key}`),
+      ...["saved_one", "saved_other", "fixErrors_one", "fixErrors_other"].map((key) => `thresholds.${key}`),
+      "nav.thresholds",
+      "recent.sort.newest",
+      "recent.sort.recommendation",
     ];
     for (const key of keys) {
       expect(FR.has(key), `fr: ${key}`).toBe(true);

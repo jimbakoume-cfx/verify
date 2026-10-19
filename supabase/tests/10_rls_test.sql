@@ -85,7 +85,7 @@ select pg_temp.assert_eq((select count(*) from public.audit_event), 0, 'reviewer
 select pg_temp.assert_eq((select count(*) from public.api_client), 0, 'reviewer cannot read api clients');
 select pg_temp.assert_eq((select count(*) from public.staff_profile), 1, 'reviewer sees only own staff profile');
 select pg_temp.assert_eq((select count(*) from public.reason_code), 10, 'reviewer reads reason codes');
-select pg_temp.assert_eq((select count(*) from public.threshold_config), 1, 'reviewer reads thresholds');
+select pg_temp.assert_eq((select count(*) from public.threshold_config), 2, 'reviewer reads every threshold version (M8 seeds version 2)');
 do $$ begin
   insert into public.decision (verification_id, actor_type, actor_id, outcome)
     values ('30000000-0000-0000-0000-000000000001', 'staff', auth.uid(), 'approve');

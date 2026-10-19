@@ -11,7 +11,8 @@
   "nav": {
     "home": "Accueil Verify Ops",
     "signOut": "Se déconnecter",
-    "signingOut": "Déconnexion…"
+    "signingOut": "Déconnexion…",
+    "thresholds": "Seuils"
   },
   "roles": {
     "reviewer": "Vérificateur",
@@ -95,7 +96,12 @@
     "empty": "Aucune vérification pour le moment.",
     "noDocument": "Document pas encore choisi",
     "photos_one": "{{count}} photo",
-    "photos_other": "{{count}} photos"
+    "photos_other": "{{count}} photos",
+    "sortLabel": "Trier",
+    "sort": {
+      "newest": "Plus récentes",
+      "recommendation": "Par recommandation"
+    }
   },
   "badges": {
     "test": "Test",
@@ -457,6 +463,209 @@
     "photoNotFound": "Cette photo n'est plus disponible, ou ce dossier ne vous est pas assigné.",
     "adminNoDataAccess": "Les administrateurs n'ont pas d'accès courant aux données lues sur les pièces d'identité. Un superviseur ou le vérificateur assigné peut les afficher.",
     "documentDataNotFound": "Ce dossier n'est plus disponible, ou il ne vous est pas assigné.",
-    "documentDataAuditFailed": "L'accès n'a pas pu être enregistré dans le journal d'audit : les données ne sont donc pas affichées. Réessayez dans un instant."
+    "documentDataAuditFailed": "L'accès n'a pas pu être enregistré dans le journal d'audit : les données ne sont donc pas affichées. Réessayez dans un instant.",
+    "already_decided": "Ce dossier a déjà été décidé. Rechargez la page.",
+    "not_submitted": "Ce dossier ne peut pas être décidé avant l'envoi par l'usager.",
+    "note_required": "Une note est obligatoire pour cette décision.",
+    "invalid_reason": "Choisissez un motif pour un refus (et aucun pour une approbation).",
+    "stale_version": "Quelqu'un a enregistré une nouvelle version entre-temps. Rechargez la page et revoyez les changements.",
+    "decisionRole": "Votre rôle ne permet pas de décider ce dossier.",
+    "thresholdsRole": "Seuls les administrateurs peuvent modifier les seuils.",
+    "thresholdsBadRequest": "Le serveur a refusé ces réglages, ou ils sont identiques à la version active."
+  },
+  "risk": {
+    "title": "Risque et décision",
+    "intro": "Ce que les règles recommandent à partir des vérifications, avec chaque signal et son poids, et la version des seuils utilisée. Aujourd'hui, une personne décide chaque dossier.",
+    "notAssessedBadge": "Non évalué",
+    "recommendation": {
+      "approve": "Recommandé : approuver",
+      "review": "Recommandé : examiner",
+      "reject": "Recommandé : refuser"
+    },
+    "decision": {
+      "approve": "Approuvé",
+      "review": "Examen",
+      "reject": "Refusé"
+    },
+    "notYet": "Évalué quand l'usager envoie son dossier.",
+    "notAssessed": "Pas encore évalué. Rechargez dans un instant.",
+    "unknownShape": "Cette évaluation vient d'une version plus récente des règles. Rechargez la page.",
+    "score": "Score",
+    "firmScore": "Signaux fermes seuls",
+    "band": "Zone du score",
+    "version": "Version des seuils",
+    "versionNumber": "Version {{version}}",
+    "assessedAt": "Évalué",
+    "reasons": {
+      "label": {
+        "hard_flag": "Signal bloquant",
+        "unknown_signal": "Signal inconnu",
+        "always_review_document": "Toujours décidé par une personne",
+        "firm_score_high": "Signaux fermes au seuil de refus",
+        "provisional_signals": "Score élevé dû à des signaux provisoires",
+        "score_between": "Score entre les seuils",
+        "score_low": "Score faible",
+        "missing_checks": "Vérifications manquantes"
+      },
+      "body": {
+        "hard_flag": "Un signal bloquant est présent : une personne décide, quel que soit le score.",
+        "unknown_signal": "Un signal que cette version des règles ne connaît pas : une personne décide.",
+        "always_review_document": "Ce type de document est toujours décidé par une personne.",
+        "firm_score_high": "Les signaux fermes atteignent à eux seuls {{rejectMin}} ou plus : les règles recommandent un refus.",
+        "provisional_signals": "Le score n'atteint {{rejectMin}} qu'avec des signaux provisoires, qui ne refusent jamais : une personne décide.",
+        "score_between": "Le score est au-dessus de {{approveMax}} et sous {{rejectMin}} : une personne décide.",
+        "score_low": "Le score est de {{approveMax}} ou moins : assez faible pour approuver.",
+        "missing_checks": "Des vérifications manquent (liste ci-dessous) : pas d'approbation tant qu'elles n'existent pas."
+      }
+    },
+    "rejectReason": "Motif donné à l'usager en cas de refus : {{code}}",
+    "signalsTitle": "Signaux",
+    "noSignals": "Aucun signal : rien ne s'ajoute au score.",
+    "signal": "Signal",
+    "weight": "Poids",
+    "kind": "Nature",
+    "notCounted": "Désactivé",
+    "firm": "Ferme",
+    "provisional": "Provisoire",
+    "unknownSignal": "Signal inconnu",
+    "signals": {
+      "document_expired": "Document expiré",
+      "under_18": "Moins de 18 ans",
+      "image_reused": "Photo déjà utilisée dans une autre vérification",
+      "unsupported_document": "Document non accepté",
+      "mrz_disagreement": "Lignes de code différentes (téléphone et serveur)",
+      "mrz_invalid_server": "Lignes de code invalides",
+      "mrz_print_mismatch": "Texte imprimé différent des lignes de code",
+      "type_mismatch": "Pas le document déclaré",
+      "date_logic": "Dates contradictoires",
+      "number_format": "Format de numéro inattendu",
+      "manual_review_document": "Toujours vérifié par une personne",
+      "unrecognised_document": "Document non reconnu",
+      "mrz_unreadable_server": "Lignes de code non lues par le serveur",
+      "mrz_phone_flag": "Lecture des lignes de code sur le téléphone signalée",
+      "phone_report_missing": "Rapport du téléphone manquant",
+      "provisional_classification": "Type reconnu provisoirement",
+      "quality_poor": "Photo de mauvaise qualité (serveur)",
+      "liveness_flag": "Test de présence non réussi",
+      "face_match_flag": "Comparaison des visages non réussie"
+    },
+    "missingTitle": "Vérifications manquantes",
+    "missing": {
+      "server_checks": "Vérification des photos par le serveur (en attente, ou impossible)",
+      "liveness": "Test de présence (à partir de M6)",
+      "face_match": "Comparaison des visages (à partir de M7)"
+    },
+    "approveUpTo": "Approuver jusqu'à {{value}}",
+    "rejectFrom": "Refuser à partir de {{value}} (signaux fermes)"
+  },
+  "decision": {
+    "title": "Décision",
+    "adminNoDecision": "Les administrateurs ne décident pas des dossiers : un superviseur ou le vérificateur assigné le fait.",
+    "noRecord": "Aucune décision enregistrée pour ce dossier.",
+    "notSubmitted": "Pourra être décidé une fois le dossier envoyé par l'usager.",
+    "outcome": {
+      "approve": "Approuver",
+      "reject": "Refuser"
+    },
+    "automatic": "Automatique",
+    "by": "Par",
+    "bySystem": "Les règles (décision automatique)",
+    "byYou": "Vous",
+    "byStaff": "Membre de l'équipe {{id}}",
+    "at": "Quand",
+    "recommendationShown": "Recommandation affichée",
+    "agreement": {
+      "agrees": "Conforme à la recommandation.",
+      "disagrees": "Contraire à la recommandation.",
+      "none": "La recommandation était l'examen : rien à confirmer."
+    },
+    "riderReason": "Motif donné à l'usager",
+    "riderReasonHint": "Affiché à l'usager dans sa langue.",
+    "note": "Note :",
+    "choose": "Votre décision",
+    "chooseReason": "Choisissez un motif",
+    "preview": {
+      "agrees": "Conforme à la recommandation.",
+      "disagrees": "Contraire à la recommandation : expliquez pourquoi dans la note.",
+      "none": "Les règles vous laissent ce dossier."
+    },
+    "noteRequired": "Note (obligatoire)",
+    "noteOptional": "Note (facultative)",
+    "noteHint": "Pour l'équipe seulement, jamais montrée à l'usager. Obligatoire contre la recommandation, ou pour approuver un dossier avec un signal bloquant. Ne recopiez pas de données lues sur le document.",
+    "saving": "Enregistrement…",
+    "submit": "Enregistrer la décision"
+  },
+  "thresholds": {
+    "title": "Seuils de décision",
+    "intro": "Les poids et les seuils des règles. Une nouvelle version s'applique aussitôt, sans redéploiement : chaque dossier en attente de décision est réévalué avec elle. Les versions ne sont jamais modifiées ; chacune garde qui l'a créée et pourquoi.",
+    "saved_one": "La version {{version}} est active. {{count}} dossier a été réévalué.",
+    "saved_other": "La version {{version}} est active. {{count}} dossiers ont été réévalués.",
+    "activeUnknown": "La version active est dans un format que ce tableau de bord ne connaît pas. Rechargez la page.",
+    "bySystem": "Installée avec le système",
+    "createdAt": "Créée",
+    "createdBy": "Par",
+    "approveMax": "Seuil d'approbation",
+    "rejectMin": "Seuil de refus",
+    "autoDecide": "Décisions automatiques",
+    "on": "activées",
+    "off": "désactivées",
+    "note": "Pourquoi",
+    "editTitle": "Nouvelle version ({{version}})",
+    "editIntro": "Les poids et les seuils sont des nombres de 0 à 1, avec 4 décimales au plus. Le score additionne les poids des signaux présents (plafonné à 1).",
+    "approveMaxHint": "Un score inférieur ou égal peut être approuvé (seulement si aucune vérification ne manque).",
+    "rejectMinHint": "Des signaux fermes qui atteignent ce total recommandent un refus. Les signaux provisoires ne refusent jamais.",
+    "signalsCaption": "Signaux : poids, prise en compte, et signal bloquant (toujours une personne).",
+    "counted": "Compte",
+    "weightOf": "Poids de {{signal}}",
+    "countedOf": "{{signal}} compte dans le score",
+    "hardOf": "{{signal}} est un signal bloquant",
+    "mandatoryHard": "Exigé par une décision du PM",
+    "alwaysReview": "Documents toujours décidés par une personne",
+    "mandatoryDocument": "(exigé par une décision du PM)",
+    "autoDecideLabel": "Décider automatiquement quand les règles sont sûres",
+    "autoDecideHint": "Désactivé par défaut. Même activé : sessions de test seulement, et jamais d'approbation tant que le test de présence ou la comparaison des visages manque (jusqu'à M6 et M7, aucune approbation).",
+    "reason": "Pourquoi ce changement (obligatoire)",
+    "reasonHint": "De {{min}} à {{max}} caractères, conservés avec la version.",
+    "noteError": {
+      "short": "Au moins {{min}} caractères.",
+      "long": "Au plus {{max}} caractères."
+    },
+    "changesTitle": "Changements par rapport à la version {{version}}",
+    "fixErrors_one": "Corrigez d'abord {{count}} problème ci-dessus.",
+    "fixErrors_other": "Corrigez d'abord {{count}} problèmes ci-dessus.",
+    "noChanges": "Aucun changement pour l'instant.",
+    "saving": "Enregistrement…",
+    "save": "Activer la version {{version}}",
+    "change": {
+      "approveMax": "Seuil d'approbation : {{from}} → {{to}}",
+      "rejectMin": "Seuil de refus : {{from}} → {{to}}",
+      "autoDecide": "Décisions automatiques : {{from}} → {{to}}",
+      "weight": "Poids de « {{signal}} » : {{from}} → {{to}}",
+      "counted": "« {{signal}} » compte de nouveau dans le score",
+      "notCounted": "« {{signal}} » ne compte plus dans le score",
+      "hard": "« {{signal}} » devient un signal bloquant",
+      "notHard": "« {{signal}} » n'est plus un signal bloquant",
+      "alwaysReview": "« {{document}} » toujours décidé par une personne",
+      "notAlwaysReview": "« {{document}} » n'est plus toujours décidé par une personne"
+    },
+    "historyTitle": "Toutes les versions",
+    "active": "Active",
+    "earlierFormat": "Format antérieur (avant M8) : chaque dossier allait à une personne.",
+    "firstOfFormat": "Première version des règles M8.",
+    "errors": {
+      "not_object": "Non valide.",
+      "unknown_key": "Réglage inconnu.",
+      "missing_key": "Manquant.",
+      "schema": "Mauvaise version du format.",
+      "not_number": "Saisissez un nombre, par ex. 0,25.",
+      "out_of_range": "Entre 0 et 1.",
+      "too_precise": "4 décimales au plus.",
+      "not_boolean": "Non valide.",
+      "not_array": "Non valide.",
+      "unknown_value": "Valeur inconnue.",
+      "duplicate": "En double.",
+      "mandatory": "Un élément obligatoire manque.",
+      "order": "Doit être au-dessus du seuil d'approbation."
+    }
   }
 }

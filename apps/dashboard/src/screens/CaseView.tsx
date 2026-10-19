@@ -22,6 +22,7 @@ import { photoAccess } from "../lib/roles";
 import { mayHaveDocumentData } from "../lib/serverChecks";
 import { DocumentDataSection } from "./CaseData";
 import { MrzSection } from "./CaseMrz";
+import { RiskSection } from "./CaseRisk";
 import { ServerChecksSection } from "./CaseServer";
 
 export interface CaseViewProps {
@@ -85,6 +86,7 @@ export function CaseView({ id, profile, initialPhotos, initialDocumentData }: Ca
       {state.data?.verification && (
         <>
           <CaseSummary verification={state.data.verification} />
+          <RiskSection verification={state.data.verification} profile={profile} onDecided={reloadAll} />
           <ServerChecksSection
             verification={state.data.verification}
             captures={state.data.captures}

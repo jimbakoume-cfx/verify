@@ -14,6 +14,7 @@ import type {
   TestSessionResponse,
   WorkerFields,
 } from "@verify/shared";
+import { DEFAULT_THRESHOLD_CONFIG, evaluateRisk, type RiskFacts, type ThresholdConfig } from "@verify/shared";
 import { StaffPages } from "../App";
 import { type DashboardServices, ServicesContext } from "../api/services";
 import type { OpenDocumentData } from "../components/DocumentDataViewer";
@@ -27,7 +28,10 @@ import type {
   StaffProfile,
   VerificationListItem,
 } from "../lib/records";
+import type { CaseRisk, DecisionRecord, ReasonCodeRecord, ThresholdVersionRecord } from "../lib/risk";
+import { formFromConfig } from "../lib/thresholdForm";
 import { CaseView } from "../screens/CaseView";
+import { ThresholdEditor, ThresholdsPage } from "../screens/Thresholds";
 import { EnrollScreen } from "../screens/Enroll";
 import { LoadingScreen, NoAccessScreen, NotConfiguredScreen } from "../screens/Message";
 import { SignInScreen } from "../screens/SignIn";
@@ -58,8 +62,39 @@ const MISMATCH_CASE_ID = "8f4b2e61-9c3d-4a17-a5e8-0d6b1f7c4e99";
 // M4: an expired passport (a hard flag), and one whose print disagrees with its code lines.
 const EXPIRED_CASE_ID = "4d2a7c90-5b1e-4f36-9a8c-2e6f0b9d3c11";
 const PRINT_MISMATCH_CASE_ID = "1b6e3f82-7d4a-4c59-8e21-5a9c0d7f2e33";
+// M8: a passport a supervisor approved against a reject recommendation.
+const DECIDED_CASE_ID = "6f2c8a14-3e9b-4d07-b5a1-9c4e2f7d0b55";
 
-const VERIFICATIONS: VerificationListItem[] = [
+// M8: each submitted case assessed by the real rules (risk.ts) with version 3 of the thresholds below.
+const PREVIEW_CONFIG: ThresholdConfig = { ...DEFAULT_THRESHOLD_CONFIG, rejectMin: 0.8 };
+const LIVENESS_MISSING = ["liveness", "face_match"];
+const RISK_FACTS: Record<string, RiskFacts> = {
+  [CASE_ID]: { declaredDocument: "cni_biometric", signals: [], missing: LIVENESS_MISSING },
+  [PASSPORT_CASE_ID]: { declaredDocument: "passport", signals: ["mrz_disagreement", "quality_poor"], missing: LIVENESS_MISSING },
+  [UNREADABLE_CASE_ID]: { declaredDocument: "cni_biometric", signals: ["mrz_unreadable_server", "mrz_phone_flag"], missing: LIVENESS_MISSING },
+  [NOT_RECEIVED_CASE_ID]: { declaredDocument: "residence_permit", signals: ["manual_review_document", "phone_report_missing"], missing: LIVENESS_MISSING },
+  [UNCHECKED_CASE_ID]: { declaredDocument: "cni_legacy", signals: [], missing: ["server_checks", ...LIVENESS_MISSING] },
+  [MISMATCH_CASE_ID]: { declaredDocument: "cni_biometric", signals: ["type_mismatch", "mrz_invalid_server"], missing: LIVENESS_MISSING },
+  [EXPIRED_CASE_ID]: { declaredDocument: "passport", signals: ["document_expired"], missing: LIVENESS_MISSING },
+  [PRINT_MISMATCH_CASE_ID]: { declaredDocument: "passport", signals: ["mrz_print_mismatch", "under_18", "number_format"], missing: LIVENESS_MISSING },
+  [DECIDED_CASE_ID]: { declaredDocument: "passport", signals: ["mrz_print_mismatch", "date_logic"], missing: LIVENESS_MISSING },
+};
+const NOT_ASSESSED: CaseRisk = { score: null, recommendation: null, assessment: null, thresholdVersion: null, assessedAt: null, decidedAt: null };
+function previewRisk(id: string, status: VerificationListItem["status"]): CaseRisk {
+  const facts = RISK_FACTS[id];
+  if (!facts || status === "created" || status === "in_progress") return NOT_ASSESSED;
+  const assessment = evaluateRisk(facts, PREVIEW_CONFIG);
+  return {
+    score: assessment.score,
+    recommendation: assessment.recommendation,
+    assessment,
+    thresholdVersion: 3,
+    assessedAt: minutes(-3),
+    decidedAt: status === "approved" || status === "rejected" ? minutes(-2) : null,
+  };
+}
+
+const BASE_VERIFICATIONS: Omit<VerificationListItem, "risk">[] = [
   {
     id: CASE_ID,
     status: "submitted",
@@ -170,7 +205,18 @@ const VERIFICATIONS: VerificationListItem[] = [
     sessionExpiresAt: minutes(-70),
     captureCount: 1,
   },
+  {
+    id: DECIDED_CASE_ID,
+    status: "approved",
+    declaredDocument: "passport",
+    isTest: true,
+    createdAt: minutes(-140),
+    submittedAt: minutes(-131),
+    sessionExpiresAt: minutes(-110),
+    captureCount: 1,
+  },
 ];
+const VERIFICATIONS: VerificationListItem[] = BASE_VERIFICATIONS.map((v) => ({ ...v, risk: previewRisk(v.id, v.status) }));
 
 const CAPTURES: CaptureRecord[] = [
   {
@@ -632,6 +678,51 @@ const testSession = (): TestSessionResponse => ({
   expiresAt: minutes(29.5),
 });
 
+const REASON_CODES: ReasonCodeRecord[] = [
+  { code: "DOC_EXPIRED", riderFr: "Votre pièce d'identité est expirée.", riderEn: "Your ID has expired.", active: true },
+  { code: "DOC_INVALID", riderFr: "Les informations de votre pièce d'identité n'ont pas pu être validées.", riderEn: "The information on your ID could not be validated.", active: true },
+  { code: "DOC_NOT_ORIGINAL", riderFr: "Photographiez directement le document original.", riderEn: "Photograph the original document directly.", active: true },
+  { code: "OTHER", riderFr: "Votre vérification n'a pas pu aboutir.", riderEn: "Your verification could not be completed.", active: true },
+];
+
+const DECISIONS: Record<string, DecisionRecord[]> = {
+  [DECIDED_CASE_ID]: [
+    {
+      id: "a1b2c3d4-0000-4000-8000-000000000001",
+      actorType: "staff",
+      actorId: PROFILES.supervisor.userId,
+      outcome: "approve",
+      reasonCode: null,
+      note: "The OCR misread the printed name and the issue date; both match the photo.",
+      thresholdVersion: 3,
+      recommendation: "reject",
+      band: "reject",
+      riskScore: 0.9,
+      agreesWithRecommendation: false,
+      createdAt: minutes(-2),
+    },
+  ],
+};
+
+const V2: ThresholdVersionRecord = {
+  version: 2,
+  config: DEFAULT_THRESHOLD_CONFIG,
+  note: "M8: transparent weighted rules and hard flags (Phase 1). Automatic decisions off: every case is decided by a person.",
+  createdBy: null,
+  createdAt: minutes(-60 * 24 * 3),
+};
+const THRESHOLD_VERSIONS: ThresholdVersionRecord[] = [
+  {
+    version: 3,
+    config: PREVIEW_CONFIG,
+    note: "Lower the reject cut-off for the M8 phone test.",
+    createdBy: PROFILES.admin.userId,
+    createdAt: minutes(-30),
+  },
+  V2,
+  { version: 1, config: null, note: "Phase 1 (assisted): every verification goes to human review.", createdBy: null, createdAt: minutes(-60 * 24 * 6) },
+];
+
 function fakeServices(): DashboardServices {
   const view = (): CaptureViewResponse => ({ url: SPECIMEN_URL, expiresIn: 60 });
   const documentData = (id: string): DocumentDataResponse => ({ items: DOCUMENT_DATA[id] ?? [], expiresIn: 60 });
@@ -639,7 +730,7 @@ function fakeServices(): DashboardServices {
     recentVerifications: async () => VERIFICATIONS,
     verification: async (id) => VERIFICATIONS.find((v) => v.id === id) ?? null,
     captures: async (id) => {
-      if ([PASSPORT_CASE_ID, PENDING_CASE_ID, EXPIRED_CASE_ID, PRINT_MISMATCH_CASE_ID].includes(id)) return PASSPORT_CAPTURES;
+      if ([PASSPORT_CASE_ID, PENDING_CASE_ID, EXPIRED_CASE_ID, PRINT_MISMATCH_CASE_ID, DECIDED_CASE_ID].includes(id)) return PASSPORT_CAPTURES;
       return id === UNREADABLE_CASE_ID ? RETAKEN_CAPTURES : CAPTURES;
     },
     mrzChecks: async (id) => MRZ_CHECKS[id] ?? [],
@@ -647,6 +738,18 @@ function fakeServices(): DashboardServices {
     createTestSession: async () => testSession(),
     viewCapture: async () => view(),
     documentData: async (id) => documentData(id),
+    decisions: async (id) => DECISIONS[id] ?? [],
+    reasonCodes: async () => REASON_CODES,
+    decide: async (request) => ({
+      decisionId: "a1b2c3d4-0000-4000-8000-000000000002",
+      status: request.outcome === "approve" ? "approved" : "rejected",
+      recommendation: "review",
+      agreesWithRecommendation: null,
+      thresholdVersion: 3,
+    }),
+    thresholdVersions: async () => THRESHOLD_VERSIONS,
+    staffNames: async () => new Map(Object.values(PROFILES).map((p) => [p.userId, p.fullName])),
+    createThresholdVersion: async () => ({ version: 4, rescored: 7 }),
   };
 }
 
@@ -678,6 +781,10 @@ const SCREENS = [
   "case-mismatch-print",
   "case-reviewer",
   "case-admin",
+  "case-reject",
+  "case-decided",
+  "thresholds",
+  "thresholds-edit",
 ] as const;
 
 export function Preview({ screen }: { screen: string }) {
@@ -774,6 +881,23 @@ export function Preview({ screen }: { screen: string }) {
       return staff(PROFILES.reviewer, <CaseView id={PASSPORT_CASE_ID} profile={PROFILES.reviewer} />);
     case "case-admin":
       return staff(PROFILES.admin, <CaseView id={CASE_ID} profile={PROFILES.admin} />);
+    case "case-reject":
+      return staff(PROFILES.supervisor, supervisorCase(MISMATCH_CASE_ID));
+    case "case-decided":
+      return staff(PROFILES.supervisor, supervisorCase(DECIDED_CASE_ID));
+    case "thresholds":
+      return staff(PROFILES.admin, <ThresholdsPage profile={PROFILES.admin} />);
+    case "thresholds-edit": {
+      const form = formFromConfig(PREVIEW_CONFIG);
+      const edited = {
+        ...form,
+        rejectMin: "0,5",
+        weights: { ...form.weights, quality_poor: "0.05" },
+        enabled: { ...form.enabled, number_format: false },
+        note: "Lower the reject cut-off for the PM test",
+      };
+      return staff(PROFILES.admin, <ThresholdEditor active={THRESHOLD_VERSIONS[0]} initialForm={edited} onSave={() => never().then(noop)} />);
+    }
     default:
       return (
         <main className="page">

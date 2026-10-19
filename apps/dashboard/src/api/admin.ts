@@ -2,6 +2,8 @@
 import {
   type CaptureViewRequest,
   type CaptureViewResponse,
+  type DecisionRequest,
+  type DecisionResponse,
   type DocumentDataRequest,
   type DocumentDataResponse,
   type EnrollRequest,
@@ -10,6 +12,8 @@ import {
   SUPABASE_PUBLISHABLE_KEY,
   type TestSessionRequest,
   type TestSessionResponse,
+  type ThresholdVersionRequest,
+  type ThresholdVersionResponse,
 } from "@verify/shared";
 import { ClientError, errorCodeFromResponse } from "../lib/errors";
 
@@ -64,4 +68,14 @@ export function viewCapture(accessToken: string, request: CaptureViewRequest): P
  */
 export function documentData(accessToken: string, request: DocumentDataRequest): Promise<DocumentDataResponse> {
   return postAdmin<DocumentDataResponse>("/document-data", request, accessToken);
+}
+
+/** M8: approve or reject a case (supervisor, or the assigned reviewer). Recorded and audited by the server. */
+export function decide(accessToken: string, request: DecisionRequest): Promise<DecisionResponse> {
+  return postAdmin<DecisionResponse>("/decisions", request, accessToken);
+}
+
+/** M8: a new threshold version (admins only), active at once. */
+export function createThresholdVersion(accessToken: string, request: ThresholdVersionRequest): Promise<ThresholdVersionResponse> {
+  return postAdmin<ThresholdVersionResponse>("/thresholds", request, accessToken);
 }
