@@ -17,7 +17,8 @@ psql "$ADMIN_URL" -qX -v ON_ERROR_STOP=1 -c "create database $DB"
 trap 'psql "$ADMIN_URL" -qX -c "drop database if exists $DB" >/dev/null' EXIT
 
 TEST_URL="${DATABASE_URL%/*}/$DB"
-run() { psql "$TEST_URL" -qX -v ON_ERROR_STOP=1 -f "$1"; }
+# repo_root lets a test file read a fixture shared with the TypeScript tests (M8: risk_vectors.json).
+run() { psql "$TEST_URL" -qX -v ON_ERROR_STOP=1 -v repo_root="$ROOT" -f "$1"; }
 
 run "$ROOT/supabase/tests/00_supabase_stub.sql"
 for f in "$ROOT"/supabase/migrations/*.sql; do
