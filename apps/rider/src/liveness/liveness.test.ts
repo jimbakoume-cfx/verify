@@ -158,6 +158,25 @@ describe("sendFaceCheck", () => {
     expect(upload).toHaveBeenCalledTimes(3);
   });
 
+  it("stops the other frames once one has failed for good, and reports no progress after it", async () => {
+    let calls = 0;
+    const progress = vi.fn();
+    const s = service({
+      upload: async (target) => {
+        calls++;
+        if (target.path.endsWith("-00.jpg")) throw new FlowError("network");
+        await new Promise((r) => setTimeout(r, 5));
+      },
+    });
+    const outcome = await sendFaceCheck(s, CHALLENGE, frames(), META, { ...NO_WAIT, onProgress: progress });
+    expect(outcome).toEqual({ ok: false, error: "network" });
+    await new Promise((r) => setTimeout(r, 30));
+    // Frame 0 tried 3 times; the two other workers finish the frame they hold and start no other.
+    expect(calls).toBeLessThanOrEqual(3 + 2);
+    expect(progress.mock.calls.every(([done]) => done === 0)).toBe(true);
+    expect(s.records).toHaveLength(0);
+  });
+
   it("refuses more frames than the challenge has slots", async () => {
     const tooMany = [...frames(), ...frames()];
     expect(await sendFaceCheck(service(), CHALLENGE, tooMany, META, NO_WAIT)).toEqual({ ok: false, error: "unexpected" });

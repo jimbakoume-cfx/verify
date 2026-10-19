@@ -83,14 +83,22 @@ export async function sendFaceCheck(
   const total = frames.length + 1;
   let done = 0;
   options.onProgress?.(done, total);
+  // Once one frame has failed for good, the others stop: no new upload starts, and nothing more is
+  // reported (the rider is already looking at the failure).
+  let failed = false;
   try {
     let next = 0;
     const worker = async () => {
-      while (next < frames.length) {
+      while (!failed && next < frames.length) {
         const index = next++;
         const slot = challenge.uploads[index];
-        await withRetry(() => service.upload({ path: slot.path, token: slot.token, bucket: challenge.bucket }, frames[index].blob), retry);
-        options.onProgress?.(++done, total);
+        try {
+          await withRetry(() => service.upload({ path: slot.path, token: slot.token, bucket: challenge.bucket }, frames[index].blob), retry);
+        } catch (err) {
+          failed = true;
+          throw err;
+        }
+        if (!failed) options.onProgress?.(++done, total);
       }
     };
     await Promise.all(Array.from({ length: Math.min(options.concurrency ?? 3, frames.length) }, worker));
