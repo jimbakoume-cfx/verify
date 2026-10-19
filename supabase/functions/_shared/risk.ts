@@ -20,7 +20,8 @@ import { DECLARED_DOCUMENTS, type DeclaredDocument, type DecisionOutcome } from 
  * - image_reused: the same photo bytes (SHA-256) were uploaded in another verification (M1);
  * - mrz_phone_flag: the phone's report of the code lines was flagged (unreadable, or check digits wrong);
  * - quality_poor: the server found a photo poor (thresholds not tuned yet);
- * - liveness_flag, face_match_flag: placeholders for M6 and M7, a check that ran and did not pass.
+ * - liveness_flag, face_match_flag: the liveness (M6) or face match (M7) check ran and did not pass
+ *   (flag or fail; both provisional, so they can only send a case to a person).
  * server_unchecked is not a signal: a photo the server could not check is a missing check.
  */
 export const RISK_SIGNALS = [
@@ -79,16 +80,25 @@ export const MANDATORY_REVIEW_DOCUMENTS: readonly DeclaredDocument[] = [
 ];
 
 /**
- * Checks a case must have before it can be recommended for approval. Liveness (M6) and face match (M7)
- * do not exist yet, so every case misses them: no case can be recommended for approval, and none can
- * be approved automatically, until they do. Not configurable.
+ * Checks a case must have before it can be recommended for approval. Not configurable.
  * - server_checks: a photo the declared document needs has no server result (waiting, or given up).
+ * - liveness (M6), face_match (M7): the face worker's case-level checks, written for test sessions
+ *   (and, for liveness, real sessions once the face switch is on).
  */
 export const REQUIRED_CHECKS = ["server_checks", "liveness", "face_match"] as const;
 export type RequiredCheck = (typeof REQUIRED_CHECKS)[number];
 
-/** check_result.check_name of the placeholder checks (to be written by M6 and M7). */
+/** check_result.check_name of the checks written by M6 and M7 (contract.ts LIVENESS_EVAL_CHECK_NAME, FACE_MATCH_CHECK_NAME). */
 export const PLACEHOLDER_CHECK_NAMES = { liveness: "liveness", faceMatch: "face_match" } as const;
+
+/**
+ * Checks whose result can never help approve a case (M7, PM 2026-10-19): a case that has one is never
+ * recommended for approval, so never approved automatically, whatever its score. The face match stays
+ * here until its threshold is calibrated on Cameroonian impostor pairs (NIST shows a ~14x higher
+ * false-match rate for West Africans at a fixed threshold). A hard rule of the database
+ * (private.face_match_review_only), not a threshold setting: no admin can switch it off.
+ */
+export const REVIEW_ONLY_CHECKS = ["face_match"] as const;
 
 /**
  * Why the recommendation is what it is; every condition that holds is listed, in this order.
@@ -99,7 +109,8 @@ export const PLACEHOLDER_CHECK_NAMES = { liveness: "liveness", faceMatch: "face_
  * - provisional_signals: the score reaches the reject cut-off only with provisional signals (review);
  * - score_between: the score is between the two cut-offs (review);
  * - score_low: the score is at or under the approve cut-off;
- * - missing_checks: a required check is missing (no approval).
+ * - missing_checks: a required check is missing (no approval);
+ * - review_only_check: a check that may never approve is present (M7: the face match; no approval).
  */
 export const RISK_REASONS = [
   "hard_flag",
@@ -110,6 +121,7 @@ export const RISK_REASONS = [
   "score_between",
   "score_low",
   "missing_checks",
+  "review_only_check",
 ] as const;
 export type RiskReason = (typeof RISK_REASONS)[number];
 
@@ -376,6 +388,8 @@ export interface RiskFacts {
   signals: string[];
   /** Required checks that are missing. */
   missing: string[];
+  /** M7: checks present whose result may never approve (REVIEW_ONLY_CHECKS). Missing means none. */
+  reviewOnly?: string[];
 }
 
 export interface RiskContribution {
@@ -403,6 +417,8 @@ export interface RiskAssessment {
   hardFlags: RiskSignal[];
   /** Required checks missing, in REQUIRED_CHECKS order (then any other, sorted). */
   missing: string[];
+  /** Review-only checks present (M7), in REQUIRED_CHECKS order (then any other, sorted). */
+  reviewOnly: string[];
   unknownSignals: string[];
   /** With a reject recommendation: the rider-facing reason code it would use. */
   rejectReasonCode: string | null;
@@ -426,7 +442,7 @@ function ordered(values: readonly string[], order: readonly string[]): string[] 
  *   recommendation:
  *     review   when a hard flag or an unknown signal is present, or the document is always reviewed;
  *     reject   when firmScore >= rejectMin;
- *     approve  when score <= approveMax and no required check is missing;
+ *     approve  when score <= approveMax, no required check is missing and no review-only check is present;
  *     review   otherwise.
  */
 export function evaluateRisk(facts: RiskFacts, config: ThresholdConfig): RiskAssessment {
@@ -440,6 +456,7 @@ export function evaluateRisk(facts: RiskFacts, config: ThresholdConfig): RiskAss
   }));
   const unknownSignals = [...present].filter((code) => !(RISK_SIGNALS as readonly string[]).includes(code)).sort();
   const missing = ordered(facts.missing, REQUIRED_CHECKS);
+  const reviewOnly = ordered(facts.reviewOnly ?? [], REQUIRED_CHECKS);
   const hardFlags = contributions.filter((c) => c.hard).map((c) => c.signal);
 
   const sum = (list: RiskContribution[]) => Math.min(SCALE, list.reduce((total, c) => total + (c.counted ? toUnits(c.weight) : 0), 0));
@@ -458,13 +475,14 @@ export function evaluateRisk(facts: RiskFacts, config: ThresholdConfig): RiskAss
     score_between: scoreUnits > approveUnits && scoreUnits < rejectUnits,
     score_low: scoreUnits <= approveUnits,
     missing_checks: missing.length > 0,
+    review_only_check: reviewOnly.length > 0,
   };
   const reasons = RISK_REASONS.filter((reason) => holds[reason]);
 
   let recommendation: DecisionOutcome = "review";
   if (holds.hard_flag || holds.unknown_signal || holds.always_review_document) recommendation = "review";
   else if (holds.firm_score_high) recommendation = "reject";
-  else if (holds.score_low && !holds.missing_checks) recommendation = "approve";
+  else if (holds.score_low && !holds.missing_checks && !holds.review_only_check) recommendation = "approve";
 
   const band: DecisionOutcome = scoreUnits <= approveUnits ? "approve" : scoreUnits >= rejectUnits ? "reject" : "review";
   const firstFirm = contributions.find((c) => c.firm && c.counted && toUnits(c.weight) > 0);
@@ -477,6 +495,7 @@ export function evaluateRisk(facts: RiskFacts, config: ThresholdConfig): RiskAss
     contributions,
     hardFlags,
     missing,
+    reviewOnly,
     unknownSignals,
     rejectReasonCode: recommendation === "reject"
       ? (firstFirm && SIGNAL_REJECT_CODES[firstFirm.signal]) ?? FALLBACK_REJECT_CODE

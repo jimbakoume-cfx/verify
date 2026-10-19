@@ -158,7 +158,7 @@ select c.verification_id, c.id, 'quality_server', 'server-checks-v1', 'pass', '{
   from public.capture c where c.id in ('84000000-0000-0000-0000-000000000001', '84000000-0000-0000-0000-000000000031',
     '84000000-0000-0000-0000-000000000032', '84000000-0000-0000-0000-000000000004', '84000000-0000-0000-0000-000000000005',
     '84000000-0000-0000-0000-000000000006');
--- F's placeholder checks, as M6 and M7 will write them.
+-- F's liveness and face match checks (written by the face worker's results since M6/M7).
 insert into public.check_result (verification_id, check_name, check_version, outcome, details) values
   ('83000000-0000-0000-0000-000000000006', 'liveness', 'test', 'pass', '{}'),
   ('83000000-0000-0000-0000-000000000006', 'face_match', 'test', 'pass', '{}');
@@ -211,12 +211,15 @@ select pg_temp.assert_true((select risk_recommendation = 'review' and risk_reaso
 select pg_temp.assert_true((select risk_recommendation = 'review' and risk_reasons -> 'hardFlags' = '["image_reused"]' and risk_score = 0.6
                              from pg_temp.v('83000000-0000-0000-0000-000000000005')),
   'E: a photo also uploaded elsewhere is a hard flag');
-select pg_temp.assert_true((select risk_recommendation = 'approve' and risk_reasons -> 'missing' = '[]'
+-- M7: a face match is review-only until it is calibrated, so even a clean case is never recommended for approval.
+select pg_temp.assert_true((select risk_recommendation = 'review' and risk_reasons -> 'missing' = '[]' and risk_reasons ->> 'band' = 'approve'
+                                   and risk_reasons -> 'reviewOnly' = '["face_match"]'
+                                   and risk_reasons -> 'reasons' = '["score_low", "review_only_check"]'
                              from pg_temp.v('83000000-0000-0000-0000-000000000006')),
-  'F: with every check present and clean, the recommendation is approve');
+  'F: with every check present and clean, review: the face match is review-only (M7)');
 select pg_temp.assert_true((select risk_reasons ?& array['recommendation', 'band', 'score', 'firmScore', 'reasons', 'contributions',
-                                                          'hardFlags', 'missing', 'unknownSignals', 'rejectReasonCode', 'approveMax', 'rejectMin']
-                                   and (select count(*) from jsonb_object_keys(risk_reasons)) = 12
+                                                          'hardFlags', 'missing', 'reviewOnly', 'unknownSignals', 'rejectReasonCode', 'approveMax', 'rejectMin']
+                                   and (select count(*) from jsonb_object_keys(risk_reasons)) = 13
                              from pg_temp.v('83000000-0000-0000-0000-000000000005')),
   'stored assessment: exactly the keys of RiskAssessment (codes, weights, cut-offs; nothing read from a document)');
 
@@ -254,8 +257,9 @@ select pg_temp.assert_true((select risk_recommendation = 'review' and risk_reaso
                              from pg_temp.v('83000000-0000-0000-0000-000000000006')),
   'F with an unknown reason: review');
 delete from public.check_result where verification_id = '83000000-0000-0000-0000-000000000006' and check_name = 'document_policy';
-select pg_temp.assert_text((select risk_recommendation::text from pg_temp.v('83000000-0000-0000-0000-000000000006')), 'approve',
-  'F after the reason is gone (a deleted check): approve again');
+select pg_temp.assert_true((select risk_recommendation = 'review' and risk_reasons -> 'unknownSignals' = '[]'
+                             from pg_temp.v('83000000-0000-0000-0000-000000000006')),
+  'F after the reason is gone (a deleted check): the unknown signal is gone (still review: the face match is review-only)');
 -- A placeholder check that ran and did not pass.
 update public.check_result set outcome = 'flag' where verification_id = '83000000-0000-0000-0000-000000000006' and check_name = 'liveness';
 select pg_temp.assert_true((select risk_recommendation = 'review' and risk_reasons -> 'contributions' @> '[{"signal": "liveness_flag"}]'
@@ -407,8 +411,8 @@ select pg_temp.assert_true((select ae.details ->> 'trigger' = 'thresholds' from 
   'A with version 3: audited as caused by the new thresholds');
 select pg_temp.assert_true((select risk_recommendation = 'review' and threshold_config_version = 3 from pg_temp.v('83000000-0000-0000-0000-000000000005')),
   'E with version 3: a hard flag still means review');
-select pg_temp.assert_true((select risk_recommendation = 'approve' and threshold_config_version = 3 from pg_temp.v('83000000-0000-0000-0000-000000000006')),
-  'F with version 3: still approve');
+select pg_temp.assert_true((select risk_recommendation = 'review' and threshold_config_version = 3 from pg_temp.v('83000000-0000-0000-0000-000000000006')),
+  'F with version 3: still review (the face match is review-only)');
 select pg_temp.assert_true((select status = 'submitted' from pg_temp.v('83000000-0000-0000-0000-000000000001')),
   'automatic decisions are off: A waits for a person');
 
@@ -497,10 +501,10 @@ select pg_temp.assert_true((select risk_reasons -> 'hardFlags' = '["manual_revie
   'C: the voter card''s manual_review_document reason is a hard flag');
 select pg_temp.assert_text(public.staff_decide('83000000-0000-0000-0000-000000000003', '81000000-0000-0000-0000-000000000002', 'supervisor',
     'approve', null, null) ->> 'result', 'note_required', 'decide: approving a case with a hard flag needs a note');
--- Approving as recommended needs no note.
+-- Approving a case recommended for review needs no note; there is nothing to agree with (M7: F is review).
 select pg_temp.assert_true(public.staff_decide('83000000-0000-0000-0000-000000000006', '81000000-0000-0000-0000-000000000002', 'supervisor',
-    'approve', null, null) @> '{"result": "ok", "agreesWithRecommendation": true}',
-  'decide: approving as recommended needs no note and agrees');
+    'approve', null, null) @> '{"result": "ok", "agreesWithRecommendation": null, "recommendation": "review"}',
+  'decide: approving a case recommended for review needs no note, and records no agreement');
 commit;
 
 -- What staff can read of it.
@@ -513,7 +517,7 @@ rollback;
 begin;
 set local role authenticated;
 set local request.jwt.claim.sub = '81000000-0000-0000-0000-000000000002';
-select pg_temp.assert_eq((select count(*) from public.decision where verification_id::text like '83000000%' and agrees_with_recommendation is not null), 2,
+select pg_temp.assert_eq((select count(*) from public.decision where verification_id::text like '83000000%' and agrees_with_recommendation is not null), 1,
   'supervisor reads the decisions and their agreement');
 select pg_temp.assert_eq((select count(*) from public.verification where id::text like '83000000%' and risk_reasons is not null), 5,
   'supervisor reads each assessment');
