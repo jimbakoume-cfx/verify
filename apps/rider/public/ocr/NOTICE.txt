@@ -9,7 +9,8 @@ every part marked "Apache-2.0", is reproduced once, in section 5; the MIT Licens
   2. /ocr/7.0.0/tesseract-core*-lstm.wasm.js
                                           tesseract.js-core: Tesseract OCR and the C libraries
                                           compiled into it
-  3. /ocr/mrz-1/mrz.traineddata.gz       the MRZ reading model
+  3. /ocr/mrz-1/mrz.traineddata.gz       the MRZ reading model (every session)
+  3b. /ocr/mrz-2/mrz.traineddata.gz      our own MRZ reading model (test sessions)
   4. The MIT License
   5. The Apache License 2.0
 
@@ -475,6 +476,20 @@ Licence (BSD 3-Clause), reproduced in full:
   CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
   OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+
+3b. /ocr/mrz-2/mrz.traineddata.gz
+---------------------------------
+Our own "mrz" LSTM model for Tesseract 4+ (integer model), read by test sessions only.
+SHA-256 of the uncompressed file: 575e55e501516f2a160d556ef7d8fd481d0a843bbab9ccbfd5b5110a2a25747b
+It is a Derivative Work of Google's "eng" model from tessdata_best
+(https://github.com/tesseract-ocr/tessdata_best, commit e12c65a, file eng.traineddata), which its
+authors license under the Apache License 2.0 (section 5); the model is distributed under the same
+licence.
+Statement of changes (Apache License 2.0, section 4(b)): Confiance modified the eng model's weights.
+Its output layer was cut down to the 37 characters of machine-readable zones (A-Z, 0-9 and '<'), and
+the network was trained further (18,300 iterations, learning rate 0.0001) on fictitious code lines
+drawn by Confiance, then converted to an integer model. No real identity document was used.
 
 
 4. The MIT License

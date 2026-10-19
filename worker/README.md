@@ -5,7 +5,7 @@ The server side of the photo checks. For each photo a rider uploads, the worker:
 1. **re-checks the photo's quality**, with the same maths as the rider's phone (`packages/capture`, ported to numpy);
 2. **re-reads the code lines (MRZ)** from the image, and sends the candidate lines to Supabase, where the same corrector and parser as on the phone check them;
 3. **gathers evidence of the document type**: which way up the photo reads, keyword counts (kept with the job, never shown to staff: on a passport they would tell a Cameroonian one from a foreign one), whether a QR code is visible;
-4. **reads a few printed fields**: names and the issue date on documents with code lines; also the number and the birth and expiry dates on documents without them.
+4. **reads a few printed fields**: names, the document number, and the birth, expiry and issue dates (since M4 on documents with code lines too, so that the server can compare them with the code lines).
 
 The worker decides nothing: the Supabase Edge Function `worker` takes every decision from this evidence. The worker never stores anything. Photos stay in memory, and raw OCR text never leaves the process.
 
@@ -66,7 +66,7 @@ uv lock --check    # the lock matches pyproject.toml
 - **Specimens.** The test photos are our own fictitious documents, marked SPECIMEN, in `e2e/fixtures/specimens/`. They are made by `scripts/make-specimens.py`, which also writes their `manifest.json` (expected type, code lines, fields). To change them, run `uv run python ../scripts/make-specimens.py` and commit the result. They test the plumbing; they cannot prove accuracy on real cards, because we drew the keywords ourselves.
 - **Quality parity.** After a change to `packages/capture`'s maths or to the specimens, run `uv run python tests/tools/make_quality_reference.py` (it needs Node and the repo's `node_modules`) and commit `tests/fixtures/quality_reference.json`.
 - **Against the real Edge Function.** Two tests run TypeScript from `supabase/functions` in Deno (`npx deno`, from the repo's dev dependencies, after `npm ci` at the root):
-  - `test_specimens_ocr.py` runs the shared MRZ corrector and parser on the worker's candidates;
+  - `test_specimens_ocr.py` runs the shared MRZ corrector and parser on the worker's candidates, and (M4) the server's own consistency checks on whole documents (`tests/tools/server_consistency.ts`): the expired passport and the one whose print disagrees with its code lines are flagged, the others are not;
   - `test_edge_function.py` serves the real worker function (`tests/tools/server_worker.ts`, with in-memory stand-ins for the database and storage) and runs the worker's own client against it. The function verifies the Python signatures (the shared test key, at the current time) and refuses unsigned, replayed, tampered, mis-routed, stale and foreign-key requests. A full ring on real specimens must pass the function's strict validation and give back exactly the printed code lines and the `unreadable` / `no_document` verdicts.
 
   Without Deno these tests are skipped; CI sets `WORKER_REQUIRE_DENO=1`, which makes them fail instead.

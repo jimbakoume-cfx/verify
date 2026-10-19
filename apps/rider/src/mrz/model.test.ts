@@ -1,11 +1,11 @@
-// Pins the vendored OCR model. Changing it changes what riders' phones read: a new model needs a new
-// folder and cache key (OCR_ASSETS.langPath and cachePath, so phones drop the cached copy), its
+// Pins the vendored OCR models. Changing one changes what riders' phones read: a new model needs a new
+// folder and cache key (MRZ_MODELS langPath and cachePath, so phones drop the cached copy), its
 // licence in public/ocr/NOTICE.txt and docs/LICENSES.md, and new hashes here.
 // Also checks that the notices of the OCR engine files reach riders with those files.
 import { describe, expect, it } from "vitest";
 import licensesDoc from "../../../../docs/LICENSES.md?raw";
 import noticeText from "../../public/ocr/NOTICE.txt?raw";
-import { OCR_ASSETS } from "./types";
+import { MRZ_MODELS, OCR_ASSETS, mrzModelFor } from "./types";
 
 // The rider app is typed for the browser (no Node types): Node's fs and the Vite config (which uses
 // Node) are imported by a non-literal name and given the functions used here.
@@ -25,6 +25,12 @@ const words = (text: string) => text.replace(/\s+/g, " ").trim();
 /** DoubangoTelecom tessdata_fast mrz.traineddata (BSD-3-Clause), gzipped as served. */
 const MODEL_GZ_SHA256 = "dbbd4add162b8d28ed82b4a384c5f16dff274c63ddcd80b63e0315fd130a3909";
 const MODEL_SHA256 = "ece2a54f125a73792f9cec74e6f8e62f6e5e00c7f19153ba865af689be5b5f01";
+/**
+ * Our own model (M3 training, run 2: fine-tuned from Google's tessdata_best eng, Apache-2.0), as
+ * exported by training/mrz/bin/40-export.sh (training/mrz/results/finetune-model.json).
+ */
+const OWN_GZ_SHA256 = "bbcd6a33477ea4f1ed1bc42b0846ea764d5849c83653206b3544e8a5b7b6cc18";
+const OWN_SHA256 = "575e55e501516f2a160d556ef7d8fd481d0a843bbab9ccbfd5b5110a2a25747b";
 
 async function sha256(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", bytes);
@@ -54,6 +60,34 @@ describe("vendored OCR model", () => {
     expect(OCR_ASSETS.langPath).toBe("/ocr/mrz-1");
     expect(OCR_ASSETS.cachePath).toBe("ocr-mrz-1");
     expect(OCR_ASSETS.engine).toBe("tesseract.js-7.0.0/mrz-1");
+  });
+});
+
+describe("our own OCR model (mrz-2, test sessions only)", () => {
+  const own = MRZ_MODELS["mrz-2"];
+  const gz = readFileSync(new URL(`../../public${own.langPath}/${OCR_ASSETS.language}.traineddata.gz`, import.meta.url));
+
+  it("is the pinned file", async () => {
+    expect(await sha256(gz)).toBe(OWN_GZ_SHA256);
+    expect(await sha256(await gunzip(gz))).toBe(OWN_SHA256);
+  });
+
+  it("is listed in the notice with its hash, its licence and the statement of our changes", () => {
+    const section = /\n3b\. \/ocr\/mrz-2\/mrz\.traineddata\.gz\n([\s\S]*?)\n\n4\. /.exec(noticeText)?.[1] ?? "";
+    expect(section).toContain(OWN_SHA256);
+    expect(section).toContain("Apache License 2.0");
+    expect(section).toContain("tessdata_best");
+    expect(section).toContain("Statement of changes");
+  });
+
+  it("has its own folder, cache key and engine label", () => {
+    expect(own).toEqual({ langPath: "/ocr/mrz-2", cachePath: "ocr-mrz-2", engine: "tesseract.js-7.0.0/mrz-2" });
+  });
+
+  it("reads test sessions only; every other session keeps Doubango's model", () => {
+    expect(mrzModelFor(true)).toBe(own);
+    expect(mrzModelFor(false)).toBe(MRZ_MODELS["mrz-1"]);
+    expect(mrzModelFor(false).langPath).toBe(OCR_ASSETS.langPath);
   });
 });
 

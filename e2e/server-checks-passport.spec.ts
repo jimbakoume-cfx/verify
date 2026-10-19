@@ -1,6 +1,6 @@
 // Camera: the sharp passport data page (as in capture-passport.spec.ts). The server's check (M3) asks
 // for a new photo of the page, the only photo of a passport and the one that carries the code lines.
-import { OCR_ASSETS } from "../apps/rider/src/mrz/types";
+import { OCR_ASSETS, mrzModelFor } from "../apps/rider/src/mrz/types";
 import { afterPhotos } from "./support/expectations";
 import { expect, test } from "./support/fixtures";
 
@@ -46,8 +46,8 @@ test("passport photo page retaken: its camera says why, the new photo is read an
   expect(backend.objects.has(first.path)).toBe(false);
   // Each photo has its own report, the second one counted as the second read of the page.
   expect(backend.mrzReports.map((r) => r.body)).toEqual([
-    { captureId: first.captureId, result: "unreadable", reason: "reader_unavailable", attempts: 1, engine: OCR_ASSETS.engine },
-    { captureId: second.captureId, result: "unreadable", reason: "reader_unavailable", attempts: 2, engine: OCR_ASSETS.engine },
+    { captureId: first.captureId, result: "unreadable", reason: "reader_unavailable", attempts: 1, engine: mrzModelFor(true).engine },
+    { captureId: second.captureId, result: "unreadable", reason: "reader_unavailable", attempts: 2, engine: mrzModelFor(true).engine },
   ]);
   expect(backend.checksAnswers.map((a) => a.sides.map((s) => [s.kind, s.state, s.reason]))).toEqual([
     [["document_front", "retake", "unreadable"]],

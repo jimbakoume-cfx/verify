@@ -4,7 +4,8 @@
 // every request for assertions, and can inject faults (an expired session, failing uploads, a worker
 // that is slow, down or out of budget). POST /mrz runs the real handler's own validation and verdict
 // (flow/validation.ts, assessMrzReport), and GET /checks the real rules (flow/checks.ts) on the jobs
-// of a scripted AI worker, so what the tests see is judged exactly as the server judges it.
+// of a scripted AI worker, so what the tests see is judged exactly as the server judges it. M4: a
+// declared document can be scripted as expired (the consistency check's firm document_expired flag).
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { Page, Request, Route } from "@playwright/test";
 import {
@@ -144,6 +145,16 @@ export class FakeBackend {
    */
   worker: (capture: AcceptedCapture, n: number) => WorkerPlan = () => ({ result: "done", verdict: "ok" });
   /**
+   * M4: documents whose code lines the server finds expired (the case's consistency check then holds
+   * the firm flag document_expired). GET /checks says so through the real rules, once the photo of
+   * the side carrying the code lines is checked. Another document chosen afterwards is not expired.
+   */
+  readonly expiredDocuments = new Set<DeclaredDocument>();
+  /** A test session (dashboard "New test session"), as every scenario uses unless it says otherwise. */
+  isTest = true;
+  /** M4: every POST /document-type body's document, in order. */
+  readonly declaredDocuments: DeclaredDocument[] = [];
+  /**
    * Rewrites what GET /checks answers, after the server's rules: to play a server that breaks them
    * (and check that the app's own limits hold). Default: none.
    */
@@ -202,7 +213,7 @@ export class FakeBackend {
       requiredSides: this.declaredDocument ? [...REQUIRED_SIDES[this.declaredDocument]] : null,
       captures: [...this.#latest.keys()].map((kind) => ({ kind, createdAt: new Date().toISOString() })),
       expiresAt: this.expiresAt,
-      isTest: true,
+      isTest: this.isTest,
     };
   }
 
@@ -298,6 +309,7 @@ export class FakeBackend {
         const doc = input.declaredDocument;
         if (!(DECLARED_DOCUMENTS as readonly unknown[]).includes(doc)) this.#badRequest(name, `declaredDocument ${String(doc)}`);
         this.declaredDocument = doc as DeclaredDocument;
+        this.declaredDocuments.push(doc as DeclaredDocument);
         return this.session();
       }
       case "POST /upload-url": {
@@ -433,7 +445,10 @@ export class FakeBackend {
       };
     });
     for (const job of this.#jobs.values()) job.polls++;
-    const computed = flowChecks(REQUIRED_SIDES[this.declaredDocument], rows);
+    const computed = flowChecks(REQUIRED_SIDES[this.declaredDocument], rows, {
+      expiredFlag: this.expiredDocuments.has(this.declaredDocument),
+      mrzSide: MRZ_EXPECTATION[this.declaredDocument]?.side ?? null,
+    });
     if (!computed) {
       // The app asks only once every required side is on the server.
       this.problems.push(`${name}: asked before every side was sent`);

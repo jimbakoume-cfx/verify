@@ -1,5 +1,6 @@
 // GET /flow/checks (M3): what the rider is told about the server's check of each photo. Pure, from the
 // rows of flow_check_state, so every rule is tested with tables. Nothing personal is returned.
+// M4: also whether the document has expired, from the case's consistency flags.
 import {
   type CaptureSide,
   type FlowCheckSide,
@@ -26,6 +27,16 @@ export interface CheckStateRow {
   phoneMrzPass: boolean | null;
 }
 
+/** What GET /flow/checks needs from the case's consistency check (M4). */
+export interface ExpiryState {
+  /** The consistency check's firm flags include document_expired (code lines, every check digit right). */
+  expiredFlag: boolean;
+  /** The side that carries the declared document's code lines; null when it has none. */
+  mrzSide: CaptureSide | null;
+}
+
+const NO_EXPIRY: ExpiryState = { expiredFlag: false, mrzSide: null };
+
 /**
  * The state of the newest live photo of each required side; null when a required side has no live
  * photo. 'retake' only for no_document or unreadable, only while the side has had fewer than
@@ -33,8 +44,15 @@ export interface CheckStateRow {
  * every check digit right (the photo is then readable, whatever the server's reader made of it).
  * Beyond that a bad photo is flagged for staff, never refused. 'unchecked' at once when the server
  * cannot check the photo (job given up, over budget, session not eligible, or the worker unreachable).
+ * `expired` (M4) only once the newest photo of the side that carries the code lines has been checked:
+ * the flag then comes from that very photo (a replaced photo's data is deleted and the case decided
+ * again), never from an earlier one.
  */
-export function flowChecks(requiredSides: readonly CaptureSide[], rows: readonly CheckStateRow[]): FlowChecks | null {
+export function flowChecks(
+  requiredSides: readonly CaptureSide[],
+  rows: readonly CheckStateRow[],
+  expiry: ExpiryState = NO_EXPIRY,
+): FlowChecks | null {
   const sides: FlowCheckSide[] = [];
   for (const kind of requiredSides) {
     const ofSide = rows.filter((row) => row.kind === kind);
@@ -45,7 +63,9 @@ export function flowChecks(requiredSides: readonly CaptureSide[], rows: readonly
     const retakes = ofSide.filter((row) => row !== newest && isRetakeReason(row.qualityVerdict)).length;
     sides.push({ kind, captureId: newest.captureId, ...sideState(newest, retakes) });
   }
-  return { done: sides.every((side) => side.state !== "pending"), sides };
+  const mrzSide = sides.find((side) => side.kind === expiry.mrzSide);
+  const expired = expiry.expiredFlag && (mrzSide?.state === "ok" || mrzSide?.state === "retake");
+  return { done: sides.every((side) => side.state !== "pending"), sides, expired };
 }
 
 function sideState(row: CheckStateRow, retakes: number): Pick<FlowCheckSide, "state" | "reason"> {

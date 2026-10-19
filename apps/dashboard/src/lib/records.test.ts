@@ -14,6 +14,7 @@ import {
   toCapture,
   toCaptureQuality,
   toClassificationDetails,
+  toConsistencyDetails,
   toDocumentPolicyDetails,
   toMrzCheck,
   toMrzCheckDetails,
@@ -429,7 +430,7 @@ function checkRow(name: string, captureId: string | null, details: unknown, crea
 describe("toServerChecks", () => {
   it("queries every server check by name", () => {
     expect([...SERVER_CHECK_NAME_LIST].sort()).toEqual(
-      ["classification", "document_policy", "mrz_server", "ocr_fields", "quality_server"].sort(),
+      ["classification", "consistency", "document_policy", "mrz_server", "ocr_fields", "quality_server"].sort(),
     );
   });
 
@@ -478,7 +479,7 @@ describe("toServerChecks", () => {
       { ...checkRow("ocr_fields", "front", FIELDS), id: null },
       null,
     ]);
-    expect(checks).toEqual({ quality: [], mrz: [], fields: [], classification: null, policy: null, jobs: new Map() });
+    expect(checks).toEqual({ quality: [], mrz: [], fields: [], classification: null, policy: null, consistency: null, jobs: new Map() });
   });
 
   it("reads each photo's job state, and nothing else of the job", () => {
@@ -578,6 +579,38 @@ describe("server check details", () => {
     ).toEqual({ reasons: ["type_mismatch", "server_unchecked"] });
     expect(toDocumentPolicyDetails({ reasons: "type_mismatch" })).toBeNull();
     expect(toDocumentPolicyDetails(null)).toBeNull();
+  });
+});
+
+describe("the consistency check (M4)", () => {
+  const DETAILS = { flags: ["document_expired", "mrz_print_mismatch"], provisional: ["number_format"], basis: "mrz", mismatches: ["name"] };
+
+  it("is read per case only, its codes kept in the contract's order", () => {
+    const checks = toServerChecks([
+      checkRow("consistency", null, { ...DETAILS, flags: ["mrz_print_mismatch", "document_expired"] }),
+      checkRow("consistency", "front", DETAILS),
+    ]);
+    expect(checks.consistency?.details).toEqual(DETAILS);
+    expect(checks.consistency?.captureId).toBeNull();
+  });
+
+  it("never lets a value through, nor an unknown code", () => {
+    const read = toConsistencyDetails({
+      ...DETAILS,
+      surname: "ERIKSSON",
+      flags: [...DETAILS.flags, "ERIKSSON", "looks_fake"],
+      mismatches: ["name", "D23145890"],
+      provisional: ["1974-08-12"],
+    });
+    expect(read).toEqual({ flags: ["document_expired", "mrz_print_mismatch"], provisional: [], basis: "mrz", mismatches: ["name"] });
+    expect(JSON.stringify(read)).not.toMatch(/ERIKSSON|D23145890|1974/);
+  });
+
+  it("is unreadable when a list or the basis is missing or wrong", () => {
+    expect(toConsistencyDetails({ ...DETAILS, basis: "guess" })).toBeNull();
+    expect(toConsistencyDetails({ ...DETAILS, flags: "document_expired" })).toBeNull();
+    expect(toConsistencyDetails({ flags: [], provisional: [], basis: "mrz" })).toBeNull();
+    expect(toConsistencyDetails(null)).toBeNull();
   });
 });
 

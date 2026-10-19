@@ -2,6 +2,8 @@
 // the injected FlowRepo / CaptureStorage so the rules can be tested with in-memory fakes.
 // M3: rings the AI worker (warm-up when a document is chosen, then after each accepted photo), erases a
 // photo replaced by a newer one of the same side, and reports the server's checks (GET /checks).
+// M4: GET /checks also says when the code lines show an expired document, and a new choice of
+// document decides the case's server checks again (photos of sides it does not need stop counting).
 import {
   CAPTURE_LIMITS,
   CAPTURE_SIDES,
@@ -130,6 +132,8 @@ export interface FlowRepo {
   markRingFailed(captureId: string): Promise<void>;
   /** M3: flow_check_state, every document photo of the case. */
   checkState(verificationId: string): Promise<CheckStateRow[]>;
+  /** M4: the firm flags of the case's consistency check (generic codes); empty when there is none. */
+  consistencyFlags(verificationId: string): Promise<string[]>;
   /** M3: worker_settings.enabled_for_real_sessions (off until Vercel Pro and its DPA). */
   workerEnabledForRealSessions(): Promise<boolean>;
 }
@@ -262,6 +266,11 @@ export function createFlowHandler(deps: FlowDeps): Handler {
     // Audit only a change that happened: a submit may have closed the session meanwhile.
     if (!(await repo.setDeclaredDocument(v.id, declaredDocument))) throw new HttpError(409, "already_submitted");
     await riderAudit(v, "document.declare", { declaredDocument });
+    // M4: another document ("Use another document" after an expired one): the case's server checks
+    // follow it at once. Best effort, like after a replaced photo; the next result decides again anyway.
+    if (v.declaredDocument !== null && v.declaredDocument !== declaredDocument && deps.cases) {
+      await refreshCase(deps.cases, v.id, now).catch((err) => log.error("flow.case_refresh_failed", err));
+    }
     // Warm-up: the worker starts while the rider frames the first photo. Only for sessions it may
     // process, so a real rider never triggers it while the switch is off.
     if (v.isTest || (await repo.workerEnabledForRealSessions())) ring("warm_up");
@@ -354,7 +363,7 @@ export function createFlowHandler(deps: FlowDeps): Handler {
       await storage.remove(path).catch((err) => log.error("flow.superseded_remove_failed", err));
     }
     if (followUp.supersededPaths.length > 0 && deps.cases) {
-      await refreshCase(deps.cases, v.id).catch((err) => log.error("flow.case_refresh_failed", err));
+      await refreshCase(deps.cases, v.id, now).catch((err) => log.error("flow.case_refresh_failed", err));
     }
     if (followUp.jobPending) {
       ring("capture", () => repo.markRingFailed(captureId));
@@ -399,7 +408,11 @@ export function createFlowHandler(deps: FlowDeps): Handler {
   const getChecks: Handler = async (req) => {
     const v = await loadSession(req);
     if (!v.declaredDocument) throw new HttpError(409, "document_type_required");
-    const checks = flowChecks(REQUIRED_SIDES[v.declaredDocument], await repo.checkState(v.id));
+    const [rows, flags] = await Promise.all([repo.checkState(v.id), repo.consistencyFlags(v.id)]);
+    const checks = flowChecks(REQUIRED_SIDES[v.declaredDocument], rows, {
+      expiredFlag: flags.includes("document_expired"),
+      mrzSide: MRZ_EXPECTATION[v.declaredDocument]?.side ?? null,
+    });
     if (!checks) throw new HttpError(409, "missing_sides");
     return jsonResponse(200, checks);
   };

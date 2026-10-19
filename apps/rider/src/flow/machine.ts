@@ -18,7 +18,7 @@ import {
 } from "@verify/shared";
 import type { GrayImage, Hint } from "@verify/capture";
 import { unavailableRead } from "../mrz/lazyReader";
-import type { MrzReadResult } from "../mrz/types";
+import { type MrzReadResult, mrzModelFor } from "../mrz/types";
 import { type FlowErrorCode, type SessionErrorReason, isImageRejection, sessionErrorReason } from "./errors";
 
 /** How the final photo was encoded (shown in the debug panel). */
@@ -159,6 +159,12 @@ export interface FlowState {
   serverRetakes: Partial<Record<CaptureSide, number>>;
   /** Why the server asked for a new photo of a side: shown on the way to its camera until it is taken. */
   retakeReasons: Partial<Record<CaptureSide, RetakeReason>>;
+  /**
+   * M4, on the checking screen: the server found the document expired (its code lines). shown: the
+   * rider is asked to use another document or to continue anyway. accepted: "Continue anyway"; never
+   * asked again for these photos.
+   */
+  expiredNotice: "none" | "shown" | "accepted";
 }
 
 export type FlowAction =
@@ -197,6 +203,12 @@ export type FlowAction =
   | { type: "checks/retake"; sides: readonly ServerRetake[] }
   /** No answer within CHECKS_WAIT_MS, or the checks could not be read: submit, with no error shown. */
   | { type: "checks/timeout" }
+  /** M4: the server says the document has expired: the waiting stops and the rider chooses. */
+  | { type: "checks/expired" }
+  /** "Use another document": back to the document list; every photo of this document is dropped. */
+  | { type: "expired/another" }
+  /** "Continue anyway": the checks go on as usual, then the case is submitted (staff see the flag). */
+  | { type: "expired/continue" }
   | { type: "error/dismiss" }
   /** The phone's Back button or gesture (see useFlow). */
   | { type: "nav/back" };
@@ -221,6 +233,7 @@ export function initialFlowState(boot: { hasToken: boolean; invalidLink: boolean
     readProgress: null,
     serverRetakes: {},
     retakeReasons: {},
+    expiredNotice: "none",
   };
 }
 
@@ -373,6 +386,7 @@ export function flowReducer(state: FlowState, action: FlowAction): FlowState {
       // A new choice starts the photos over: the previous ones may not fit the new document.
       return {
         ...state,
+        expiredNotice: "none",
         busy: false,
         error: null,
         session: action.session,
@@ -415,7 +429,8 @@ export function flowReducer(state: FlowState, action: FlowAction): FlowState {
           return { ...taken, shots: { ...taken.shots, [shot.side]: shot }, screen: { name: "reading", side: shot.side } };
         }
         // No grayscale copy (the phone could not spare the memory): nothing to read, which never blocks.
-        return recordRead(taken, shot, unavailableRead(expectation.format));
+        const model = mrzModelFor(state.session?.isTest === true);
+        return recordRead(taken, shot, unavailableRead(expectation.format, model.engine));
       }
       const kept = shot.gray ? { ...shot, gray: null } : shot;
       return { ...taken, shots: { ...taken.shots, [shot.side]: kept }, screen: { name: "review", side: shot.side } };
@@ -511,6 +526,35 @@ export function flowReducer(state: FlowState, action: FlowAction): FlowState {
     case "checks/timeout":
       if (state.screen.name !== "checking") return state;
       return queueSubmit(state);
+
+    case "checks/expired":
+      if (state.screen.name !== "checking" || state.expiredNotice !== "none") return state;
+      return { ...state, error: null, expiredNotice: "shown" };
+
+    case "expired/continue":
+      if (state.screen.name !== "checking" || state.expiredNotice !== "shown") return state;
+      return { ...state, error: null, expiredNotice: "accepted" };
+
+    case "expired/another":
+      if (state.screen.name !== "checking" || state.expiredNotice !== "shown") return state;
+      // Whatever is chosen next, the same type included, starts with new photos, which replace these
+      // on the server. The server's retakes stay counted per side, as the server counts them.
+      return {
+        ...state,
+        error: null,
+        document: null,
+        sides: [],
+        shots: {},
+        uploaded: {},
+        refusals: {},
+        mrzReads: {},
+        mrzFailures: {},
+        readProgress: null,
+        retakeReasons: {},
+        expiredNotice: "none",
+        upload: IDLE_UPLOAD,
+        screen: { name: "document" },
+      };
 
     case "checks/retake": {
       if (state.screen.name !== "checking") return state;
@@ -667,15 +711,18 @@ export function acceptsServerRetake(state: FlowState, side: CaptureSide): boolea
 }
 
 /** What an answer of GET /flow/checks leads to; see checksDecision. */
-export type ChecksDecision = Extract<FlowAction, { type: "checks/ok" | "checks/retake" }>;
+export type ChecksDecision = Extract<FlowAction, { type: "checks/ok" | "checks/retake" | "checks/expired" }>;
 
 /**
- * What an answer of GET /flow/checks means on the checking screen: retake the sides the server found
- * unusable that the rider may still be asked for, at once, even while other sides are pending (that
- * photo must be taken again anyway, and the others are checked meanwhile); submit once no side is
- * pending; otherwise null, to ask again. A "retake" the rider may not be asked for counts as ok.
+ * What an answer of GET /flow/checks means on the checking screen: an expired document first (M4:
+ * there is no point retaking a photo of it), unless the rider chose to continue anyway; then retake
+ * the sides the server found unusable that the rider may still be asked for, at once, even while
+ * other sides are pending (that photo must be taken again anyway, and the others are checked
+ * meanwhile); submit once no side is pending; otherwise null, to ask again. A "retake" the rider may
+ * not be asked for counts as ok.
  */
 export function checksDecision(state: FlowState, checks: FlowChecks): ChecksDecision | null {
+  if (checks.expired === true && state.expiredNotice === "none") return { type: "checks/expired" };
   const sides = state.sides.flatMap((side): ServerRetake[] => {
     const check = checks.sides.find((s) => s.kind === side);
     if (check?.state !== "retake" || !isRetakeReason(check.reason) || !acceptsServerRetake(state, side)) return [];

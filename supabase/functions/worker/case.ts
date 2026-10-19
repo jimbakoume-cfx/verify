@@ -1,8 +1,18 @@
-// The case-level server checks (classification and document_policy) are decided from a snapshot of
-// the case and written only if the case has not changed since: the database compares the snapshot's
-// fingerprint under the case lock and answers 'stale' otherwise (see the M3 migration). Used by the
-// worker function after a result and by the flow function after a photo was replaced.
-import type { CaptureSide, DeclaredDocument, PolicyReason } from "../_shared/contract.ts";
+// The case-level server checks (classification, consistency and document_policy) are decided from a
+// snapshot of the case and written only if the case has not changed since: the database compares the
+// snapshot's fingerprint under the case lock and answers 'stale' otherwise (see the M3 migration). Used
+// by the worker function after a result and by the flow function after a photo was replaced or the
+// document changed.
+//
+// M4: the snapshot also carries the values the consistency checks compare (documentData), decrypted
+// by the database for this decision only. They are never logged, and only generic codes come out.
+import {
+  type CaptureSide,
+  type DeclaredDocument,
+  type PolicyReason,
+  REQUIRED_SIDES,
+} from "../_shared/contract.ts";
+import { type ConsistencyDecision, decideConsistency, type SideDocumentData } from "./consistency.ts";
 import { type CaseDecision, type CaseSide, decideCase, SERVER_CHECKS_VERSION } from "./decide.ts";
 
 export type JobStatus = "pending" | "claimed" | "done" | "failed" | "superseded";
@@ -22,6 +32,8 @@ export interface CaseSnapshot {
   declaredDocument: DeclaredDocument | null;
   /** The newest live photo of each side, with the evidence of its finished job. */
   sides: CaseSide[];
+  /** M4: what the server read on those photos (code lines, printed fields without the sub-type). */
+  documentData: SideDocumentData[];
   fingerprint: string;
   job: SnapshotJob | null;
 }
@@ -30,14 +42,34 @@ export interface CaseSnapshot {
 export interface CaseChecksPayload {
   version: string;
   classification: CaseDecision["classification"] | null;
+  /** The decided reasons and, since M4, the consistency flags, sorted. */
   reasons: PolicyReason[];
+  /** M4; null drops the stored check. */
+  consistency: ConsistencyDecision | null;
 }
 
-/** Null: no photo of the case has a server result; the database then drops the classification. */
-export function caseChecksPayload(decision: CaseDecision | null): CaseChecksPayload | null {
-  return decision
-    ? { version: SERVER_CHECKS_VERSION, classification: decision.classification, reasons: decision.reasons }
-    : null;
+/** The snapshot's parts the decision depends on. */
+export type CaseInputs = Pick<CaseSnapshot, "declaredDocument" | "sides" | "documentData">;
+
+/**
+ * Every case-level check from the newest live photo of each side the declared document needs. Null:
+ * no such photo has a server result; the database then drops the case-level checks.
+ */
+export function decideCaseChecks(inputs: CaseInputs, now: Date): CaseChecksPayload | null {
+  const { declaredDocument: declared } = inputs;
+  const decision = decideCase(declared, inputs.sides);
+  if (!decision) return null;
+  // The same photos as decideCase: checked, and of a side this document needs.
+  const required: readonly CaptureSide[] | null = declared ? REQUIRED_SIDES[declared] : null;
+  const data = inputs.sides
+    .filter((side) => side.evidence !== null && (!required || required.includes(side.kind)))
+    .map((side): SideDocumentData =>
+      inputs.documentData.find((d) => d.captureId === side.captureId) ??
+        { kind: side.kind, captureId: side.captureId, mrzLines: null, fields: null }
+    );
+  const consistency = decideConsistency(declared, data, now);
+  const reasons = [...new Set<PolicyReason>([...decision.reasons, ...consistency.details.flags])].sort();
+  return { version: SERVER_CHECKS_VERSION, classification: decision.classification, reasons, consistency };
 }
 
 export type CaseWriteResult = "ok" | "stale" | "not_found";
@@ -57,12 +89,15 @@ export interface CaseStore {
 export const CASE_WRITE_ROUNDS = 5;
 
 /** Decides the case again from its current photos and writes the result. */
-export async function refreshCase(store: CaseStore, verificationId: string): Promise<CaseWriteResult> {
+export async function refreshCase(
+  store: CaseStore,
+  verificationId: string,
+  now: () => Date = () => new Date(),
+): Promise<CaseWriteResult> {
   for (let round = 0; round < CASE_WRITE_ROUNDS; round++) {
     const snapshot = await store.snapshot(verificationId);
     if (!snapshot) return "not_found";
-    const decision = decideCase(snapshot.declaredDocument, snapshot.sides);
-    const result = await store.write(verificationId, snapshot.fingerprint, caseChecksPayload(decision));
+    const result = await store.write(verificationId, snapshot.fingerprint, decideCaseChecks(snapshot, now()));
     if (result !== "stale") return result;
   }
   return "stale";

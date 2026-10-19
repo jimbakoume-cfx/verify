@@ -332,6 +332,13 @@ export interface FlowChecks {
   /** True when no side is pending any more. */
   done: boolean;
   sides: FlowCheckSide[];
+  /**
+   * M4: the side that carries the code lines has been checked, and its code lines (every check digit
+   * right) give an expiry date before today (Douala). The rider is asked to use another document, or
+   * to continue anyway (the case keeps the hard flag document_expired). Never set from printed text
+   * alone. A rider app treats a missing value as false.
+   */
+  expired: boolean;
 }
 
 /** How long the rider waits for the server checks, and how often the app asks. */
@@ -494,6 +501,8 @@ export const SERVER_CHECK_NAMES = {
   fields: "ocr_fields",
   classification: "classification",
   policy: "document_policy",
+  /** M4: the document compared with itself and with today's date (one per case). */
+  consistency: "consistency",
 } as const;
 
 export interface QualityServerDetails {
@@ -560,11 +569,67 @@ export const CLASSIFICATION_DETAIL_KEYS = [
   "qrPresent",
 ] as const satisfies readonly (keyof ClassificationDetails)[];
 
+// ---------------------------------------------------------------------------
+// Consistency checks (M4), stored in check_result.details of the case-level check "consistency".
+// Generic codes only: never a value read from the document, never which value disagreed.
+// ---------------------------------------------------------------------------
 /**
- * Generic reasons a person must decide, in the order the dashboard lists them. No reason reveals the
- * card sub-type or nationality.
+ * document_expired: the expiry date is before today (Douala). under_18: the holder is under 18 today.
+ * mrz_print_mismatch: a printed field disagrees with the code lines. date_logic: the dates contradict
+ * each other or today (birth, issue, expiry). number_format: the document number does not fit the
+ * format known for the declared document.
+ */
+export const CONSISTENCY_FLAGS = [
+  "document_expired",
+  "under_18",
+  "mrz_print_mismatch",
+  "date_logic",
+  "number_format",
+] as const;
+export type ConsistencyFlag = (typeof CONSISTENCY_FLAGS)[number];
+
+/**
+ * Hard flags (PM, 2026-10-15): such a case is never approved automatically once automatic decisions
+ * exist (M8), and the dashboard shows them apart.
+ */
+export const HARD_FLAGS: readonly ConsistencyFlag[] = ["document_expired", "under_18"];
+
+/** Kinds of field a printed value and the code lines can disagree on (mrz_print_mismatch). */
+export const MISMATCH_KINDS = ["name", "number", "birth_date", "expiry_date"] as const;
+export type MismatchKind = (typeof MISMATCH_KINDS)[number];
+
+export interface ConsistencyDetails {
+  /** Firm flags (and under_18 from printed text, PM decision): each is also a document_policy reason. */
+  flags: ConsistencyFlag[];
+  /** From printed text whose format is not confirmed yet: shown as provisional, never a reason. */
+  provisional: ConsistencyFlag[];
+  /** What the dates and the number came from: code lines (every check digit right), printed text, or nothing. */
+  basis: "mrz" | "printed" | "none";
+  /** With mrz_print_mismatch: which kinds of field disagree (never their values). */
+  mismatches: MismatchKind[];
+}
+
+/** The only keys of ConsistencyDetails (the database refuses any other). */
+export const CONSISTENCY_DETAIL_KEYS = [
+  "flags",
+  "provisional",
+  "basis",
+  "mismatches",
+] as const satisfies readonly (keyof ConsistencyDetails)[];
+
+/** "Today" for expiry and age: the date in Douala (UTC+1, no daylight saving time). */
+export const CONSISTENCY_TIME_ZONE = "Africa/Douala";
+
+/**
+ * Generic reasons a person must decide, in the order the dashboard lists them: the hard flags first.
+ * No reason reveals the card sub-type or nationality. Since M4 the firm consistency flags are reasons too.
  */
 export const POLICY_REASONS = [
+  "document_expired",
+  "under_18",
+  "mrz_print_mismatch",
+  "date_logic",
+  "number_format",
   "manual_review_document",
   "unsupported_document",
   "unrecognised_document",

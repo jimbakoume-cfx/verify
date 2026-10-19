@@ -1,16 +1,21 @@
 // What the case page shows about the server's checks (M3): per side, the newest live photo and the
-// server's results for it; per case, the document recognised and the reasons a person must decide.
-// Pure functions, so the rules are tested without rendering.
+// server's results for it; per case, the document recognised, the reasons a person must decide and,
+// since M4, the consistency of the document's data. Pure functions, so the rules are tested without
+// rendering.
 import {
   CAPTURE_SIDES,
   type CaptureSide,
   type ClassificationDetails,
+  type ConsistencyDetails,
+  type ConsistencyFlag,
   type DeclaredDocument,
   type DocumentPolicyDetails,
+  HARD_FLAGS,
   MRZ_EXPECTATION,
   type MrzFormat,
   type MrzServerDetails,
   type OcrFieldsDetails,
+  POLICY_REASONS,
   type PolicyReason,
   type QualityServerDetails,
   REQUIRED_SIDES,
@@ -44,7 +49,9 @@ export interface ServerOverview {
   sides: ServerSide[];
   classification: CheckRecord<ClassificationDetails> | null;
   policy: CheckRecord<DocumentPolicyDetails> | null;
-  /** The reasons a person must decide, in the contract's order. */
+  /** M4: the document compared with itself and with today's date. */
+  consistency: CheckRecord<ConsistencyDetails> | null;
+  /** The reasons a person must decide, in the contract's order (the hard flags first). */
   reasons: PolicyReason[];
   /** Flagged, but for no reason this dashboard knows (a newer server version). */
   unknownFlag: boolean;
@@ -70,7 +77,9 @@ export function serverOverview(
   const newest = newestLiveCaptures(captures);
   const required: readonly CaptureSide[] = declared ? REQUIRED_SIDES[declared] : [];
   const expectation = declared ? MRZ_EXPECTATION[declared] : null;
-  const reasons = checks.policy?.details?.reasons ?? [];
+  // In the contract's order (the hard flags first), whatever order they were given in.
+  const given = checks.policy?.details?.reasons ?? [];
+  const reasons = POLICY_REASONS.filter((reason) => given.includes(reason));
 
   const sides = CAPTURE_SIDES.filter((side) => required.includes(side) || newest.has(side)).map((side): ServerSide => {
     const capture = newest.get(side) ?? null;
@@ -99,11 +108,28 @@ export function serverOverview(
     sides,
     classification: checks.classification,
     policy: checks.policy,
+    consistency: checks.consistency,
     reasons,
     unknownFlag: checks.policy?.outcome === "flag" && checks.policy.details !== null && reasons.length === 0,
-    started: sides.some((s) => s.state === "checked") || checks.classification !== null || checks.policy !== null,
+    started: sides.some((s) => s.state === "checked") || checks.classification !== null || checks.policy !== null ||
+      checks.consistency !== null,
   };
 }
+
+/**
+ * A hard flag (M4, PM 2026-10-15): such a case is never approved automatically once automatic
+ * decisions exist (M8). The page shows these reasons first, in red, with their own badge.
+ */
+export function isHardFlag(code: string): code is ConsistencyFlag {
+  return (HARD_FLAGS as readonly string[]).includes(code);
+}
+
+/** What the consistency check was based on, as the page says it. */
+export const CONSISTENCY_BASIS_KEY: Record<ConsistencyDetails["basis"], string> = {
+  mrz: "serverChecks.consistency.basis.mrz",
+  printed: "serverChecks.consistency.basis.printed",
+  none: "serverChecks.consistency.basis.none",
+};
 
 /**
  * Label of the server's sharpness. It is the phone's focus score (compared with 5), not the raw

@@ -1,0 +1,8 @@
+{"run": "finetune", "checkpoint": "mrz_0.428_1526_18300.checkpoint", "exported": "2026-10-15T11:49:48Z",
+ "integer": {"file": "mrz.traineddata", "bytes": 1453233, "sha256": "575e55e501516f2a160d556ef7d8fd481d0a843bbab9ccbfd5b5110a2a25747b"},
+ "integerGz": {"file": "mrz.traineddata.gz", "bytes": 1299528, "sha256": "bbcd6a33477ea4f1ed1bc42b0846ea764d5849c83653206b3544e8a5b7b6cc18"},
+ "float": {"file": "mrz_float.traineddata", "bytes": 11396760, "sha256": "203c03c21b18f99f64d28abb7d0fff222714ac4a83dd8d82589b9ae9b5d5c1dd"},
+ "protoModelSha256": "35147bb70670bffc3ca5344eae7ff96381b3137bf9909d52d6dfb4187980106e", "training": {"mode": "finetune", "maxIterations": 30000, "learningRate": 0.0001, "netSpec": "[1,36,0,1 Ct3,3,16 Mp3,3 Lfys48 Lfx96 Lrx96 Lfx192 O1c###]",
+ "threads": 4, "targetErrorRate": 0.01, "resumed": "no",
+ "started": "2026-10-15T09:58:07Z", "repoCommit": "ad921b1f152c38bbbac1a8fa7ca4e3f54d58e556",
+ "data": {"train": 78116, "eval": 3255, "unicharset": 40, "protoModelSha256": "35147bb70670bffc3ca5344eae7ff96381b3137bf9909d52d6dfb4187980106e"}, "tesseract": "tesseract 5.3.4"}}

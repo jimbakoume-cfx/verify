@@ -1,10 +1,10 @@
 """The few printed fields the worker reads, and nothing more.
 
-Documents with code lines (passport, new CNI, new foreigner cards): the code lines are the
-authoritative source for the number, birth and expiry dates, sex and nationality, so only what they
-lack is read from the print: the full names (the code lines may cut them short) and the issue date.
-Documents without code lines (old CNI, old permits, driving licence, voter card): names, document
-number, birth, expiry and issue dates.
+Every document: names, document number, birth, expiry and issue dates. On documents with code lines
+(passport, new CNI, new foreigner cards) the code lines stay the authoritative source of the number
+and dates; since M4 the print is read too, so that the server can compare the two (a printed field
+that disagrees with the code lines is flagged for staff). Sex and nationality are never read from the
+print: the code lines carry them.
 
 Never read, whatever the document: parents' names, address, height, place of birth, occupation,
 distinguishing marks, the 17-digit unique identifier, the passport's card access number (CAN). Their
@@ -42,6 +42,11 @@ LABELS: dict[str, tuple[str, ...]] = {
         "NO DE CARTE",
         "CARD NO",
         "CARD NUMBER",
+        "N DE PASSEPORT",
+        "NO DE PASSEPORT",
+        "NUMERO DE PASSEPORT",
+        "PASSPORT NO",
+        "PASSPORT NUMBER",
         "N DU PERMIS",
         "NUMERO DU PERMIS",
         "LICENCE NO",
@@ -106,8 +111,9 @@ FORBIDDEN_LABELS: tuple[str, ...] = (
 
 NAME_FIELDS = ("surname", "givenNames")
 DATE_FIELDS = ("birthDate", "expiryDate", "issueDate")
-WITH_CODE_LINES = ("surname", "givenNames", "issueDate")
+# The same fields with or without code lines since M4 (the server compares them with the code lines).
 WITHOUT_CODE_LINES = ("surname", "givenNames", "documentNumber", "birthDate", "expiryDate", "issueDate")
+WITH_CODE_LINES = WITHOUT_CODE_LINES
 
 # ---------------------------------------------------------------------------------------------
 # Dates

@@ -8,7 +8,7 @@ import {
   type FlowChecks,
   SERVER_RETAKES_PER_SIDE,
 } from "../supabase/functions/_shared/contract";
-import { OCR_ASSETS } from "../apps/rider/src/mrz/types";
+import { OCR_ASSETS, mrzModelFor } from "../apps/rider/src/mrz/types";
 import type { FakeBackend } from "./support/backend";
 import { GUIDES } from "./support/camera";
 import { CARD_FLOW, afterPhotos, expectCleanPhoto } from "./support/expectations";
@@ -110,6 +110,7 @@ test("server retake of the front: straight back to its camera, told why; only th
   expect(backend.checksAnswers).toEqual(checksOf([
     {
       done: true,
+      expired: false,
       sides: [
         { kind: "document_front", captureId: firstFront.captureId, state: "retake", reason: "no_document" },
         { kind: "document_back", captureId: back.captureId, state: "ok", reason: null },
@@ -117,6 +118,7 @@ test("server retake of the front: straight back to its camera, told why; only th
     },
     {
       done: true,
+      expired: false,
       sides: [
         { kind: "document_front", captureId: newFront.captureId, state: "ok", reason: null },
         { kind: "document_back", captureId: back.captureId, state: "ok", reason: null },
@@ -209,8 +211,8 @@ test("server retake of the code-lines side (new CNI back): read again on the pho
   const [, firstBack, newBack] = backend.captures;
   expect([firstBack.kind, firstBack.live, newBack.kind, newBack.live]).toEqual(["document_back", false, "document_back", true]);
   expect(backend.mrzReports.map((r) => r.body)).toEqual([
-    { captureId: firstBack.captureId, result: "unreadable", reason: "reader_unavailable", attempts: 1, engine: OCR_ASSETS.engine },
-    { captureId: newBack.captureId, result: "unreadable", reason: "reader_unavailable", attempts: 2, engine: OCR_ASSETS.engine },
+    { captureId: firstBack.captureId, result: "unreadable", reason: "reader_unavailable", attempts: 1, engine: mrzModelFor(true).engine },
+    { captureId: newBack.captureId, result: "unreadable", reason: "reader_unavailable", attempts: 2, engine: mrzModelFor(true).engine },
   ]);
   expect(states(backend)).toEqual([
     ["ok", "retake"],
@@ -332,6 +334,7 @@ test("unchecked: the worker is out of budget for one photo and could not be rung
   expect(backend.checksAnswers).toEqual(checksOf([
     {
       done: true,
+      expired: false,
       sides: [
         { kind: "document_front", captureId: backend.captures[0].captureId, state: "unchecked", reason: null },
         { kind: "document_back", captureId: backend.captures[1].captureId, state: "unchecked", reason: null },

@@ -44,5 +44,22 @@
   "G4": {
     "what": "The PM's own test-session photos, read offline on the phone pipeline before switching: valid rate at least Doubango's and zero wrong-but-valid. Manual (photos never leave the test project).",
     "automated": false
+  },
+  "results": {
+    "about": "Outcome of each full run, decided against the gates above. Reports in results/ (copied from work/gates/<model>/).",
+    "run1-scratch": {
+      "model": "scratch-0.863_22490_139500 (150,000 iterations from zero)",
+      "report": "results/run1-scratch-gates.md",
+      "automated": "fail",
+      "why": "G1 clean CER 0.036% above Doubango's 0.014%; G2 3 wrong-but-valid reads of the model's own; G3 6 wrong-but-valid against Doubango's 5.",
+      "decision": "2026-10-15: not shipped. Run 2 (fine-tune) was launched as planned."
+    },
+    "run2-finetune": {
+      "model": "finetune-0.428_1526_18300 (fine-tuned from tessdata_best eng, 30,000 iterations; best checkpoint at 18,300)",
+      "report": "results/run2-finetune-gates.md",
+      "automated": "pass",
+      "G4": "pending: the PM's own test-session photos",
+      "decision": "2026-10-15 (PM, M4): shipped for test sessions only, as /ocr/mrz-2/ in apps/rider (cache ocr-mrz-2). Doubango stays for every other session until G4 passes. Its provenance (Google's eng weights, Apache-2.0, trained on about 4,500 mostly commercial fonts) is on the lawyer's list (docs/LICENSES.md)."
+    }
   }
 }

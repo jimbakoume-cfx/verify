@@ -1,17 +1,20 @@
 // "Server checks" section of the case page (M3): what the server found on the photos themselves. Per
-// case, the document recognised and the reasons a person must decide; per side (the newest photo
-// only), the photo check, the code lines read from the photo and the names of the printed fields
-// read. Outcomes, generic codes and metrics only: the values are behind "Show data read".
+// case, the document recognised, the reasons a person must decide (the hard flags first, in red) and,
+// since M4, the consistency of the document's data; per side (the newest photo only), the photo
+// check, the code lines read from the photo and the names of the printed fields read. Outcomes,
+// generic codes and metrics only: the values are behind "Show data read".
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import type { ClassificationDetails, Language, PolicyReason } from "@verify/shared";
+import type { ClassificationDetails, ConsistencyDetails, Language, PolicyReason } from "@verify/shared";
 import { CheckLines, OutcomeBadge, ProvisionalBadge } from "../components/Checks";
 import { ErrorText } from "../components/Feedback";
 import { formatDateTime, formatNumber, formatPercent, toLanguage } from "../lib/format";
 import { formatMrzFormat, serverMrzCheckLines } from "../lib/mrz";
 import type { CaptureRecord, CheckRecord, ServerChecks, VerificationSummary } from "../lib/records";
 import {
+  CONSISTENCY_BASIS_KEY,
   declaredMatch,
+  isHardFlag,
   type ServerOverview,
   type ServerSide,
   SERVER_FOCUS_LABEL,
@@ -69,6 +72,9 @@ export function ServerChecksSection({
           </li>
           <li>
             <ReasonsItem overview={overview} />
+          </li>
+          <li>
+            <ConsistencyItem consistency={overview.consistency} />
           </li>
           {overview.sides.map((side) => (
             <li key={side.side}>
@@ -152,8 +158,14 @@ function DocumentItem({
   );
 }
 
-/** The generic reasons a person must decide, each with its explanation. */
-function ReasonsItem({ overview }: { overview: ServerOverview }) {
+/** A hard flag (document_expired, under_18): never approved automatically, shown apart. */
+export function HardFlagBadge() {
+  const { t } = useTranslation();
+  return <span className="badge bad">{t("serverChecks.hardFlag")}</span>;
+}
+
+/** The generic reasons a person must decide, each with its explanation; the hard flags first, in red. */
+export function ReasonsItem({ overview }: { overview: ServerOverview }) {
   const { t } = useTranslation();
   const { policy, reasons } = overview;
   const title = t("serverChecks.reasons.title");
@@ -171,14 +183,107 @@ function ReasonsItem({ overview }: { overview: ServerOverview }) {
       )}
       {reasons.length > 0 && (
         <ul className="dash-reasons">
-          {reasons.map((reason: PolicyReason) => (
-            <li key={reason}>
-              <strong>{t(`serverChecks.reasons.label.${reason}`)}</strong>
-              <span>{t(`serverChecks.reasons.body.${reason}`)}</span>
-              <code className="mono muted">{reason}</code>
-            </li>
-          ))}
+          {reasons.map((reason: PolicyReason) => {
+            const hard = isHardFlag(reason);
+            return (
+              <li key={reason} className={hard ? "hard" : undefined}>
+                <strong>
+                  {t(`serverChecks.reasons.label.${reason}`)}
+                  {hard && (
+                    <>
+                      {" "}
+                      <HardFlagBadge />
+                    </>
+                  )}
+                </strong>
+                <span>{t(`serverChecks.reasons.body.${reason}`)}</span>
+                <code className="mono muted">{reason}</code>
+              </li>
+            );
+          })}
         </ul>
+      )}
+    </article>
+  );
+}
+
+/**
+ * M4: the document compared with itself and with today's date. Generic codes only: which kind of
+ * field disagrees, never its value (that is behind "Show data read").
+ */
+export function ConsistencyItem({ consistency }: { consistency: CheckRecord<ConsistencyDetails> | null }) {
+  const { t } = useTranslation();
+  const title = t("serverChecks.consistency.title");
+  const d = consistency?.details ?? null;
+
+  return (
+    <article className="dash-capture" aria-label={title}>
+      <header className="dash-capture-head">
+        <h3>{title}</h3>
+        {consistency && (
+          <span className="dash-row-badges">
+            <OutcomeBadge outcome={consistency.outcome} />
+            {d?.basis === "printed" && <ProvisionalBadge />}
+          </span>
+        )}
+      </header>
+      {!consistency && <p className="muted">{t("serverChecks.consistency.pending")}</p>}
+      {consistency && !d && <p className="dash-alert info">{t("mrz.detailsUnknown")}</p>}
+      {d && (
+        <>
+          <p className="muted dash-small">{t(CONSISTENCY_BASIS_KEY[d.basis])}</p>
+          {d.flags.length === 0 && d.provisional.length === 0 && (
+            <p>{t(d.basis === "none" ? "serverChecks.consistency.nothing" : "serverChecks.consistency.none")}</p>
+          )}
+          {d.flags.length > 0 && (
+            <ul className="dash-reasons">
+              {d.flags.map((code) => (
+                <li key={code} className={isHardFlag(code) ? "hard" : undefined}>
+                  <strong>
+                    {t(`serverChecks.reasons.label.${code}`)}
+                    {isHardFlag(code) && (
+                      <>
+                        {" "}
+                        <HardFlagBadge />
+                      </>
+                    )}
+                  </strong>
+                  {code === "mrz_print_mismatch" && d.mismatches.length > 0 && (
+                    <span>
+                      {t("serverChecks.consistency.mismatches", {
+                        kinds: d.mismatches.map((kind) => t(`serverChecks.consistency.kind.${kind}`)).join(", "),
+                      })}
+                    </span>
+                  )}
+                  <code className="mono muted">{code}</code>
+                </li>
+              ))}
+            </ul>
+          )}
+          {d.provisional.length > 0 && (
+            <div className="dash-subsection">
+              <div className="dash-capture-head">
+                <h4>{t("serverChecks.consistency.provisionalTitle")}</h4>
+                <ProvisionalBadge />
+              </div>
+              <p className="muted dash-small">{t("serverChecks.consistency.provisionalBody")}</p>
+              <ul className="dash-reasons">
+                {d.provisional.map((code) => (
+                  <li key={code}>
+                    <strong>{t(`serverChecks.reasons.label.${code}`)}</strong>
+                    <code className="mono muted">{code}</code>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          <dl className="dash-facts compact">
+            <div>
+              <dt>{t("mrz.parserVersion")}</dt>
+              <dd>{consistency?.checkVersion || "—"}</dd>
+            </div>
+          </dl>
+        </>
       )}
     </article>
   );

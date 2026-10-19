@@ -18,6 +18,7 @@ export function MrzDebug({ read, attempt }: { read: MrzReadResult; attempt: numb
   const { t } = useTranslation();
   const { parsed } = read;
   const rows: [string, string][] = [
+    [t("debug.mrz.model"), read.engine],
     [t("debug.mrz.status"), read.status],
     [t("debug.mrz.format"), read.format],
     [t("debug.mrz.charHeight"), read.charHeight === null ? "—" : `${read.charHeight.toFixed(1)} px`],

@@ -11,6 +11,7 @@ import {
 import { checkDigit } from "../_shared/mrz.ts";
 import { makeRequest, readJson } from "../_shared/test-helpers.ts";
 import type { CaseChecksPayload, CaseSnapshot, JobStatus } from "./case.ts";
+import type { SideDocumentData } from "./consistency.ts";
 import type { CaptureEvidence } from "./decide.ts";
 import {
   type ClaimedJob,
@@ -28,7 +29,7 @@ import { newKey, signedHeaders, type TestKey } from "./test-support.ts";
 // ---------------------------------------------------------------------------
 // In-memory fakes. They mirror the M3 migration: worker_use_nonce, worker_claim, worker_image_lookup,
 // worker_case_snapshot and worker_record_result (first result wins, the fingerprint guards the
-// case-level checks).
+// case-level checks), and since M4 the snapshot's decrypted documentData.
 // ---------------------------------------------------------------------------
 interface JobRow {
   id: string;
@@ -56,6 +57,8 @@ class MemoryWorkerRepo implements WorkerRepo {
   declared = new Map<string, DeclaredDocument | null>();
   recorded: ResultRecord[] = [];
   caseChecks = new Map<string, CaseChecksPayload | null>();
+  /** extracted_document_data of mrz_server and ocr_server, by capture (stored "encrypted"). */
+  stored = new Map<string, { mrzLines: string | null; fields: string | null }>();
   audits: AuditEntry[] = [];
   calls: string[] = [];
   /** Runs before a result is checked against the case, to simulate a concurrent write. */
@@ -137,9 +140,23 @@ class MemoryWorkerRepo implements WorkerRepo {
     this.calls.push("jobSnapshot");
     const job = this.jobs.find((j) => j.id === jobId);
     if (!job) return null;
+    const inputs = structuredClone(this.inputs(job.verificationId));
+    // private.worker_case_document_data: the newest live photos' values, never the sub-type.
+    const documentData = inputs.sides.flatMap((side): SideDocumentData[] => {
+      const values = this.stored.get(side.captureId);
+      if (!values) return [];
+      const { subtype: _subtype, ...fields } = values.fields ? JSON.parse(values.fields) : {};
+      return [{
+        kind: side.kind,
+        captureId: side.captureId,
+        mrzLines: values.mrzLines ? values.mrzLines.split("\n") : null,
+        fields: values.fields ? fields : null,
+      }];
+    });
     return {
       verificationId: job.verificationId,
-      ...structuredClone(this.inputs(job.verificationId)),
+      ...inputs,
+      documentData,
       fingerprint: this.fingerprint(job.verificationId),
       job: {
         id: job.id,
@@ -165,6 +182,9 @@ class MemoryWorkerRepo implements WorkerRepo {
     if (this.fingerprint(job.verificationId) !== record.fingerprint) return "stale";
     job.status = "done";
     job.evidence = structuredClone(record.evidence);
+    if (record.mrzLines !== null || record.fields !== null) {
+      this.stored.set(job.captureId, { mrzLines: record.mrzLines, fields: record.fields });
+    }
     this.recorded.push(structuredClone(record));
     this.caseChecks.set(job.verificationId, structuredClone(record.caseChecks));
     this.audits.push({
@@ -272,6 +292,13 @@ function td1Cmr(nationality = "CMR"): string[] {
   const l1 = "IDCMR" + "AB1234567" + cd("AB1234567") + "<".repeat(15);
   const head = "900101" + cd("900101") + "F" + "350101" + cd("350101") + nationality + "<".repeat(11);
   return [l1, head + cd(l1.slice(5, 30) + head.slice(0, 7) + head.slice(8, 15) + head.slice(18, 29)), "SPECIMEN<<TESTA" + "<".repeat(15)];
+}
+
+/** A passport page that expired on `expiry` (YYMMDD). */
+function td3Cmr(expiry: string): string[] {
+  const cd = (field: string) => String(checkDigit(field));
+  const head = "SP7654321" + cd("SP7654321") + "CMR" + "850704" + cd("850704") + "M" + expiry + cd(expiry) + "<".repeat(14) + "<";
+  return [("P<CMRECHANTILLON<<FRANCOIS<ESSAI" + "<".repeat(44)).slice(0, 44), head + cd(head.slice(0, 10) + head.slice(13, 20) + head.slice(21, 43))];
 }
 
 function result(jobId: string, overrides: Partial<WorkerResultRequest> = {}): WorkerResultRequest {
@@ -665,6 +692,53 @@ describe("POST /result", () => {
     await expectError(await h.send("/result", { ...result(front!.jobId), rawText: "SPECIMEN" }), 400, "bad_request");
     await expectError(await h.send("/result", result(front!.jobId, { mrzCandidates: ["p<cmr"] })), 400, "bad_request");
     expect(h.repo.calls).not.toContain("jobSnapshot");
+  });
+
+  it("M4: compares the front's printed fields with the back's code lines, whichever lands first", async () => {
+    for (const order of [["document_front", "document_back"], ["document_back", "document_front"]] as const) {
+      const h = await setup();
+      const c = h.repo.addCase("cni_biometric", ["document_front", "document_back"], "claimed");
+      const bodies = {
+        document_front: result(c.document_front!.jobId, { fields: { surname: "Autre", givenNames: "Testa", birthDate: "01.01.1990" } }),
+        document_back: result(c.document_back!.jobId, { mrzCandidates: td1Cmr(), fields: { issueDate: "2025-03-01" } }),
+      };
+      for (const side of order) expect(await readJson(await h.send("/result", bodies[side]))).toEqual({ status: "recorded" });
+      const checks = h.repo.caseChecks.get(c.verificationId)!;
+      expect(checks.consistency).toEqual({
+        outcome: "flag",
+        details: { flags: ["mrz_print_mismatch"], provisional: [], basis: "mrz", mismatches: ["name"] },
+      });
+      expect(checks.reasons).toEqual(["mrz_print_mismatch"]);
+      // Only codes: nothing printed or read reaches the case checks.
+      expect(JSON.stringify(checks)).not.toMatch(/AUTRE|Autre|TESTA|SPECIMEN|1990/);
+    }
+  });
+
+  it("M4: flags an expired document (code lines, every check digit right) as a hard reason", async () => {
+    const h = await setup();
+    const { verificationId, document_front: front } = h.repo.addCase("passport", ["document_front"], "claimed");
+    await h.send("/result", result(front!.jobId, {
+      mrzCandidates: td3Cmr("261013"),
+      fields: { surname: "ECHANTILLON", givenNames: "FRANCOIS ESSAI", expiryDate: "13.10.2026" },
+    }));
+    expect(h.repo.caseChecks.get(verificationId)).toMatchObject({
+      reasons: ["document_expired"],
+      consistency: { outcome: "flag", details: { flags: ["document_expired"], basis: "mrz", mismatches: [] } },
+    });
+    // The day before, Douala time, it was still valid.
+    const valid = h.repo.addCase("passport", ["document_front"], "claimed");
+    await h.send("/result", result(valid.document_front!.jobId, { mrzCandidates: td3Cmr("261014") }));
+    expect(h.repo.caseChecks.get(valid.verificationId)).toMatchObject({ reasons: [], consistency: { outcome: "pass" } });
+  });
+
+  it("M4: never uses the card sub-type, and the snapshot's values never include it", async () => {
+    const h = await setup();
+    const c = h.repo.addCase("residence_permit", ["document_front", "document_back"], "claimed");
+    await h.send("/result", result(c.document_front!.jobId, { fields: { surname: "Doe", subtype: "refugee" } }));
+    const snapshot = await h.repo.jobSnapshot(c.document_back!.jobId);
+    expect(snapshot?.documentData).toEqual([
+      { kind: "document_front", captureId: c.document_front!.captureId, mrzLines: null, fields: { surname: "Doe" } },
+    ]);
   });
 
   it("keeps everything read from the document out of check details, the audit log and the logs", async () => {

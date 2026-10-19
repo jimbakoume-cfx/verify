@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import netlifyHeadersFile from "../public/_headers?raw";
 import netlifyRedirectsFile from "../public/_redirects?raw";
 import vercelConfig from "../vercel.json";
-import { OCR_ASSETS } from "./mrz/types";
+import { MRZ_MODELS, OCR_ASSETS } from "./mrz/types";
 
 interface Rule {
   source: string;
@@ -63,6 +63,7 @@ const PATHS = [
   `${OCR_ASSETS.workerPath}.LICENSE.txt`,
   `${OCR_ASSETS.corePath}/tesseract-core-simd-lstm.wasm.js`,
   `${OCR_ASSETS.langPath}/${OCR_ASSETS.language}.traineddata.gz`,
+  `${MRZ_MODELS["mrz-2"].langPath}/${OCR_ASSETS.language}.traineddata.gz`,
   "/ocr/NOTICE.txt",
   "/session/xyz",
 ];
@@ -106,7 +107,7 @@ describe("hosting configuration", () => {
     }
     expect(OCR_ASSETS.workerPath.startsWith(`${OCR_ASSETS.corePath}/`)).toBe(true);
     expect(OCR_ASSETS.corePath).toMatch(/^\/ocr\/\d+\.\d+\.\d+$/);
-    expect(OCR_ASSETS.langPath).toMatch(/^\/ocr\/mrz-\d+$/);
+    for (const model of Object.values(MRZ_MODELS)) expect(model.langPath).toMatch(/^\/ocr\/mrz-\d+$/);
   });
 
   it("serves the app for every page but never for a missing build or OCR file", () => {

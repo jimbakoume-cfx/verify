@@ -11,15 +11,15 @@ In-house identity verification (KYC) for Confiance riders. It is a standalone we
 
 | Folder | What it is |
 |---|---|
-| `apps/rider` | The rider's verification flow (mobile web page, FR/EN), hosted on Vercel: https://confiance-verify.vercel.app. Since M2 it also reads the code lines (MRZ) on the phone, with a reading engine and model served from the site itself under `/ocr/` (`public/ocr/`, `src/mrz/`). Since M3 it waits for the server's check of the photos ("Checking your photos…") and retakes a photo the server cannot use. |
-| `apps/dashboard` | The internal ops dashboard for the KYC team, hosted on Vercel: https://confiance-verify-ops.vercel.app. Since M3 the case page shows the server's checks and the data read by the server. |
+| `apps/rider` | The rider's verification flow (mobile web page, FR/EN), hosted on Vercel: https://confiance-verify.vercel.app. Since M2 it also reads the code lines (MRZ) on the phone, with a reading engine and model served from the site itself under `/ocr/` (`public/ocr/`, `src/mrz/`). Since M3 it waits for the server's check of the photos ("Checking your photos…") and retakes a photo the server cannot use. Since M4 it says when the document has expired, and test sessions read the code lines with our own model (`/ocr/mrz-2/`). |
+| `apps/dashboard` | The internal ops dashboard for the KYC team, hosted on Vercel: https://confiance-verify-ops.vercel.app. Since M3 the case page shows the server's checks and the data read by the server; since M4 the consistency of the document's data, with the hard flags in red. |
 | `packages/capture` | The camera quality engine: blur, glare, brightness and framing checks, card detection, auto-capture, compression. Since M2 it also finds the code lines on the photo and prepares them for reading (`src/mrz/`). Pure TypeScript, runs in the rider's browser. |
 | `packages/shared` | Code shared by both apps: languages, branding, Supabase connection, and the HTTP contract and MRZ parser re-exported from `supabase/functions/_shared/` |
 | `supabase/functions` | Edge Functions: `flow` (the rider's session API), `admin` (staff enrollment, test sessions, audited photo links, audited "data read" views) and, since M3, `worker` (the AI worker's signed API: claim a job, fetch its photo, send the result; all decisions are made here). `_shared/mrz.ts` and `_shared/mrzCorrect.ts` are our MRZ parser and look-alike correction, used by the phone, the server and the dashboard alike. |
 | `supabase/migrations` | Database structure and security rules, applied to Supabase |
 | `supabase/tests` | Automatic tests proving the security rules work |
 | `worker` | **The AI worker (M3):** Python 3.12, one Vercel function (`api/process.py`, project `confiance-verify-worker`, Paris region). Re-checks photo quality, re-reads the code lines, gathers evidence of the document type and reads a few printed fields, with RapidOCR. See [`worker/README.md`](worker/README.md). |
-| `training/mrz` | **Our own MRZ reading model (M3):** the reproducible training recipe, its pinned inputs and its acceptance gates. Runs on a training machine only. See [`training/mrz/README.md`](training/mrz/README.md). |
+| `training/mrz` | **Our own MRZ reading model (M3):** the reproducible training recipe, its pinned inputs and its acceptance gates, and since M4 the two runs' gate reports (`results/`). Runs on a training machine only. See [`training/mrz/README.md`](training/mrz/README.md). |
 | `e2e` | Browser tests (Playwright) with a fake camera; `e2e/fixtures/mrz` holds the MRZ test images, `e2e/fixtures/specimens` the worker's fictitious specimen documents (M3) |
 | `scripts` | Licence check, database test runner, the fake-camera video, MRZ test-image and specimen-document generators, and the fonts used only to draw those images (OCR-B, and Inter since M3) |
 | `docs` | Plan, milestone specs, licences, threat model |
@@ -31,13 +31,25 @@ In-house identity verification (KYC) for Confiance riders. It is a standalone we
 | M0: foundations (apps, database, security rules, CI) | Done |
 | M1: ID capture | Done |
 | M2: MRZ reading | Done |
-| **M3**: AI worker (the server re-checks the photos, re-reads the code lines from the image, recognises the document, reads printed text; our own MRZ model's training) | In review |
-| M4: consistency checks and first risk flags | Next |
+| M3: AI worker (the server re-checks the photos, re-reads the code lines from the image, recognises the document, reads printed text; our own MRZ model's training) | Done |
+| **M4**: consistency checks and first risk flags (expired document, under 18, printed data vs code lines, date logic); our own MRZ model on test sessions | In review |
+| M5: active liveness capture | Next |
 
 ## Before you test (once)
 1. An administrator creates your invite (see the comment at the top of `supabase/migrations/20261014000000_m1_capture.sql`) and gives you the one-time code. Use the role **supervisor**: admins cannot open ID photos or the data read from them, by design.
 2. On the dashboard, choose **Set up my account**, then enter your email, the invite code and a new password (12 characters or more). Next time, just sign in with email and password.
    Forgotten password, or an invite that expired or was locked after 5 wrong codes: the administrator runs the same statement again with a new code (it updates the existing invite and resets its counter), and you choose **Set up my account** again; your account and role are kept.
+
+## How to test M4 on your phone
+M4 compares what the document says with itself and with today's date. The full test is in [`docs/M4_SPEC.md`](docs/M4_SPEC.md) ("The PM test"). As in M3, **only test sessions are checked by the server**; use your own documents, or the printed specimens below, and never paste data read from a document into a chat or a ticket.
+
+1. **An expired document.** Use your own expired passport or card if you have one; otherwise print `e2e/fixtures/specimens/passport-expired.jpg` at 100% and photograph it as a passport. On **Vérification de vos photos…** the phone says **Ce document a expiré** (*This document has expired*) with two buttons:
+   - **Utiliser une autre pièce** (*Use another document*) goes back to the list of documents;
+   - **Continuer quand même** (*Continue anyway*) finishes as usual.
+   On the dashboard, **À décider par une personne** (*For a person to decide*) lists **Document expiré** in red with **Signal bloquant** (*Hard flag*), and the new **Cohérence** (*Consistency*) block says the same.
+2. **Printed data that does not match the code lines.** Print `e2e/fixtures/specimens/passport-mismatch.jpg` and photograph it as a passport. The phone shows nothing special; the dashboard shows **Texte imprimé différent des lignes de code** with "Nom" (*Name*).
+3. **Your own valid documents:** **Cohérence** should say nothing is inconsistent (provisional notes, from printed text only, may appear). Tell us about any false flag: which kind of field, never its value.
+4. **Our own reading model.** With the Debug link, the debug panel under the photo shows **modèle** (*model*) **tesseract.js-7.0.0/mrz-2** on test sessions. Tell us if a document's code lines read worse than with M3.
 
 ## How to test M3 on your phone
 M3 adds the "AI worker": the server now looks at each photo itself. It checks that the photo is usable, reads the code lines from the image and compares them with what your phone read, recognises the document and reads a few printed fields. The full test, and what counts as a pass, is in [`docs/M3_SPEC.md`](docs/M3_SPEC.md) ("The PM test").
@@ -123,7 +135,7 @@ To publish: build the app with `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABL
 
 The rider build also writes the reading engine's files into `dist/ocr/7.0.0/`, next to the model in `dist/ocr/mrz-1/`. These paths are cached by phones for a year, so a new engine or model version must get a new folder name (see `apps/rider/src/mrz/types.ts`).
 
-Apply a milestone's database migration before publishing its dashboard: since M2 the case page reads `check_result.capture_id`, and since M3 `capture.superseded_by` and the server checks. For M3, deploy the three Edge Functions straight after the migration, in the same sitting: its trigger marks a replaced photo erased, but only the M3 `flow` function removes the file (order and checks: `docs/M3_SPEC.md`, "Deploy notes").
+Apply a milestone's database migration before publishing its dashboard: since M2 the case page reads `check_result.capture_id`, since M3 `capture.superseded_by` and the server checks, and since M4 the `consistency` check. For M3, deploy the three Edge Functions straight after the migration, in the same sitting: its trigger marks a replaced photo erased, but only the M3 `flow` function removes the file (order and checks: `docs/M3_SPEC.md`, "Deploy notes").
 
 The sites themselves hold no data: riders need a session link from staff, and the dashboard needs a staff sign-in.
 

@@ -7,6 +7,7 @@ import {
   type WorkerResultRequest,
 } from "../_shared/contract.ts";
 import { checkDigit, MRZ_PARSER_VERSION, parseMrz } from "../_shared/mrz.ts";
+import { decideCaseChecks } from "./case.ts";
 import {
   type CaptureEvidence,
   type CaseSide,
@@ -555,6 +556,57 @@ describe("decideCase", () => {
     expect(broken.checks.find((c) => c.name === "mrz_server")?.outcome).toBe("flag");
     expect(broken.evidence).toMatchObject({ expectedMrzFound: true, expectedMrzValid: false });
     expect(decideCase("passport", [side("document_front", broken.evidence)])!.reasons).toEqual(["mrz_invalid_server"]);
+  });
+});
+
+describe("M4: the sides that count", () => {
+  it("ignores a photo of a side the declared document does not need (left from an earlier choice)", () => {
+    // An expired-looking new CNI was photographed first; the rider then chose a passport.
+    const oldBack = evidence({ mrz: { family: "cni_biometric", valid: true }, expectedMrzFound: true, expectedMrzValid: true });
+    const page = evidence({ mrz: { family: "passport", valid: true }, expectedMrzFound: true, expectedMrzValid: true });
+    const decision = decideCase("passport", [side("document_front", page), side("document_back", oldBack)])!;
+    expect(decision.classification.details).toMatchObject({ detected: "passport", matchesDeclared: true });
+    expect(decision.reasons).toEqual([]);
+    // Only the leftover side has a result: nothing to decide yet.
+    expect(decideCase("passport", [side("document_front", null), side("document_back", oldBack)])).toBeNull();
+  });
+});
+
+describe("decideCaseChecks", () => {
+  const page = evidence({ mrz: { family: "passport", valid: true }, expectedMrzFound: true, expectedMrzValid: true });
+  const front = { kind: "document_front" as const, captureId: "document_front-id" };
+
+  it("adds the consistency check, its flags joining the reasons (sorted)", () => {
+    const lines = td3();
+    const checks = decideCaseChecks({
+      declaredDocument: "passport",
+      sides: [side("document_front", page)],
+      documentData: [{ ...front, mrzLines: lines, fields: { surname: "AUTRE" } }],
+    }, TODAY)!;
+    expect(checks.version).toBe(SERVER_CHECKS_VERSION);
+    expect(checks.consistency).toEqual({
+      outcome: "flag",
+      details: { flags: ["mrz_print_mismatch"], provisional: [], basis: "mrz", mismatches: ["name"] },
+    });
+    expect(checks.reasons).toEqual(["mrz_print_mismatch"]);
+  });
+
+  it("decides nothing while no photo has a result, and compares nothing for a photo without values", () => {
+    expect(decideCaseChecks({ declaredDocument: "passport", sides: [side("document_front", null)], documentData: [] }, TODAY)).toBeNull();
+    const checks = decideCaseChecks({ declaredDocument: "passport", sides: [side("document_front", page)], documentData: [] }, TODAY)!;
+    expect(checks.consistency).toEqual({ outcome: "skipped", details: { flags: [], provisional: [], basis: "none", mismatches: [] } });
+  });
+
+  it("uses no value of a photo that is not the side's newest, nor of a side the document does not need", () => {
+    const checks = decideCaseChecks({
+      declaredDocument: "passport",
+      sides: [side("document_front", page), side("document_back", evidence())],
+      documentData: [
+        { kind: "document_front", captureId: "an-older-photo", mrzLines: null, fields: { surname: "X", expiryDate: "2001-01-01" } },
+        { kind: "document_back", captureId: "document_back-id", mrzLines: td1(), fields: { expiryDate: "2001-01-01" } },
+      ],
+    }, TODAY)!;
+    expect(checks.consistency?.details).toEqual({ flags: [], provisional: [], basis: "none", mismatches: [] });
   });
 });
 

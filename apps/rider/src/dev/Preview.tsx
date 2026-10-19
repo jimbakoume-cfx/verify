@@ -13,7 +13,7 @@ import type { Hint } from "@verify/capture";
 import { FlowView } from "../FlowView";
 import type { FlowErrorCode } from "../flow/errors";
 import { type FlowState, type Shot, initialFlowState, mrzExpectationFor } from "../flow/machine";
-import type { MrzReadResult, MrzReadStatus } from "../mrz/types";
+import { MRZ_MODELS, type MrzReadResult, type MrzReadStatus } from "../mrz/types";
 import type { FlowActions } from "../flow/useFlow";
 import { type CameraErrorKind } from "../capture/camera";
 import { CaptureDebug } from "../capture/CaptureDebug";
@@ -36,6 +36,8 @@ const ACTIONS: FlowActions = {
   useShot: noop,
   turnOverReady: noop,
   retryUpload: noop,
+  chooseAnotherDocument: noop,
+  continueExpired: noop,
 };
 
 const SESSION: FlowSession = {
@@ -206,6 +208,7 @@ function previewRead(document: DeclaredDocument, status: MrzReadStatus): MrzRead
     rawText: lines ? lines.join("\n").replace(/0/g, "O") : "1D<UT0 D23 1458<<\nERIKS5ON",
     charHeight: format === "TD3" ? 15.2 : 19.8,
     rotated: false,
+    engine: MRZ_MODELS["mrz-2"].engine,
   };
 }
 
@@ -395,10 +398,14 @@ function ReadingPreviewScreen({ name }: { name: string }) {
   return <FlowView state={readingState} actions={ACTIONS} debug={false} />;
 }
 
-/** "Checking your photos…" (M3): both sides of the old CNI, or the passport's photo page alone. */
+/**
+ * "Checking your photos…" (M3): both sides of the old CNI, or the passport's photo page alone; and
+ * (M4) the passport found expired, asking the rider to use another document.
+ */
 const CHECKINGS: Record<string, DeclaredDocument> = {
   checking: "cni_legacy",
   "checking-passport": "passport",
+  "checking-expired": "passport",
 };
 
 function CheckingPreviewScreen({ name }: { name: string }) {
@@ -414,6 +421,7 @@ function CheckingPreviewScreen({ name }: { name: string }) {
     screen: { name: "checking" },
     shots: Object.fromEntries(sides.map((side) => [side, previewShot(blob, photo, side)])),
     uploaded: Object.fromEntries(sides.map((side) => [side, true])),
+    expiredNotice: name === "checking-expired" ? "shown" : "none",
   });
   return <FlowView state={checkingState} actions={ACTIONS} debug={false} />;
 }

@@ -3,6 +3,7 @@ import { type MrzExpectation, MRZ_EXPECTATION } from "@verify/shared";
 import { describe, expect, it, vi } from "vitest";
 import { OcrError, type OcrEngine } from "./ocrEngine";
 import { createMrzReader } from "./reader";
+import { MRZ_MODELS } from "./types";
 
 const TD3 = ["P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<", "L898902C36UTO7408122F1204159ZE184226B<<<<<10"];
 const at = (line: string, i: number, c: string) => line.slice(0, i) + c + line.slice(i + 1);
@@ -86,8 +87,16 @@ describe("createMrzReader", () => {
       rawText: "",
       charHeight: null,
       rotated: false,
+      // The default model (real sessions) read, or rather could not.
+      engine: "tesseract.js-7.0.0/mrz-1",
     });
     expect(engine.recognize).not.toHaveBeenCalled();
+  });
+
+  it("names the model it reads with (M4: our own for test sessions)", async () => {
+    const { engine } = fakeEngine([TD3.join("\n")]);
+    const result = await createMrzReader({ engine, model: MRZ_MODELS["mrz-2"] }).read(still, passport);
+    expect(result).toMatchObject({ status: "valid", engine: "tesseract.js-7.0.0/mrz-2" });
   });
 
   it("tries the still turned 180 degrees when nothing was found", async () => {
