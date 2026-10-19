@@ -77,6 +77,9 @@ function run(state: FlowState, ...actions: FlowAction[]): FlowState {
   return actions.reduce(flowReducer, state);
 }
 
+/** M5: the server recorded the face check. */
+const LIVENESS_DONE: FlowAction = { type: "liveness/done" };
+
 const loading = initialFlowState({ hasToken: true, invalidLink: false });
 const ready = run(loading, { type: "session/loaded", session: session() });
 const cniChosen = run(
@@ -741,8 +744,11 @@ describe("the server's checks (M3)", () => {
     expect(run(state, { type: "nav/back" })).toBe(state);
   });
 
-  it("submits once the checks are over, then finishes", () => {
-    const state = run(checkingCni(), { type: "checks/ok" });
+  it("submits once the checks are over and the face check is recorded (M5), then finishes", () => {
+    const face = run(checkingCni(), { type: "checks/ok" });
+    expect(face.screen).toEqual({ name: "liveness" });
+    expect(face.upload).toEqual({ status: "idle", stage: "sides", progress: null });
+    const state = run(face, LIVENESS_DONE);
     expect(state.screen).toEqual({ name: "upload" });
     expect(state.upload).toEqual({ status: "queued", stage: "submit", progress: null });
     // Nothing left to send: only the submit.
@@ -760,7 +766,9 @@ describe("the server's checks (M3)", () => {
   });
 
   it("submits with no error shown when the checks time out or cannot be read", () => {
-    const state = run(checkingCni(), { type: "checks/timeout" });
+    const face = run(checkingCni(), { type: "checks/timeout" });
+    expect(face).toMatchObject({ error: null, screen: { name: "liveness" } });
+    const state = run(face, LIVENESS_DONE);
     expect(state).toMatchObject({ error: null, screen: { name: "upload" } });
     expect(state.upload).toMatchObject({ status: "queued", stage: "submit" });
   });
@@ -773,7 +781,7 @@ describe("the server's checks (M3)", () => {
   });
 
   it("retries only the submit after it failed, without checking again", () => {
-    let state = run(checkingCni(), { type: "checks/ok" }, { type: "upload/started", progress });
+    let state = run(checkingCni(), { type: "checks/ok" }, LIVENESS_DONE, { type: "upload/started", progress });
     state = run(state, { type: "upload/failed", error: "network", side: null });
     expect(state).toMatchObject({ error: "network", screen: { name: "upload" } });
     expect(state.upload).toMatchObject({ status: "failed", stage: "submit" });
@@ -862,7 +870,7 @@ describe("the server's checks (M3)", () => {
     const answer = checks({ document_front: "retake", document_back: "ok" });
     expect(checksDecision(state, answer)).toEqual({ type: "checks/ok" });
     const again = run(state, retakeFront);
-    expect(again).toMatchObject({ screen: { name: "upload" }, upload: { status: "queued", stage: "submit" } });
+    expect(again).toMatchObject({ screen: { name: "liveness" } });
     expect(again.serverRetakes).toEqual({ document_front: SERVER_RETAKES_PER_SIDE });
     // The other side still may be asked for.
     expect(acceptsServerRetake(state, "document_back")).toBe(true);
@@ -878,7 +886,7 @@ describe("the server's checks (M3)", () => {
     state = send(run(state, { type: "capture/taken", shot: shot("document_back") }, { type: "review/accept" }));
     expect(usedOverride(state, state.shots.document_front!)).toBe(true);
     expect(acceptsServerRetake(state, "document_front")).toBe(false);
-    expect(run(state, retakeFront)).toMatchObject({ screen: { name: "upload" }, serverRetakes: {} });
+    expect(run(state, retakeFront)).toMatchObject({ screen: { name: "liveness" }, serverRetakes: {} });
   });
 
   describe("on the side with the code lines", () => {
@@ -907,14 +915,14 @@ describe("the server's checks (M3)", () => {
       expect(checksDecision(state, checks({ document_front: "ok", document_back: "retake" }))).toEqual({
         type: "checks/ok",
       });
-      expect(run(state, retakeBack).screen).toEqual({ name: "upload" });
+      expect(run(state, retakeBack).screen).toEqual({ name: "liveness" });
     });
 
     it(`never asks again after "Continue anyway"`, () => {
       const state = checkingBiometric(...Array.from({ length: MRZ_TRIES_BEFORE_OVERRIDE }, () => "not_found" as const));
       expect(mrzReview(state, state.shots.document_back!)).toMatchObject({ status: "unread", canContinue: true });
       expect(usedOverride(state, state.shots.document_back!)).toBe(true);
-      expect(run(state, retakeBack).screen).toEqual({ name: "upload" });
+      expect(run(state, retakeBack).screen).toEqual({ name: "liveness" });
     });
 
     it("reads the code lines of the retaken photo again, for a new report", () => {
@@ -982,7 +990,7 @@ describe("the server's checks (M3)", () => {
       };
       expect(checksDecision(state, odd)).toEqual({ type: "checks/ok" });
       const unknown = { side: "document_front", reason: "too_shiny" as never } as const;
-      expect(run(state, { type: "checks/retake", sides: [unknown] }).screen).toEqual({ name: "upload" });
+      expect(run(state, { type: "checks/retake", sides: [unknown] }).screen).toEqual({ name: "liveness" });
       const passport = send(
         run(
           run(ready, { type: "document/chosen", session: withDocument("passport", ["document_front"]) }),
@@ -1023,7 +1031,7 @@ describe("the server's checks (M3)", () => {
       expect(checksDecision(accepted, expired(checks({ document_front: "no_document", document_back: "ok" })))).toEqual(
         retakeFront,
       );
-      const submitting = run(accepted, { type: "checks/ok" });
+      const submitting = run(accepted, { type: "checks/ok" }, LIVENESS_DONE);
       expect(submitting.upload).toEqual({ status: "queued", stage: "submit", progress: null });
     });
 

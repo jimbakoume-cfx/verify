@@ -16,6 +16,15 @@ export const CAMERA_CONSTRAINTS: MediaStreamConstraints = {
   audio: false,
 };
 
+/**
+ * M5, the face check: the front camera at a modest size. 640x480 is plenty for 480-pixel frames, and
+ * low-end phones deliver it without strain. `ideal`: a phone with only one camera still gets it.
+ */
+export const FRONT_CAMERA_CONSTRAINTS: MediaStreamConstraints = {
+  video: { facingMode: { ideal: "user" }, width: { ideal: 640 }, height: { ideal: 480 } },
+  audio: false,
+};
+
 interface CameraEnvironment {
   isSecureContext: boolean;
   mediaDevices?: { getUserMedia?: unknown } | undefined;
@@ -53,12 +62,16 @@ export function classifyCameraError(err: unknown, isSecureContext = true): Camer
   }
 }
 
-/** Asks for the back camera. Throws CameraError. */
-export async function openCamera(nav: Navigator = navigator, secure: boolean = window.isSecureContext): Promise<MediaStream> {
+/** Asks for the back camera (or, M5, the front one with FRONT_CAMERA_CONSTRAINTS). Throws CameraError. */
+export async function openCamera(
+  nav: Navigator = navigator,
+  secure: boolean = window.isSecureContext,
+  constraints: MediaStreamConstraints = CAMERA_CONSTRAINTS,
+): Promise<MediaStream> {
   const unsupported = cameraSupport({ isSecureContext: secure, mediaDevices: nav.mediaDevices });
   if (unsupported) throw new CameraError(unsupported);
   try {
-    return await nav.mediaDevices.getUserMedia(CAMERA_CONSTRAINTS);
+    return await nav.mediaDevices.getUserMedia(constraints);
   } catch (err) {
     // `ideal` constraints should never over-constrain, but some old WebViews disagree: try once
     // more with any camera before giving up.

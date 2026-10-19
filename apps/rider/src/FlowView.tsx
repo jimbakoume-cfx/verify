@@ -3,6 +3,7 @@
 import { Suspense, lazy, useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { CaptureScreenProps } from "./capture/CaptureScreen";
+import type { LivenessScreenProps } from "./liveness/LivenessScreen";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { type FlowState, canUseShot, mrzReview, sideShots } from "./flow/machine";
 import type { FlowActions } from "./flow/useFlow";
@@ -19,6 +20,9 @@ import { WelcomeScreen } from "./screens/Welcome";
 const loadCapture = () => import("./capture/CaptureScreen");
 // React.lazy remembers a failed import for good, so a retry needs a new lazy component.
 let CaptureScreen = lazy(loadCapture);
+// M5: the face check, also on demand (fetched while the server checks the photos).
+const loadLiveness = () => import("./liveness/LivenessScreen");
+let LivenessScreen = lazy(loadLiveness);
 
 function CaptureLoading() {
   const { t } = useTranslation();
@@ -69,6 +73,27 @@ function CaptureLoader(props: CaptureScreenProps) {
   );
 }
 
+/** The face check screen, loaded on demand, with the same retry as the camera's. */
+function LivenessLoader(props: LivenessScreenProps) {
+  const [attempt, setAttempt] = useState(0);
+  const retry = useCallback(() => {
+    loadLiveness().then(
+      () => {
+        LivenessScreen = lazy(loadLiveness);
+        setAttempt((n) => n + 1);
+      },
+      () => window.location.reload(),
+    );
+  }, []);
+  return (
+    <ErrorBoundary key={attempt} fallback={<CaptureLoadFailed onRetry={retry} />}>
+      <Suspense fallback={<CaptureLoading />}>
+        <LivenessScreen {...props} />
+      </Suspense>
+    </ErrorBoundary>
+  );
+}
+
 export function FlowView({ state, actions, debug }: { state: FlowState; actions: FlowActions; debug: boolean }) {
   const { screen } = state;
   const side = "side" in screen ? screen.side : null;
@@ -82,6 +107,7 @@ export function FlowView({ state, actions, debug }: { state: FlowState; actions:
   // is reported by CaptureLoader when the camera is needed.
   useEffect(() => {
     if (screen.name === "consent" || screen.name === "document") loadCapture().catch(() => {});
+    if (screen.name === "upload" || screen.name === "checking") loadLiveness().catch(() => {});
   }, [screen.name]);
 
   switch (screen.name) {
@@ -167,6 +193,16 @@ export function FlowView({ state, actions, debug }: { state: FlowState; actions:
           expired={state.expiredNotice === "shown"}
           onAnotherDocument={actions.chooseAnotherDocument}
           onContinueAnyway={actions.continueExpired}
+        />
+      );
+    case "liveness":
+      return (
+        <LivenessLoader
+          service={actions.liveness}
+          debug={debug}
+          error={state.error}
+          onDone={actions.livenessDone}
+          onFailed={actions.livenessFailed}
         />
       );
     case "done":

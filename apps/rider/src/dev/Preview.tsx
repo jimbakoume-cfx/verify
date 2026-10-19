@@ -38,6 +38,9 @@ const ACTIONS: FlowActions = {
   retryUpload: noop,
   chooseAnotherDocument: noop,
   continueExpired: noop,
+  liveness: null,
+  livenessDone: noop,
+  livenessFailed: noop,
 };
 
 const SESSION: FlowSession = {
@@ -75,6 +78,9 @@ const STATES: Record<string, FlowState> = {
   document: state({ screen: { name: "document" }, document: null }),
   "document-busy": state({ screen: { name: "document" }, busy: true }),
   turnover: state({ screen: { name: "turnOver", side: "document_back" } }),
+  // M5: the face check (the camera opens; Start stays off without a session link).
+  liveness: state({ screen: { name: "liveness" } }),
+  "liveness-missing": state({ screen: { name: "liveness" }, error: "liveness_required" }),
   // The server asked for the back again (M3): its reason instead of "turn it over".
   "turnover-retake": state({
     screen: { name: "turnOver", side: "document_back" },

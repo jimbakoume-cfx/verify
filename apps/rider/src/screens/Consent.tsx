@@ -9,13 +9,15 @@ const SECTIONS = ["what", "why", "how", "keep", "rights"] as const;
 interface Props {
   busy: boolean;
   error: FlowErrorCode | null;
-  onAccept: () => void;
+  /** `keepFaceImages`: the separate, optional box (M5, PM decision), unticked by default. */
+  onAccept: (keepFaceImages: boolean) => void;
   onDecline: () => void;
 }
 
 export function ConsentScreen({ busy, error, onAccept, onDecline }: Props) {
   const { t } = useTranslation();
   const [agreed, setAgreed] = useState(false);
+  const [keepFaces, setKeepFaces] = useState(false);
   return (
     <Page>
       <ScreenTitle>{t("consent.title")}</ScreenTitle>
@@ -39,10 +41,18 @@ export function ConsentScreen({ busy, error, onAccept, onDecline }: Props) {
         <span>{t("consent.checkbox")}</span>
       </label>
 
+      {/* Separate and optional: the verification goes ahead whatever the answer. Placeholder wording. */}
+      <label className="check optional">
+        <input type="checkbox" checked={keepFaces} onChange={(e) => setKeepFaces(e.target.checked)} disabled={busy} />
+        <span>
+          {t("consent.keepFaces")} <span className="muted">{t("consent.keepFacesOptional")}</span>
+        </span>
+      </label>
+
       {error && <ErrorNotice code={error} />}
 
       <div className="actions">
-        <button type="button" className="primary" disabled={!agreed || busy} onClick={onAccept}>
+        <button type="button" className="primary" disabled={!agreed || busy} onClick={() => onAccept(keepFaces)}>
           {busy ? t("common.saving") : t("consent.accept")}
         </button>
         <button type="button" className="secondary" disabled={busy} onClick={onDecline}>

@@ -357,3 +357,17 @@ button.primary, button.secondary { min-height: 52px; font-size: 1rem; }
   .capture-bottom { min-height: 0; padding: 8px; }
   .capture-auto { font-size: 0.85rem; }
 }
+
+/* ------------------------------------------------------------------------------------------------
+   Face check (M5). The front camera's picture is shown mirrored, as riders expect from a selfie; the
+   frames sent are not mirrored. The oval's colour follows the brightness check, as the card guide's
+   corners do.
+   --------------------------------------------------------------------------------------------- */
+.capture-video.mirrored { transform: scaleX(-1); }
+.oval-frame { fill: none; stroke: #fff; stroke-width: 4; transition: stroke 0.15s; }
+.oval-frame.adjust { stroke: #ffb020; }
+.oval-frame.ready { stroke: #32d74b; }
+.liveness-code { font-family: ui-monospace, monospace; font-weight: 700; letter-spacing: 0.08em; }
+.liveness-start { width: min(420px, 100%); }
+.liveness .camera-error .progress { margin: 12px 0; }
+.check.optional { border-style: dashed; }

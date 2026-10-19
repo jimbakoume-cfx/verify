@@ -14,6 +14,8 @@ export const CLIENT_ERROR_CODES = [
   "unexpected",
   /** The storage upload was refused for a reason other than a duplicate. */
   "storage_failed",
+  /** M5: the face check stopped half-way (the page was hidden): it must start again. */
+  "interrupted",
 ] as const;
 export type ClientErrorCode = (typeof CLIENT_ERROR_CODES)[number];
 export type FlowErrorCode = ErrorCode | ClientErrorCode;
