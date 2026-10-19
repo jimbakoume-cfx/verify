@@ -26,6 +26,8 @@ function capture(id: string, kind: string, createdAt: string, deleted = false): 
     sha256: "",
     deleted,
     supersededBy: null,
+    livenessChallengeId: null,
+    liveness: null,
     quality: {
       source: "auto",
       sharpness: null,

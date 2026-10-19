@@ -3,7 +3,7 @@
 -- assessment of a case (at submit, when a late check lands, when a new version is created; deterministic;
 -- never for an open or decided case), staff decisions (access, reasons, notes, agreement with the
 -- recommendation, the case closed and audited) and automatic decisions (off by default; test sessions
--- only; never an approval with a check missing). Run by scripts/test-db.sh after 50_m4_test.sql in the same
+-- only; never an approval with a check missing). Run by scripts/test-db.sh after 60_m5_test.sql in the same
 -- database; the ids used here (8...) do not overlap with the earlier files' fixtures. Any failed assertion
 -- aborts.
 \set ON_ERROR_STOP on
@@ -190,6 +190,13 @@ select pg_temp.assert_true((select risk_score = 0 and threshold_config_version =
 select pg_temp.assert_true((select risk_reasons -> 'missing' = '["liveness", "face_match"]' and risk_reasons -> 'reasons' = '["score_low", "missing_checks"]'
                              from pg_temp.v('83000000-0000-0000-0000-000000000001')),
   'A at submit: the missing checks are listed as the reason');
+-- M5's liveness_capture check (frames recorded, nothing evaluated) is not the liveness check of M6.
+begin;
+insert into public.check_result (verification_id, check_name, check_version, outcome, details)
+values ('83000000-0000-0000-0000-000000000001', 'liveness_capture', 'test', 'pass', '{}');
+select pg_temp.assert_true((select private.risk_facts('83000000-0000-0000-0000-000000000001') -> 'missing' = '["face_match", "liveness"]'),
+  'A: a liveness_capture check (M5) does not count as the liveness check');
+rollback;
 select pg_temp.assert_eq(pg_temp.audits('83000000-0000-0000-0000-000000000001', 'risk.assess'), 1, 'A at submit: audited once');
 select pg_temp.assert_true((select ae.details = jsonb_build_object('thresholdVersion', 2, 'score', 0, 'recommendation', 'review', 'band', 'approve', 'trigger', 'submit')
                              from public.audit_event ae where ae.target_id = '83000000-0000-0000-0000-000000000001' and ae.action = 'risk.assess'),

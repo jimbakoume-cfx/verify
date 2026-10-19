@@ -24,7 +24,7 @@ const facts = (signals: string[], missing: string[] = [], declaredDocument: Risk
   missing,
 });
 
-describe("the shared vectors (also run by the database: supabase/tests/60_m8_test.sql)", () => {
+describe("the shared vectors (also run by the database: supabase/tests/70_m8_test.sql)", () => {
   it("list the signals and the default configuration of this code", () => {
     expect(vectors.signals).toEqual([...RISK_SIGNALS]);
     expect(vectors.defaultConfig).toEqual(DEFAULT_THRESHOLD_CONFIG);

@@ -18,6 +18,13 @@ export const AUTO_CAPTURE_TIMEOUT = 10_000;
 export const READ_TIMEOUT = 20_000;
 /** Spec: the manual shutter appears when auto-capture has not fired within 8 s. */
 export const SHUTTER_TIMEOUT = 12_000;
+/**
+ * M5: Start is offered once the brightness check has passed for about a second, or after 6 s
+ * whatever it says. Generous for CI.
+ */
+export const LIVENESS_START_TIMEOUT = 12_000;
+/** M5: the capture (10.5 s), then the frames' upload and report. */
+export const LIVENESS_CAPTURE_TIMEOUT = 30_000;
 
 export class Rider {
   /** The language the rider currently sees (French by default). */
@@ -176,14 +183,47 @@ export class Rider {
     await this.usePhoto();
   }
 
-  /** From the checking screen to the end: the server's checks are over and the case is submitted. */
+  /** "Face check" (M5): its camera screen's title. */
+  get livenessHeading(): Locator {
+    return this.heading("liveness.title");
+  }
+
+  /** The face check's Start button. */
+  get livenessStart(): Locator {
+    return this.button("liveness.start");
+  }
+
+  /**
+   * M5: waits for the face check (after the server's checks, within `timeout`), starts it as soon as
+   * the app allows, and waits until the frames are recorded and the screen moves on. The capture
+   * itself takes about 10.5 s.
+   */
+  async passLiveness(timeout = 30_000): Promise<void> {
+    await expect(this.livenessHeading).toBeVisible({ timeout });
+    await expect(this.livenessStart).toBeEnabled({ timeout: LIVENESS_START_TIMEOUT });
+    await this.livenessStart.click();
+    await expect(this.livenessHeading).toBeHidden({ timeout: LIVENESS_CAPTURE_TIMEOUT });
+  }
+
+  /** From the checking screen to the end: the server's checks are over, the face check is done, the case is submitted. */
   async waitForSubmit(timeout = 30_000): Promise<void> {
-    await expect(this.heading("done.title")).toBeVisible({ timeout });
+    await this.passLiveness(timeout);
+    await expect(this.heading("done.title")).toBeVisible({ timeout: 20_000 });
   }
 
   /** Every screen title shown since the link was opened, in order (logged by fixtures.ts). */
   screensSeen(): Promise<string[]> {
     return this.page.evaluate(() => [...(window as unknown as { __screens: string[] }).__screens]);
+  }
+
+  /** When (Date.now()) the screen titled `title` first appeared; NaN if it never did. */
+  async screenShownAt(title: string): Promise<number> {
+    const [screens, times] = await this.page.evaluate(() => {
+      const w = window as unknown as { __screens: string[]; __screenTimes: number[] };
+      return [[...w.__screens], [...w.__screenTimes]] as const;
+    });
+    const index = screens.indexOf(title);
+    return index < 0 ? Number.NaN : times[index];
   }
 
   async switchLanguage(lang: Language): Promise<void> {

@@ -111,8 +111,9 @@ export const CAPTURE_LIMITS = {
  * Version label of the consent wording shown to the rider: change it whenever the wording changes,
  * so each recorded consent names the text that was shown. Replace when the lawyer's text arrives.
  * v1 (M2): the wording adds the details read from the document's code lines.
+ * v2 (M5): the wording describes the face check (still images from the front camera).
  */
-export const CONSENT_VERSION = "placeholder-v1";
+export const CONSENT_VERSION = "placeholder-v2";
 
 // ---------------------------------------------------------------------------
 // Client-side quality metrics sent with each capture (informational; the server re-checks in M3)
@@ -144,8 +145,10 @@ export interface ClientQuality {
 //   POST /flow/captures       CaptureCompleteRequest -> CaptureCompleteResponse
 //   POST /flow/mrz            MrzReportRequest -> MrzReportResponse (M2)
 //   GET  /flow/checks         -> FlowChecks (M3, see below)
-//   POST /flow/submit
-// All except upload-url, captures and mrz return FlowSession.
+//   POST /flow/liveness/challenge {}                       -> LivenessChallengeResponse (M5, see below)
+//   POST /flow/liveness/captures  LivenessCaptureRequest  -> LivenessCaptureResponse (M5)
+//   POST /flow/submit         (M5: needs the face check's frames: 409 liveness_required)
+// All except upload-url, captures, mrz, checks and liveness return FlowSession.
 // ---------------------------------------------------------------------------
 export const SESSION_TOKEN_HEADER = "x-session-token";
 
@@ -182,7 +185,16 @@ export interface FlowSession {
 export interface ConsentRequest {
   consentVersion: string;
   language: "fr" | "en";
+  /**
+   * M5 (PM, 2026-10-19): the separate, optional box "keep my face images to improve and tune
+   * Confiance's checks (deleted on request)", unticked by default. Missing means false. Recorded with
+   * KEEP_FACE_IMAGES_VERSION. Nothing depends on it yet.
+   */
+  keepFaceImages?: boolean;
 }
+
+/** Version label of the optional "keep my face images" wording (placeholder until the lawyer's text). */
+export const KEEP_FACE_IMAGES_VERSION = "placeholder-keep-faces-v1";
 
 export interface DocumentTypeRequest {
   declaredDocument: DeclaredDocument;
@@ -346,6 +358,151 @@ export const CHECKS_WAIT_MS = 20_000;
 export const CHECKS_POLL_MS = 2_000;
 /** Server-requested retakes allowed per side; after that the photo is flagged, never refused. */
 export const SERVER_RETAKES_PER_SIDE = 1;
+
+// ---------------------------------------------------------------------------
+// Active liveness capture (M5). Edge Function "flow". Auth: session token.
+//   POST /flow/liveness/challenge {}                      -> LivenessChallengeResponse
+//   (the app uploads each frame to its signed path, as for the document photos)
+//   POST /flow/liveness/captures  LivenessCaptureRequest -> LivenessCaptureResponse
+// M5 captures only: nothing judges whether the actions were done (M6). The server records a
+// `liveness_capture` check saying whether the frames arrived complete and with plausible timings.
+// ---------------------------------------------------------------------------
+/** What the rider is asked to do, one after the other. Generic codes; the app shows FR/EN text. */
+export const LIVENESS_ACTIONS = ["turn_left", "turn_right", "look_up", "blink", "smile"] as const;
+export type LivenessAction = (typeof LIVENESS_ACTIONS)[number];
+
+export const LIVENESS_LIMITS = {
+  /** Distinct actions per challenge, drawn at random by the server, in a random order. */
+  actionsPerChallenge: 3,
+  /** Digits of the one-time code shown on screen during the capture and sent back with the frames. */
+  codeDigits: 6,
+  /** A challenge must be recorded within this time; it is used once. */
+  challengeTtlSeconds: 600,
+  /** Challenges one session may ask for (each "Start again" asks for a new one). */
+  maxChallengesPerSession: 5,
+  /** Frames per capture. The app sends 13 (1 before the first action, then 4 per action). */
+  minFrames: 8,
+  maxFrames: 15,
+  /** Frames during each action (step 1 and later), at least. */
+  minFramesPerAction: 2,
+  /** Size of each frame file and of all of them together (light on slow networks). */
+  minFrameBytes: 2_000,
+  maxFrameBytes: 100_000,
+  maxTotalBytes: 600_000,
+  /** Long side of each frame, in pixels (the app sends 480). */
+  minFrameLongSide: 240,
+  maxFrameLongSide: 640,
+  /** Time from the capture's start to its last frame, at most. */
+  maxCaptureMs: 60_000,
+} as const;
+
+export interface LivenessUploadTarget {
+  /** Object path inside the private bucket: <verification id>/liveness-<challenge id>-<NN>.jpg. */
+  path: string;
+  /** Token for supabase.storage.from(bucket).uploadToSignedUrl(path, token, file). */
+  token: string;
+}
+
+export interface LivenessChallengeResponse {
+  challengeId: string;
+  /** In the order the rider performs them. */
+  actions: LivenessAction[];
+  /** One-time code shown on screen during the capture; sent back with the frames. */
+  code: string;
+  expiresAt: string;
+  bucket: string;
+  /** One signed upload per frame slot (LIVENESS_LIMITS.maxFrames), in frame order: frame i uses uploads[i]. */
+  uploads: LivenessUploadTarget[];
+}
+
+export interface LivenessFrameReport {
+  /** 0-based position of the frame; its upload slot. */
+  index: number;
+  path: string;
+  /** SHA-256 (hex) of the uploaded bytes, computed on the phone; the server compares it with its own. */
+  sha256: string;
+  /** Milliseconds from the start of the capture (step 0) to this frame. */
+  atMs: number;
+  /** 0: before the first action ("look at the camera"); n: during actions[n - 1]. */
+  step: number;
+}
+
+export interface LivenessCaptureRequest {
+  challengeId: string;
+  code: string;
+  frames: LivenessFrameReport[];
+  /** When each step started, in ms from the start of the capture: one per step (step 0 first, at 0). */
+  stepStartsMs: number[];
+  /** The rider started although the phone's face-presence hint was not satisfied (the shortcut after a wait). */
+  startedWithWarning: boolean;
+  /** Front camera stream size, for calibration. */
+  videoWidth: number;
+  videoHeight: number;
+}
+
+export interface LivenessCaptureResponse {
+  recorded: true;
+}
+
+/** check_result.check_name of the case-level liveness capture check (M5). */
+export const LIVENESS_CHECK_NAME = "liveness_capture";
+
+/**
+ * Why a capture's timings or frames look implausible (outcome "flag"). Never decides on its own.
+ * too_fast: shorter than the actions need. longer_than_challenge: the frames claim more time than has
+ * passed since the challenge was issued. gap_too_long: a long pause between two frames. out_of_order:
+ * frame times or steps go backwards. step_missing_frames: a step has too few frames. duplicate_frames:
+ * two frames are the same file. frames_reused: a frame's file was already sent in another verification.
+ */
+export const LIVENESS_PROBLEMS = [
+  "too_fast",
+  "longer_than_challenge",
+  "gap_too_long",
+  "out_of_order",
+  "step_missing_frames",
+  "duplicate_frames",
+  "frames_reused",
+] as const;
+export type LivenessProblem = (typeof LIVENESS_PROBLEMS)[number];
+
+/**
+ * check_result.details of liveness_capture. Supervisors and admins can read check_result: codes,
+ * counts and timings only. The challenge's actions and its code are no personal data (the code is
+ * used once and is worthless after).
+ */
+export interface LivenessCaptureDetails {
+  /** Always false in M5: nothing has judged whether the actions were really done (M6). */
+  evaluated: false;
+  challengeId: string;
+  actions: LivenessAction[];
+  code: string;
+  frames: number;
+  /** Frames per step: step 0 first. */
+  framesPerStep: number[];
+  /** Time from the capture's start to its last frame. */
+  durationMs: number;
+  /** Time on the server from the challenge's issue to the frames' arrival. */
+  serverElapsedMs: number;
+  /** Longest pause between two frames. */
+  maxGapMs: number;
+  startedWithWarning: boolean;
+  problems: LivenessProblem[];
+}
+
+/** The only keys of LivenessCaptureDetails (the database refuses any other). */
+export const LIVENESS_DETAIL_KEYS = [
+  "evaluated",
+  "challengeId",
+  "actions",
+  "code",
+  "frames",
+  "framesPerStep",
+  "durationMs",
+  "serverElapsedMs",
+  "maxGapMs",
+  "startedWithWarning",
+  "problems",
+] as const satisfies readonly (keyof LivenessCaptureDetails)[];
 
 // ---------------------------------------------------------------------------
 // Worker API (M3). Edge Function "worker", called only by the AI worker (Vercel, Python).
@@ -805,6 +962,12 @@ export const ERROR_CODES = [
   "image_too_large",
   "image_resolution_too_low",
   "invalid_mrz",
+  // M5: the face check.
+  "liveness_required",
+  "too_many_challenges",
+  "challenge_expired",
+  "challenge_used",
+  "invalid_liveness",
   "invalid_signature",
   "replayed_request",
   "image_gone",

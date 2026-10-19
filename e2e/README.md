@@ -40,7 +40,13 @@ Requirements: Node 22 and `python3` (standard library only).
   | `smudged` | the card in focus, its code lines smudged | 1080×1920 |
   | `no-card` | the table only | 1080×1920 |
   | `low-res` | sharp ID-1 card | 720×1280, a camera limited to 720p held upright |
+  | `face` | M5: a drawn face (ellipses, no real person) on a wall, where the face check's oval falls, cycling through 8 poses (straight, turned left and right, eyes closed, looking up, smiling), 0.5 s each | 1080×1920 |
   | `camera-denied` | none: `--deny-permission-prompts` answers "Block" | none |
+
+  Chromium's fake device answers every camera request, the back camera's and (M5) the front
+  camera's, with the same video. So the other projects run the face check on their card video
+  (the phone only checks brightness and contrast, which the card scene passes), and the `face`
+  project takes its document photos with the shutter (there is no card for an automatic photo).
 
   The card is placed where the app's guide falls in the video. That position comes from the guide
   on screen (`GUIDES` in `support/camera.ts`) mapped into the video with the `object-fit: cover`
@@ -70,6 +76,11 @@ Requirements: Node 22 and `python3` (standard library only).
     `failChecks` makes the route answer an error. M4: `expiredDocuments` lists the declared documents
     whose code lines the server finds expired; `GET /checks` then says `expired` through the real
     rules, once the side with the code lines is checked;
+  - M5: `POST /liveness/challenge` (the server's own draw, an unused earlier challenge replaced,
+    15 signed slots) and `POST /liveness/captures`, through the real validation
+    (`flow/liveness.ts`), the real per-file checks (`checkFrame`, the SHA-256 of each stored frame)
+    and the real rule (`worker/liveness.ts`). `failLiveness` refuses the next reports (e.g. an
+    expired challenge). The submit needs a recorded face check, as on the server;
   - the signed storage upload;
   - the health check.
 
@@ -82,9 +93,12 @@ Requirements: Node 22 and `python3` (standard library only).
   - an unknown request;
   - an uncaught page error;
   - a Content Security Policy violation (in the page, or reported by a worker).
-- **Screens.** `support/fixtures.ts` logs every screen title as it appears, so a test can check a
-  screen that shows only briefly (the reading screen takes about half a second once the OCR engine
-  is warm).
+- **Screens.** `support/fixtures.ts` logs every screen title as it appears, with the time, so a test
+  can check a screen that shows only briefly (the reading screen takes about half a second once the
+  OCR engine is warm), and when it appeared.
+- **The face check (M5)** follows the server's checks in every complete scenario:
+  `Rider.passLiveness` waits for it, presses Start and waits for the capture (about 10.5 s) and the
+  frames' report. `Rider.waitForSubmit` includes it. Each test may take up to 90 s.
 - **Photos retaken at the server's request** are taken with the shutter (`Rider.shutterCapture`,
   after the usual 8 s). The camera's red alert ("Recto : photo à reprendre" and the reason) sits
   above the hint and places the guide lower than usual, so the fake card, drawn for the usual guide,
@@ -104,6 +118,7 @@ Requirements: Node 22 and `python3` (standard library only).
 | `camera-denied.spec.ts` | A clear "camera blocked" message in a focused dialog, Retry, and Back. |
 | `server-checks.spec.ts` | The server's check of the photos (M3), card camera. "Checking your photos…" with the photos sent, `GET /checks` at once then every 2 s, the submit once every side is checked. A retake of the front (no "turn over", the side named and the reason, only that photo sent again, the replaced one erased); both sides (in English: the front first, then "turn over" titled "Back: please take this photo again"); the code-lines side of the new CNI (read again on the phone, a second report with `attempts: 2`); never a retake when the phone read every check digit right, even if the server asked; the limit of one server retake per side, on the server and on the phone; the real 20 s time-out with the worker down; `unchecked` (out of budget, ring failed) submitted at once; the route answering 503 (with the `?debug=1&checksWaitMs=` override). No error is ever shown for the checks. |
 | `server-checks-expired.spec.ts` | An expired document (M4), new CNI: "Checking your photos…" stops asking and says "This document has expired". "Continue anyway": asked once more, then submitted. "Use another document" (in English): back to the list, the old CNI chosen, both sides photographed again (the new photos replace the old ones), then submitted. |
+| `liveness.spec.ts` | The face check (M5), `face` camera: the front camera asked for at 640×480 without audio; the prompts in the server's challenge order with "Step n of 3" and the code on screen; 13 frames into their slots, each a 480-pixel canvas JPEG without metadata, under 100 KB and 600 KB in all, judged "pass" by the real rule (1 + 4 + 4 + 4 frames, plausible timings); the camera released. A refused report (expired challenge): only "Start again", then a different challenge, in English. A network failure while sending: "Try again" sends the same frames, with no new challenge. |
 | `server-checks-passport.spec.ts` | A passport photo page retaken after the server's check: its camera names the "Photo page", and the new photo is read and reported again. |
 
 ## Settings

@@ -38,6 +38,17 @@ describe("createFlowApi", () => {
       attempts: 2,
       engine: "tesseract.js-7.0.0/mrz-1",
     });
+    await api.livenessChallenge();
+    const report = {
+      challengeId: "c0ffee00-0000-4000-8000-000000000002",
+      code: "123456",
+      frames: [],
+      stepStartsMs: [0, 1500, 4500, 7500],
+      startedWithWarning: false,
+      videoWidth: 480,
+      videoHeight: 640,
+    };
+    await api.recordLiveness(report);
     await api.submit();
     const calls = fetchMock.mock.calls.map(([url, init]) => [String(url).slice(BASE.length), init?.method, init?.body]);
     expect(calls).toEqual([
@@ -55,6 +66,8 @@ describe("createFlowApi", () => {
           engine: "tesseract.js-7.0.0/mrz-1",
         }),
       ],
+      ["/liveness/challenge", "POST", "{}"],
+      ["/liveness/captures", "POST", JSON.stringify(report)],
       ["/submit", "POST", "{}"],
     ]);
     expect((fetchMock.mock.calls[0][1]?.headers as Record<string, string>)["content-type"]).toBe("application/json");

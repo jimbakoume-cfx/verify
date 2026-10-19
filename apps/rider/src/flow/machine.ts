@@ -92,6 +92,8 @@ export type Screen =
   | { name: "upload" }
   /** "Checking your photos…": waiting for the server's check of the photos just sent (M3). */
   | { name: "checking" }
+  /** M5: the face check (front camera, a random challenge), after the photos and before the submit. */
+  | { name: "liveness" }
   | { name: "done" }
   | { name: "sessionError"; reason: SessionErrorReason };
 
@@ -165,6 +167,11 @@ export interface FlowState {
    * asked again for these photos.
    */
   expiredNotice: "none" | "shown" | "accepted";
+  /**
+   * M5: the server recorded this visit's face check. Kept when the document changes (the face does
+   * not), so "Use another document" does not ask for it again.
+   */
+  livenessDone: boolean;
 }
 
 export type FlowAction =
@@ -209,6 +216,10 @@ export type FlowAction =
   | { type: "expired/another" }
   /** "Continue anyway": the checks go on as usual, then the case is submitted (staff see the flag). */
   | { type: "expired/continue" }
+  /** M5: the server recorded the face check: on to the submit. */
+  | { type: "liveness/done" }
+  /** M5: the face check met an error that ends the session (expired link...); other errors stay on its screen. */
+  | { type: "liveness/failed"; error: FlowErrorCode }
   | { type: "error/dismiss" }
   /** The phone's Back button or gesture (see useFlow). */
   | { type: "nav/back" };
@@ -234,6 +245,7 @@ export function initialFlowState(boot: { hasToken: boolean; invalidLink: boolean
     serverRetakes: {},
     retakeReasons: {},
     expiredNotice: "none",
+    livenessDone: false,
   };
 }
 
@@ -298,8 +310,12 @@ function captureStep(side: CaptureSide, fromReview: boolean): Screen {
   return side === "document_back" && fromReview ? { name: "turnOver", side } : { name: "capture", side };
 }
 
-/** After the checking screen: only the submit is left, shown on the upload screen. */
+/**
+ * After the checking screen: the face check (M5) unless it is already recorded, then the submit,
+ * shown on the upload screen.
+ */
 function queueSubmit(state: FlowState): FlowState {
+  if (!state.livenessDone) return { ...state, error: null, upload: IDLE_UPLOAD, screen: { name: "liveness" } };
   return {
     ...state,
     error: null,
@@ -498,6 +514,10 @@ export function flowReducer(state: FlowState, action: FlowAction): FlowState {
           screen: { name: "capture", side },
         };
       }
+      if (error === "liveness_required") {
+        // The server has no face check for this session (e.g. its frames were replaced): do it again.
+        return { ...state, error, livenessDone: false, upload: IDLE_UPLOAD, screen: { name: "liveness" } };
+      }
       if (error === "missing_sides") {
         const first = state.sides[0];
         if (!first) return fail(state, error);
@@ -566,6 +586,14 @@ export function flowReducer(state: FlowState, action: FlowAction): FlowState {
       return retakes.length > 0 ? retakeSides(state, retakes) : queueSubmit(state);
     }
 
+    case "liveness/done":
+      if (state.screen.name !== "liveness") return state;
+      return queueSubmit({ ...state, livenessDone: true });
+
+    case "liveness/failed":
+      if (state.screen.name !== "liveness" || !sessionErrorReason(action.error)) return state;
+      return fail(state, action.error);
+
     case "error/dismiss":
       return { ...state, error: null };
 
@@ -625,7 +653,8 @@ export function handlesBack(screen: Screen): boolean {
     screen.name === "reading" ||
     screen.name === "review" ||
     screen.name === "upload" ||
-    screen.name === "checking"
+    screen.name === "checking" ||
+    screen.name === "liveness"
   );
 }
 

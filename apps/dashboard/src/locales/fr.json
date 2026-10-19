@@ -409,6 +409,70 @@
       "carte_de_sejour": "Carte de séjour"
     }
   },
+  "liveness": {
+    "title": "Vérification du visage",
+    "intro": "Le défi aléatoire donné par le serveur et les images prises par la caméra avant du passager. Rien n'a encore jugé si le passager a fait les actions (prochaine étape) : regardez les images.",
+    "none": "Aucune vérification du visage enregistrée pour l'instant.",
+    "challenge": "Défi",
+    "notEvaluated": "Pas encore évalué",
+    "step0": "Regarder droit vers la caméra",
+    "actions": {
+      "turn_left": "Tourner la tête à gauche",
+      "turn_right": "Tourner la tête à droite",
+      "look_up": "Lever les yeux",
+      "blink": "Cligner des yeux",
+      "smile": "Sourire"
+    },
+    "framesCount_one": "{{count}} image",
+    "framesCount_other": "{{count}} images",
+    "code": "Code affiché à l'écran",
+    "frames": "Images",
+    "duration": "Durée de la prise",
+    "serverElapsed": "Du défi aux images (serveur)",
+    "maxGap": "Plus longue pause",
+    "startedWithWarning": "Commencé malgré un avertissement de lumière",
+    "yes": "Oui",
+    "no": "Non",
+    "plausible": "Images complètes, durées plausibles.",
+    "unreadable": "Cette version du tableau de bord ne sait pas lire le détail de cette vérification.",
+    "framesTitle": "Images",
+    "viewAll": "Voir toutes les images",
+    "viewFrame": "Voir l'image",
+    "frameLabel": "Image {{n}}",
+    "frameAlt": "Image {{n}} de la vérification du visage",
+    "replaced_one": "{{count}} image d'une vérification précédente a été remplacée et effacée.",
+    "replaced_other": "{{count}} images de vérifications précédentes ont été remplacées et effacées.",
+    "problems": {
+      "too_fast": {
+        "title": "Trop rapide.",
+        "body": "Les images couvrent moins de temps que les actions n'en demandent."
+      },
+      "longer_than_challenge": {
+        "title": "Durées incohérentes.",
+        "body": "Les images annoncent plus de temps qu'il ne s'en est écoulé sur le serveur depuis l'envoi du défi."
+      },
+      "gap_too_long": {
+        "title": "Longue pause.",
+        "body": "Plusieurs secondes se sont écoulées entre deux images."
+      },
+      "out_of_order": {
+        "title": "Dans le désordre.",
+        "body": "Les heures ou les étapes des images reculent, ou une image ne tombe pas dans son étape."
+      },
+      "step_missing_frames": {
+        "title": "Images manquantes.",
+        "body": "Une étape a moins d'images que prévu."
+      },
+      "duplicate_frames": {
+        "title": "Images identiques.",
+        "body": "Deux images sont le même fichier."
+      },
+      "frames_reused": {
+        "title": "Image déjà vue.",
+        "body": "Le fichier d'une image a déjà été envoyé dans une autre vérification."
+      }
+    }
+  },
   "capture": {
     "size": "Taille",
     "dimensions": "Dimensions (px)",
@@ -464,6 +528,11 @@
     "adminNoDataAccess": "Les administrateurs n'ont pas d'accès courant aux données lues sur les pièces d'identité. Un superviseur ou le vérificateur assigné peut les afficher.",
     "documentDataNotFound": "Ce dossier n'est plus disponible, ou il ne vous est pas assigné.",
     "documentDataAuditFailed": "L'accès n'a pas pu être enregistré dans le journal d'audit : les données ne sont donc pas affichées. Réessayez dans un instant.",
+    "liveness_required": "La vérification du visage est d'abord nécessaire.",
+    "too_many_challenges": "Trop de vérifications du visage pour cette session.",
+    "challenge_expired": "Cette vérification du visage a expiré ou a été remplacée.",
+    "challenge_used": "Cette vérification du visage est déjà enregistrée.",
+    "invalid_liveness": "Les images de la vérification du visage ne sont pas valides.",
     "already_decided": "Ce dossier a déjà été décidé. Rechargez la page.",
     "not_submitted": "Ce dossier ne peut pas être décidé avant l'envoi par l'usager.",
     "note_required": "Une note est obligatoire pour cette décision.",

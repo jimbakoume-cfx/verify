@@ -4,6 +4,8 @@
 // photo replaced by a newer one of the same side, and reports the server's checks (GET /checks).
 // M4: GET /checks also says when the code lines show an expired document, and a new choice of
 // document decides the case's server checks again (photos of sides it does not need stop counting).
+// M5: the face check: a random challenge (POST /liveness/challenge), then its frames, checked and
+// recorded with the liveness_capture check (POST /liveness/captures). The submit needs them.
 import {
   CAPTURE_LIMITS,
   CAPTURE_SIDES,
@@ -12,9 +14,16 @@ import {
   CONSENT_VERSION,
   DECLARED_DOCUMENTS,
   type DeclaredDocument,
+  type ErrorCode,
   type FlowCaptureSummary,
   type FlowSession,
   type FlowStatus,
+  KEEP_FACE_IMAGES_VERSION,
+  LIVENESS_LIMITS,
+  type LivenessAction,
+  type LivenessCaptureDetails,
+  type LivenessCaptureResponse,
+  type LivenessChallengeResponse,
   type MrzCheckDetails,
   MRZ_EXPECTATION,
   type MrzExpectation,
@@ -33,7 +42,9 @@ import { isJpeg, readJpegSize } from "../_shared/jpeg.ts";
 import { consoleLogger, type Logger } from "../_shared/log.ts";
 import { documentCodeFits, MRZ_PARSER_VERSION, parseMrz } from "../_shared/mrz.ts";
 import { type CaseStore, refreshCase } from "../worker/case.ts";
+import { assessLivenessCapture, LIVENESS_CHECK_VERSION } from "../worker/liveness.ts";
 import { type CheckStateRow, flowChecks } from "./checks.ts";
+import { cryptoRandomInt, drawChallenge, livenessFramePath, type RandomInt, validateLivenessCapture } from "./liveness.ts";
 import { noRing, type WorkerRing } from "./ring.ts";
 import { buildCapturePath, isOwnCapturePath, sanitizeQuality, validateMrzReport } from "./validation.ts";
 
@@ -69,6 +80,52 @@ export interface NewCapture {
 
 export type SubmitResult = "ok" | "already_submitted" | "missing_sides";
 
+/** What the submit requires a live capture of: the document's sides and, since M5, the face check's frames. */
+export type RequiredKind = CaptureSide | "liveness_frame";
+
+/** A face-check challenge as the flow function reads it back (M5). */
+export interface StoredChallenge {
+  id: string;
+  actions: LivenessAction[];
+  code: string;
+  createdAt: string;
+  expiresAt: string;
+  supersededAt: string | null;
+  usedAt: string | null;
+}
+
+/** flow_issue_liveness_challenge's answer. */
+export type ChallengeIssue =
+  | { result: "ok"; challengeId: string; expiresAt: string }
+  | { result: "too_many" | "closed" };
+
+/** One frame as flow_record_liveness stores it: what the phone reported, and what the server measured. */
+export interface LivenessFrameRecord {
+  index: number;
+  step: number;
+  atMs: number;
+  path: string;
+  sha256: string;
+  byteSize: number;
+  width: number;
+  height: number;
+}
+
+export interface LivenessRecord {
+  verificationId: string;
+  challengeId: string;
+  code: string;
+  frames: LivenessFrameRecord[];
+  version: string;
+  outcome: "pass" | "flag";
+  details: LivenessCaptureDetails;
+}
+
+/** flow_record_liveness's answer; nothing changes unless "ok". */
+export type LivenessRecordResult =
+  | { result: "ok"; supersededPaths: string[] }
+  | { result: "not_found" | "used" | "expired" | "code_mismatch" | "closed" };
+
 /** What flow_record_mrz stores for one photo: the check result, and the encrypted lines when some were read. */
 export interface MrzRecord {
   verificationId: string;
@@ -102,6 +159,9 @@ export interface FlowRepo {
     consentVersion: string;
     language: "fr" | "en";
     userAgent: string | null;
+    /** M5: the optional "keep my face images" box, and the version of its wording. */
+    keepFaceImages: boolean;
+    keepFaceImagesVersion: string;
   }): Promise<void>;
   /** created -> in_progress; no change in any other status. */
   markInProgress(verificationId: string): Promise<void>;
@@ -116,8 +176,8 @@ export interface FlowRepo {
   /** True when a capture of another verification has the same sha256. */
   isShaUsedElsewhere(sha256: string, verificationId: string): Promise<boolean>;
   insertCapture(capture: NewCapture): Promise<string>;
-  /** flow_submit: locks the row, checks status and sides, opens the review task and audits. */
-  submit(verificationId: string, requiredSides: readonly CaptureSide[]): Promise<SubmitResult>;
+  /** flow_submit: locks the row, checks status and the required kinds, opens the review task and audits. */
+  submit(verificationId: string, requiredKinds: readonly RequiredKind[]): Promise<SubmitResult>;
   /** A capture of this verification that has not been erased; null otherwise. */
   findActiveCapture(verificationId: string, captureId: string): Promise<{ kind: string } | null>;
   /**
@@ -136,6 +196,24 @@ export interface FlowRepo {
   consistencyFlags(verificationId: string): Promise<string[]>;
   /** M3: worker_settings.enabled_for_real_sessions (off until Vercel Pro and its DPA). */
   workerEnabledForRealSessions(): Promise<boolean>;
+  /** M5: flow_issue_liveness_challenge (replaces an unused earlier challenge; audited, never the code). */
+  issueLivenessChallenge(issue: {
+    verificationId: string;
+    actions: LivenessAction[];
+    code: string;
+    ttlSeconds: number;
+    max: number;
+  }): Promise<ChallengeIssue>;
+  /** M5: a challenge of this session; null for any other. */
+  getLivenessChallenge(verificationId: string, challengeId: string): Promise<StoredChallenge | null>;
+  /** M5: storage paths of the live frames recorded for a challenge. */
+  livenessFramePaths(challengeId: string): Promise<string[]>;
+  /** M5: whether any of these SHA-256 belongs to a capture of another verification. */
+  shasUsedElsewhere(sha256s: readonly string[], verificationId: string): Promise<boolean>;
+  /** M5: flow_record_liveness: frames, check, challenge used and audit, together or not at all. */
+  recordLiveness(record: LivenessRecord): Promise<LivenessRecordResult>;
+  /** M5: whether the session has the live frames of a recorded face check. */
+  hasLiveness(verificationId: string): Promise<boolean>;
 }
 
 export interface CaptureStorage {
@@ -155,6 +233,8 @@ export interface FlowDeps {
   cases?: CaseStore;
   now?: () => Date;
   randomUUID?: () => string;
+  /** Draws the face check's actions and code (M5); default: crypto.getRandomValues. */
+  randomInt?: RandomInt;
   log?: Logger;
 }
 
@@ -167,6 +247,7 @@ export function createFlowHandler(deps: FlowDeps): Handler {
   const ring = deps.ring ?? noRing;
   const now = deps.now ?? (() => new Date());
   const randomUUID = deps.randomUUID ?? (() => crypto.randomUUID());
+  const randomInt = deps.randomInt ?? cryptoRandomInt;
   const log = deps.log ?? consoleLogger;
 
   /**
@@ -244,15 +325,32 @@ export function createFlowHandler(deps: FlowDeps): Handler {
     if (body.consentVersion !== CONSENT_VERSION) throw badRequest("Unknown consent version.");
     if (body.language !== "fr" && body.language !== "en") throw badRequest("language must be fr or en.");
     const language = body.language;
+    // M5: optional, false when missing (an app from before M5); never anything but true or false.
+    if (body.keepFaceImages !== undefined && typeof body.keepFaceImages !== "boolean") {
+      throw badRequest("keepFaceImages must be true or false.");
+    }
+    const keepFaceImages = body.keepFaceImages === true;
 
     if (await repo.hasConsent(v.id)) {
       // Idempotent: a retried request records nothing new.
       if (v.status === "created") await repo.markInProgress(v.id);
     } else {
       const userAgent = req.headers.get("user-agent")?.slice(0, MAX_USER_AGENT) ?? null;
-      await repo.insertConsent({ verificationId: v.id, consentVersion: CONSENT_VERSION, language, userAgent });
+      await repo.insertConsent({
+        verificationId: v.id,
+        consentVersion: CONSENT_VERSION,
+        language,
+        userAgent,
+        keepFaceImages,
+        keepFaceImagesVersion: KEEP_FACE_IMAGES_VERSION,
+      });
       await repo.markInProgress(v.id);
-      await riderAudit(v, "consent.accept", { consentVersion: CONSENT_VERSION, language });
+      await riderAudit(v, "consent.accept", {
+        consentVersion: CONSENT_VERSION,
+        language,
+        keepFaceImages,
+        keepFaceImagesVersion: KEEP_FACE_IMAGES_VERSION,
+      });
     }
     return sessionResponse(v.id);
   };
@@ -417,10 +515,145 @@ export function createFlowHandler(deps: FlowDeps): Handler {
     return jsonResponse(200, checks);
   };
 
+  // M5: a random challenge for the face check, with a signed upload for each frame slot.
+  const postLivenessChallenge: Handler = async (req) => {
+    const v = await loadSession(req);
+    await readJsonObject(req, { allowEmpty: true });
+    await requireConsent(v);
+    if (!v.declaredDocument) throw new HttpError(409, "document_type_required");
+    const { actions, code } = drawChallenge(randomInt);
+    const issued = await repo.issueLivenessChallenge({
+      verificationId: v.id,
+      actions,
+      code,
+      ttlSeconds: LIVENESS_LIMITS.challengeTtlSeconds,
+      max: LIVENESS_LIMITS.maxChallengesPerSession,
+    });
+    if (issued.result !== "ok") {
+      throw issued.result === "closed"
+        ? new HttpError(409, "already_submitted")
+        : new HttpError(429, "too_many_challenges");
+    }
+    const { challengeId, expiresAt } = issued;
+    const uploads = await Promise.all(
+      Array.from({ length: LIVENESS_LIMITS.maxFrames }, async (_, index) => {
+        const signed = await storage.createSignedUploadUrl(livenessFramePath(v.id, challengeId, index));
+        return { path: signed.path, token: signed.token };
+      }),
+    );
+    const response: LivenessChallengeResponse = {
+      challengeId,
+      actions,
+      code,
+      expiresAt,
+      bucket: ID_CAPTURES_BUCKET,
+      uploads,
+    };
+    return jsonResponse(200, response);
+  };
+
+  // M5: the frames of a challenge. Each file is checked like a photo (size, JPEG, resolution) and
+  // against the SHA-256 the phone computed; any problem refuses them all and erases them, and the
+  // rider starts a new face check. Never logs or audits the code.
+  const postLivenessCaptures: Handler = async (req) => {
+    const v = await loadSession(req);
+    const check = validateLivenessCapture(await readJsonObject(req));
+    if (!check.ok) throw badRequest(check.message);
+    const capture = check.request;
+    const paths = capture.frames.map((frame) => frame.path);
+    if (capture.frames.some((frame) => frame.path !== livenessFramePath(v.id, capture.challengeId, frame.index))) {
+      throw badRequest("Invalid path.");
+    }
+
+    // Another session's challenge gets the same answer as a missing one.
+    const challenge = await repo.getLivenessChallenge(v.id, capture.challengeId);
+    if (!challenge) throw new HttpError(404, "not_found");
+    if (challenge.usedAt !== null) return alreadyRecorded(challenge.id, paths);
+    if (challenge.supersededAt !== null || !(now().getTime() < Date.parse(challenge.expiresAt))) {
+      throw new HttpError(410, "challenge_expired");
+    }
+    if (capture.code !== challenge.code) {
+      throw new HttpError(422, "invalid_liveness", "The code does not match the challenge.");
+    }
+
+    const frames: LivenessFrameRecord[] = [];
+    let total = 0;
+    for (const frame of capture.frames) {
+      const bytes = await storage.download(frame.path);
+      if (!bytes) throw new HttpError(404, "upload_missing");
+      total += bytes.byteLength;
+      const checked = checkFrame(bytes);
+      let refusal: ErrorCode | null = checked.ok ? null : checked.code;
+      if (!refusal && total > LIVENESS_LIMITS.maxTotalBytes) refusal = "image_too_large";
+      if (!refusal && (await sha256Hex(bytes)) !== frame.sha256) refusal = "invalid_liveness";
+      if (refusal || !checked.ok) {
+        // Refused frames are not kept: the rider starts a new face check with new upload slots.
+        await Promise.all(
+          paths.map((path) => storage.remove(path).catch((err) => log.error("flow.frame_remove_failed", err))),
+        );
+        throw new HttpError(422, refusal ?? "invalid_image");
+      }
+      frames.push({ ...frame, byteSize: bytes.byteLength, width: checked.width, height: checked.height });
+    }
+
+    const reusedElsewhere = await repo.shasUsedElsewhere(frames.map((frame) => frame.sha256), v.id);
+    const { outcome, details } = assessLivenessCapture({
+      challengeId: challenge.id,
+      actions: challenge.actions,
+      code: challenge.code,
+      frames,
+      stepStartsMs: capture.stepStartsMs,
+      serverElapsedMs: now().getTime() - Date.parse(challenge.createdAt),
+      reusedElsewhere,
+      startedWithWarning: capture.startedWithWarning,
+    });
+    const recorded = await repo.recordLiveness({
+      verificationId: v.id,
+      challengeId: challenge.id,
+      code: capture.code,
+      frames,
+      version: LIVENESS_CHECK_VERSION,
+      outcome,
+      details,
+    });
+    switch (recorded.result) {
+      case "ok": {
+        // The older face check's frames are erased; their files go too (best effort, logged).
+        for (const path of recorded.supersededPaths) {
+          await storage.remove(path).catch((err) => log.error("flow.superseded_remove_failed", err));
+        }
+        const response: LivenessCaptureResponse = { recorded: true };
+        return jsonResponse(200, response);
+      }
+      case "used":
+        // A retried request that crossed the first one.
+        return alreadyRecorded(challenge.id, paths);
+      case "expired":
+        throw new HttpError(410, "challenge_expired");
+      case "code_mismatch":
+        throw new HttpError(422, "invalid_liveness", "The code does not match the challenge.");
+      case "closed":
+        throw new HttpError(409, "already_submitted");
+      case "not_found":
+        throw new HttpError(404, "not_found");
+    }
+  };
+
+  /** A challenge already recorded: the same frames again is a retry, answered as the first time; any others are refused. */
+  async function alreadyRecorded(challengeId: string, paths: readonly string[]): Promise<Response> {
+    const recorded = await repo.livenessFramePaths(challengeId);
+    const same = recorded.length === paths.length && paths.every((path) => recorded.includes(path));
+    if (!same) throw new HttpError(409, "challenge_used");
+    const response: LivenessCaptureResponse = { recorded: true };
+    return jsonResponse(200, response);
+  }
+
   const postSubmit: Handler = async (req) => {
     const v = await loadSession(req);
     if (!v.declaredDocument) throw new HttpError(409, "document_type_required");
-    const result = await repo.submit(v.id, REQUIRED_SIDES[v.declaredDocument]);
+    // M5: the face check first. The database checks its frames again, with the sides, under the row lock.
+    if (!(await repo.hasLiveness(v.id))) throw new HttpError(409, "liveness_required");
+    const result = await repo.submit(v.id, [...REQUIRED_SIDES[v.declaredDocument], "liveness_frame"]);
     if (result === "already_submitted") throw new HttpError(409, "already_submitted");
     if (result === "missing_sides") throw new HttpError(409, "missing_sides");
     return sessionResponse(v.id);
@@ -438,6 +671,8 @@ export function createFlowHandler(deps: FlowDeps): Handler {
       "/captures": { POST: postCaptures },
       "/mrz": { POST: postMrz },
       "/checks": { GET: getChecks },
+      "/liveness/challenge": { POST: postLivenessChallenge },
+      "/liveness/captures": { POST: postLivenessCaptures },
       "/submit": { POST: postSubmit },
     },
   });
@@ -459,6 +694,23 @@ export function checkImage(bytes: Uint8Array): ImageCheck {
   // The rider app never sends more; the AI worker refuses larger photos, so one sent around the app
   // would never be checked and would hold up the worker's queue.
   if (longSide > CAPTURE_LIMITS.maxLongSide) return { ok: false, code: "image_too_large" };
+  return { ok: true, ...size };
+}
+
+export type FrameCheck =
+  | { ok: true; width: number; height: number }
+  | { ok: false; code: "image_too_small" | "image_too_large" | "invalid_image" | "image_resolution_too_low" };
+
+/** M5: the checks on one face-check frame's bytes (LIVENESS_LIMITS). Nothing is decoded. */
+export function checkFrame(bytes: Uint8Array): FrameCheck {
+  if (bytes.byteLength < LIVENESS_LIMITS.minFrameBytes) return { ok: false, code: "image_too_small" };
+  if (bytes.byteLength > LIVENESS_LIMITS.maxFrameBytes) return { ok: false, code: "image_too_large" };
+  if (!isJpeg(bytes)) return { ok: false, code: "invalid_image" };
+  const size = readJpegSize(bytes);
+  if (!size) return { ok: false, code: "invalid_image" };
+  const longSide = Math.max(size.width, size.height);
+  if (longSide < LIVENESS_LIMITS.minFrameLongSide) return { ok: false, code: "image_resolution_too_low" };
+  if (longSide > LIVENESS_LIMITS.maxFrameLongSide) return { ok: false, code: "image_too_large" };
   return { ok: true, ...size };
 }
 

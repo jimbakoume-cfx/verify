@@ -297,3 +297,7 @@ a:hover { color: var(--brand-hover); }
   .dash-row-count { grid-column: 2; grid-row: 1; }
   .dash-section-head button.primary.dash-inline { width: 100%; }
 }
+
+/* M5: the face check (CaseLiveness). */
+.dash-liveness-actions { margin: 8px 0 12px; padding-left: 1.4em; display: grid; gap: 4px; }
+.dash-frames { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }

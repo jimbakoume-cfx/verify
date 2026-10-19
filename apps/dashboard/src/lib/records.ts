@@ -76,6 +76,17 @@ export interface CaptureRecord {
   /** The newer photo of the same side that replaced this one (M3); it is then erased too. */
   supersededBy: string | null;
   quality: CaptureQuality;
+  /** M5: the face check a liveness_frame belongs to; null for a document photo. */
+  livenessChallengeId: string | null;
+  /** M5: a frame's place in its face check; null for a document photo. */
+  liveness: LivenessFrameInfo | null;
+}
+
+/** M5: where a face-check frame sits: its slot, its step (0 before the first action) and its time. */
+export interface LivenessFrameInfo {
+  index: number;
+  step: number;
+  atMs: number;
 }
 
 /** check_outcome enum of the database. */
@@ -144,7 +155,7 @@ export const CAPTURE_KINDS = ["document_front", "document_back", "selfie", "live
 export const STAFF_PROFILE_COLUMNS = "user_id, role, full_name, active";
 export const VERIFICATION_COLUMNS = `id, status, declared_document, is_test, created_at, submitted_at, session_expires_at, ${RISK_COLUMNS}`;
 export const CAPTURE_COLUMNS =
-  "id, verification_id, kind, byte_size, width, height, quality, created_at, sha256, deleted_at, superseded_by";
+  "id, verification_id, kind, byte_size, width, height, quality, created_at, sha256, deleted_at, superseded_by, liveness_challenge_id";
 export const CHECK_COLUMNS = "id, capture_id, check_name, check_version, outcome, details, created_at";
 /** The only columns of worker_job staff may read (with verification_id, to filter by case). */
 export const JOB_COLUMNS = "capture_id, status";
@@ -240,7 +251,17 @@ export function toCapture(value: unknown): CaptureRecord | null {
     deleted: row.deleted_at !== null && row.deleted_at !== undefined,
     supersededBy: str(row.superseded_by),
     quality: toCaptureQuality(row.quality),
+    livenessChallengeId: str(row.liveness_challenge_id),
+    liveness: toLivenessFrameInfo(asRow(row.quality)?.liveness),
   };
+}
+
+function toLivenessFrameInfo(value: unknown): LivenessFrameInfo | null {
+  const l = asRow(value);
+  const index = num(l?.index);
+  const step = num(l?.step);
+  const atMs = num(l?.atMs);
+  return index === null || step === null || atMs === null ? null : { index, step, atMs };
 }
 
 function isOneOf<T extends string>(values: readonly T[], value: unknown): value is T {
@@ -309,7 +330,7 @@ export function toMrzCheckDetails(value: unknown): MrzCheckDetails | null {
 }
 
 /** The columns every check_result row shares, with its name and raw details; null when one is missing. */
-function toCheckRow(value: unknown): { name: string; check: CheckRecord<never>; details: unknown } | null {
+export function toCheckRow(value: unknown): { name: string; check: CheckRecord<never>; details: unknown } | null {
   const row = asRow(value);
   const id = str(row?.id);
   const createdAt = str(row?.created_at);

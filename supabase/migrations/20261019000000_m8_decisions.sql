@@ -319,7 +319,7 @@ create trigger threshold_config_no_truncate
 revoke all on public.threshold_config from anon, authenticated;
 grant select on public.threshold_config to authenticated;
 
--- Version 2: DEFAULT_THRESHOLD_CONFIG in risk.ts (risk.test.ts and 60_m8_test.sql check they are equal).
+-- Version 2: DEFAULT_THRESHOLD_CONFIG in risk.ts (risk.test.ts and 70_m8_test.sql check they are equal).
 insert into public.threshold_config (version, config, note) values (
   2,
   '{

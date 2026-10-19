@@ -24,7 +24,7 @@ test("new CNI: the code lines on the back are read, the rider only sees 'Code li
   await expect(rider.mrzDebug).toHaveCount(0);
   for (const line of MRZ_LINES.td1) await expect(page.getByText(line)).toHaveCount(0);
   await rider.usePhoto();
-  await expect(rider.heading("done.title")).toBeVisible({ timeout: 20_000 });
+  await rider.waitForSubmit();
 
   // The back's photo went to the reading screen before its review; the front's did not.
   const screens = await rider.screensSeen();
@@ -86,7 +86,7 @@ test("OCR engine blocked: the rider is not held up, and the server is told the r
   await expect(rider.mrzWarning).toHaveCount(0);
   await expect(rider.button("review.use")).toHaveClass(/primary/);
   await rider.usePhoto();
-  await expect(rider.heading("done.title")).toBeVisible({ timeout: 20_000 });
+  await rider.waitForSubmit();
   expect(blocked).toBeGreaterThan(0);
 
   expect(backend.routes).toEqual(NEW_CNI_FLOW);
@@ -113,7 +113,7 @@ test("M4: the model follows the session: ours for a test session, Doubango's for
   await rider.autoCapture("cni_biometric", "document_back");
   await expect(rider.mrzRead).toHaveText(rider.t("mrz.read"));
   await rider.usePhoto();
-  await expect(rider.heading("done.title")).toBeVisible({ timeout: 20_000 });
+  await rider.waitForSubmit();
 
   // Only Doubango's file was fetched, and the report names it.
   expect(new Set(models)).toEqual(new Set([`${MRZ_MODELS["mrz-1"].langPath}/${OCR_ASSETS.language}.traineddata.gz`]));

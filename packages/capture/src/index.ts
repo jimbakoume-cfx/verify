@@ -31,6 +31,8 @@ export { DETECTION_SEARCH_EXPANSION, detectDocumentBox } from "./detect";
 export { FOCUS_REFERENCE_CONTRAST, HINT_PRIORITY, analyzeFrame } from "./analyze";
 export { DEFAULT_THRESHOLDS } from "./thresholds";
 export { AutoCapture } from "./autoCapture";
+export { SELFIE_THRESHOLDS, analyzeSelfie } from "./selfie";
+export type { SelfieAnalysis, SelfieHint, SelfieThresholds } from "./selfie";
 export { FrameAnalyzer, toClientQuality } from "./frameAnalyzer";
 export type { CaptureContext, FrameStep, RgbaFrame } from "./frameAnalyzer";
 export {

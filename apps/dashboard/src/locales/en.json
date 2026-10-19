@@ -409,6 +409,70 @@
       "carte_de_sejour": "Residence permit (carte de séjour)"
     }
   },
+  "liveness": {
+    "title": "Face check",
+    "intro": "The random challenge the server gave the rider and the frames their front camera took. Nothing has judged yet whether the rider did the actions (next milestone): look at the frames.",
+    "none": "No face check recorded yet.",
+    "challenge": "Challenge",
+    "notEvaluated": "Not evaluated yet",
+    "step0": "Look straight at the camera",
+    "actions": {
+      "turn_left": "Turn the head left",
+      "turn_right": "Turn the head right",
+      "look_up": "Look up",
+      "blink": "Blink",
+      "smile": "Smile"
+    },
+    "framesCount_one": "{{count}} frame",
+    "framesCount_other": "{{count}} frames",
+    "code": "Code shown on screen",
+    "frames": "Frames",
+    "duration": "Capture length",
+    "serverElapsed": "Challenge to frames (server)",
+    "maxGap": "Longest pause",
+    "startedWithWarning": "Started despite a light warning",
+    "yes": "Yes",
+    "no": "No",
+    "plausible": "Frames complete, timings plausible.",
+    "unreadable": "The details of this check cannot be read by this version of the dashboard.",
+    "framesTitle": "Frames",
+    "viewAll": "View all frames",
+    "viewFrame": "View frame",
+    "frameLabel": "Frame {{n}}",
+    "frameAlt": "Face check frame {{n}}",
+    "replaced_one": "{{count}} frame of an earlier face check was replaced and erased.",
+    "replaced_other": "{{count}} frames of earlier face checks were replaced and erased.",
+    "problems": {
+      "too_fast": {
+        "title": "Too fast.",
+        "body": "The frames cover less time than the actions need."
+      },
+      "longer_than_challenge": {
+        "title": "Timing does not add up.",
+        "body": "The frames claim more time than passed on the server since the challenge was issued."
+      },
+      "gap_too_long": {
+        "title": "Long pause.",
+        "body": "Several seconds passed between two frames."
+      },
+      "out_of_order": {
+        "title": "Out of order.",
+        "body": "Frame times or steps go backwards, or a frame does not fall in its step."
+      },
+      "step_missing_frames": {
+        "title": "Missing frames.",
+        "body": "A step has fewer frames than expected."
+      },
+      "duplicate_frames": {
+        "title": "Identical frames.",
+        "body": "Two frames are the same file."
+      },
+      "frames_reused": {
+        "title": "Frame seen before.",
+        "body": "A frame's file was already sent in another verification."
+      }
+    }
+  },
   "capture": {
     "size": "Size",
     "dimensions": "Dimensions (px)",
@@ -464,6 +528,11 @@
     "adminNoDataAccess": "Administrators have no routine access to data read from ID documents. A supervisor or the assigned reviewer can show it.",
     "documentDataNotFound": "This case is no longer available, or it is not assigned to you.",
     "documentDataAuditFailed": "The access could not be recorded in the audit log, so the data is not shown. Try again in a moment.",
+    "liveness_required": "The face check is required first.",
+    "too_many_challenges": "Too many face checks for this session.",
+    "challenge_expired": "This face check expired or was replaced.",
+    "challenge_used": "This face check was already recorded.",
+    "invalid_liveness": "The face check's frames are not valid.",
     "already_decided": "This case has already been decided. Reload the page.",
     "not_submitted": "This case cannot be decided before the rider submits.",
     "note_required": "A note is required for this decision.",

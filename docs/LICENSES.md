@@ -17,7 +17,7 @@
 
 **Forbidden:** GPL, AGPL, SSPL, BUSL, any "non-commercial" / "research-only" licence (e.g. CC BY-NC), and any unknown licence.
 
-## In use now (M0–M4)
+## In use now (M0–M5)
 
 | Component | Version | Licence | Where it runs | Source |
 |---|---|---|---|---|
@@ -55,6 +55,8 @@
 The capture quality engine (`packages/capture`: blur, glare, framing and document detection, and since M2 finding and preparing the code lines for reading) is our own code. It is built on textbook image maths (luma, Laplacian variance, Sobel gradients, Otsu and local-mean thresholds) and uses no third-party image library; the worker's `quality.py` is our own port of it. The MRZ parser and check digits (`supabase/functions/_shared/mrz.ts`) and the look-alike correction (`supabase/functions/_shared/mrzCorrect.ts`, moved there from the rider app in M3 so that the phone and the server share it) are also our own, written from the ICAO 9303 standard. The worker's signing, field reading and classification code are ours too.
 
 The full list of every indirect npm package and its licence is in `package-lock.json`, and is checked on every CI run. M3 adds no npm package; M4 adds no npm or Python package (only our own model file, below).
+
+**M5 (the face check) adds no package and no model.** The phone's checks before the capture (brightness, contrast and backlight inside the oval, `packages/capture/src/selfie.ts`) are our own code; the frames are encoded by the browser's canvas and hashed with WebCrypto. MediaPipe was checked and left out on the phone (see "Planned"). The browser tests' fake front camera is a face we draw ourselves (`scripts/make-fake-camera-video.py --variant=face`: ellipses on a textured wall, generated at test time, never stored in the repository): no photograph, no real person, nothing licensed.
 
 ## AI worker (M3): Python packages, native parts and models
 
@@ -236,8 +238,8 @@ The generic English Tesseract model was tried and is not used: it misread about 
 | Our own MRZ reading model for **every** session (replaces Doubango's) | After G4 | Apache-2.0 (run 2, derived from `eng`) | Shipped for test sessions since M4 (see "MRZ reading"); the lawyer's review of `eng`'s provenance is pending. |
 | Slim OpenCV build (from source, no FFmpeg, IPP, ITT or OpenBLAS) | Before the pilot (M14) | Apache-2.0 | Removes every exception listed for the OpenCV wheel |
 | omegaconf 2.4.0 (drops antlr4), rapidocr 3.10.0 (headless OpenCV by default) | When at least two weeks old (after 2026-10-23 and 2026-10-22) | BSD-3-Clause, Apache-2.0 | Never install `rapidocr[rtl]`: it pulls python-bidi (LGPL) |
-| OpenCV YuNet face detector | M5 | MIT | — |
-| MediaPipe Face Landmarker | M5 | Apache-2.0 | — |
+| **MediaPipe** BlazeFace short-range (face detector) and Face Landmarker, `@mediapipe/tasks-vision` (npm) / `mediapipe` (PyPI) | M6 (on the server); on the phone only if it becomes cheap enough | Apache-2.0 (code); **Apache-2.0 on the model card** (BlazeFace short-range card, checked 2026-10-19: "LICENSED UNDER Apache License, Version 2.0") | **The only face detector allowed** (PM, 2026-10-19; green in `docs/research/FACE_MODELS.md`). Checked for M5 and **not used on the phone**: `@mediapipe/tasks-vision` 1.1.1 carries a 13.5 MB WebAssembly engine (3.9 MB compressed), plus the 230 KB model, too heavy for every rider's first visit on low-end Android over slow networks. Model card caveats for the lawyer: "out of scope: any form of surveillance or identity recognition", "not intended for human life-critical decisions", "primary intended application is entertainment and assistive technologies". Our use (face presence and liveness geometry) is neither recognition nor surveillance, but the lawyer should confirm. |
+| ~~OpenCV YuNet face detector~~ | — | MIT on the weights | **Not to be used** (PM, 2026-10-19): trained on WIDER FACE (CC BY-NC-ND 4.0) with labels from InsightFace's SCRFD; amber in `docs/research/FACE_MODELS.md`. |
 | MiniVision Silent-Face-Anti-Spoofing | M6 | Apache-2.0 | — |
 | OpenCV SFace / dlib ResNet face recognition | M7 | Apache-2.0 / public domain (CC0) | **The lawyer must review the provenance of the training data.** Benchmark on Cameroonian faces before use. |
 | scikit-learn | Phase 2 | BSD-3-Clause | — |

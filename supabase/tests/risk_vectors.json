@@ -1,5 +1,5 @@
 {
-  "comment": "Shared test vectors for the risk rules, run by supabase/functions/_shared/risk.test.ts (TypeScript) and supabase/tests/60_m8_test.sql (private.risk_evaluate, private.risk_config_errors): both must give exactly these results. defaultConfig is threshold version 2 as the M8 migration seeds it.",
+  "comment": "Shared test vectors for the risk rules, run by supabase/functions/_shared/risk.test.ts (TypeScript) and supabase/tests/70_m8_test.sql (private.risk_evaluate, private.risk_config_errors): both must give exactly these results. defaultConfig is threshold version 2 as the M8 migration seeds it.",
   "signals": [
     "document_expired",
     "under_18",

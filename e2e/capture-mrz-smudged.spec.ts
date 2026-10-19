@@ -41,7 +41,7 @@ test("smudged code lines: tips and Retake, then 'Continue anyway' after 3 tries,
   await expect(rider.mrzWarning).toContainText(rider.t("mrz.continueNote"));
   await expect(rider.button("mrz.continue")).toHaveClass(/secondary/);
   await rider.button("mrz.continue").click();
-  await expect(rider.heading("done.title")).toBeVisible({ timeout: 20_000 });
+  await rider.waitForSubmit();
 
   // Retakes never reach the server: only the photo finally used is sent, with its report.
   expect(backend.routes).toEqual(NEW_CNI_FLOW);

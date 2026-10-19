@@ -49,8 +49,11 @@ export const GUIDES = {
 } satisfies Record<string, Rect>;
 
 export interface FakeCamera {
-  /** sharp, heavily out of focus, in focus but with the code lines smudged, or no document at all. */
-  variant: "sharp" | "blurred" | "smudged" | "none";
+  /**
+   * sharp, heavily out of focus, in focus but with the code lines smudged, or no document at all;
+   * M5: a drawn face (no real person) where the face check's oval falls, cycling through poses.
+   */
+  variant: "sharp" | "blurred" | "smudged" | "none" | "face";
   document: keyof typeof GUIDES;
   width: number;
   height: number;
@@ -75,6 +78,9 @@ export const CAMERAS = {
   // A camera limited to 720p, held upright: the photo would be ~566 px long, under the server's
   // minimum whatever the rider does. The app says so and never takes it by itself.
   lowRes: { variant: "sharp", document: "id1", width: 720, height: 1280, portrait: true },
+  // M5: a drawn face, as a front camera sees it (Chromium's fake device is both cameras). Full HD
+  // upright, so the document photos taken with the shutter before the face check are big enough.
+  face: { variant: "face", document: "id1", width: 1080, height: 1920, portrait: true },
 } satisfies Record<string, FakeCamera>;
 
 export type CameraName = keyof typeof CAMERAS;

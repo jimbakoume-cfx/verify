@@ -1,7 +1,7 @@
 // Camera: the sharp passport data page (as in capture-passport.spec.ts). The server's check (M3) asks
 // for a new photo of the page, the only photo of a passport and the one that carries the code lines.
 import { OCR_ASSETS, mrzModelFor } from "../apps/rider/src/mrz/types";
-import { afterPhotos } from "./support/expectations";
+import { LIVENESS, afterPhotos } from "./support/expectations";
 import { expect, test } from "./support/fixtures";
 
 test("passport photo page retaken: its camera says why, the new photo is read and reported again, then submitted", async ({
@@ -39,6 +39,7 @@ test("passport photo page retaken: its camera says why, the new photo is read an
     "POST /captures",
     "POST /mrz",
     "GET /checks",
+    ...LIVENESS,
     "POST /submit",
   ]);
   const [first, second] = backend.captures;

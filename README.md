@@ -32,8 +32,10 @@ In-house identity verification (KYC) for Confiance riders. It is a standalone we
 | M1: ID capture | Done |
 | M2: MRZ reading | Done |
 | M3: AI worker (the server re-checks the photos, re-reads the code lines from the image, recognises the document, reads printed text; our own MRZ model's training) | Done |
-| **M4**: consistency checks and first risk flags (expired document, under 18, printed data vs code lines, date logic); our own MRZ model on test sessions | In review |
-| M5: active liveness capture | Next |
+| M4: consistency checks and first risk flags (expired document, under 18, printed data vs code lines, date logic); our own MRZ model on test sessions | Done |
+| **M5**: active liveness capture (face check after the document photos: a random challenge, 13 small frames, recorded and shown on the dashboard; not evaluated yet) | In review (`docs/M5_SPEC.md`) |
+| M6: server-side liveness evaluation and passive anti-spoofing | Next |
+| **M8**: risk score, editable thresholds and staff decisions (built ahead of M6–M7; every case still goes to a person) | In review (`docs/M8_SPEC.md`) |
 
 ## Before you test (once)
 1. An administrator creates your invite (see the comment at the top of `supabase/migrations/20261014000000_m1_capture.sql`) and gives you the one-time code. Use the role **supervisor**: admins cannot open ID photos or the data read from them, by design.
@@ -135,7 +137,7 @@ To publish: build the app with `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABL
 
 The rider build also writes the reading engine's files into `dist/ocr/7.0.0/`, next to the model in `dist/ocr/mrz-1/`. These paths are cached by phones for a year, so a new engine or model version must get a new folder name (see `apps/rider/src/mrz/types.ts`).
 
-Apply a milestone's database migration before publishing its dashboard: since M2 the case page reads `check_result.capture_id`, since M3 `capture.superseded_by` and the server checks, since M4 the `consistency` check, and since M8 the risk columns of `verification` and `decision`. For M3, deploy the three Edge Functions straight after the migration, in the same sitting: its trigger marks a replaced photo erased, but only the M3 `flow` function removes the file (order and checks: `docs/M3_SPEC.md`, "Deploy notes").
+Apply a milestone's database migration before publishing its dashboard: since M2 the case page reads `check_result.capture_id`, since M3 `capture.superseded_by` and the server checks, since M4 the `consistency` check, since M5 `capture.liveness_challenge_id` and the `liveness_capture` check, and since M8 the risk columns of `verification` and `decision`. For M3, deploy the three Edge Functions straight after the migration, in the same sitting: its trigger marks a replaced photo erased, but only the M3 `flow` function removes the file (order and checks: `docs/M3_SPEC.md`, "Deploy notes").
 
 The sites themselves hold no data: riders need a session link from staff, and the dashboard needs a staff sign-in.
 

@@ -34,7 +34,7 @@
     "placeholderBadge": "Placeholder text",
     "placeholderNote": "This wording is for testing only. The final text will be written by our lawyer.",
     "whatTitle": "What we collect",
-    "what": "Photos of your identity document (front, and back if needed), and the details read from its code lines (name, number, dates). Later, a short check of your face in front of the camera.",
+    "what": "Photos of your identity document (front, and back if needed), and the details read from its code lines (name, number, dates). Then a short face check: about 13 still pictures from your phone's front camera while you follow a few movements, to confirm that a real person is present and, later, to compare your face with the photo on your document.",
     "whyTitle": "Why",
     "why": "To confirm that you are who you say you are, for the safety of riders and drivers.",
     "howTitle": "How they are protected",
@@ -45,7 +45,9 @@
     "rights": "You can ask to see or delete your data by contacting Confiance customer support.",
     "checkbox": "I have read this information and I agree to Confiance verifying my identity with these photos.",
     "accept": "Continue",
-    "decline": "I do not agree"
+    "decline": "I do not agree",
+    "keepFaces": "Optional: I agree that Confiance keeps my face pictures to improve and tune its checks. They are deleted if I ask.",
+    "keepFacesOptional": "(You can leave this unticked: your verification works the same.)"
   },
   "declined": {
     "title": "You did not agree",
@@ -177,9 +179,40 @@
       "continue": "Continue anyway"
     }
   },
+  "liveness": {
+    "title": "Face check",
+    "subtitle": "Front camera",
+    "tip": "Hold the phone at eye level, your face inside the oval.",
+    "start": "Start the face check",
+    "preparing": "Getting ready…",
+    "lookStraight": "Look straight at the camera",
+    "actions": {
+      "turn_left": "Turn your head slowly to the left",
+      "turn_right": "Turn your head slowly to the right",
+      "look_up": "Look up slowly",
+      "blink": "Blink your eyes",
+      "smile": "Smile"
+    },
+    "stepOf": "Step {{step}} of {{total}}",
+    "code": "Code {{code}}",
+    "holdPhone": "Keep your face in the oval",
+    "hints": {
+      "checking": "Place your face inside the oval",
+      "ready": "Ready: press Start",
+      "too_dark": "Too dark: face a light or a window",
+      "too_bright": "Too bright: avoid direct sunlight",
+      "backlit": "The light is behind you: turn to face it",
+      "no_face": "Place your face inside the oval"
+    },
+    "sending": "Sending your face check…",
+    "sent": "Face check received",
+    "failedTitle": "The face check did not go through",
+    "startAgain": "Start the face check again",
+    "noCamera": "We could not find a front camera on this device. Use a phone with a front camera."
+  },
   "done": {
     "title": "Photos received",
-    "next": "Next step: face check (coming in M5).",
+    "next": "We have your document photos and your face check. Confiance will check them.",
     "close": "You can now return to the Confiance app."
   },
   "sessionError": {
@@ -229,7 +262,13 @@
     "timeout": "The server is taking too long to answer. Check your connection, then try again.",
     "not_configured": "This test version is not connected to a server.",
     "unexpected": "Something went wrong. Please try again.",
-    "storage_failed": "The photo could not be sent. Please try again."
+    "storage_failed": "The photo could not be sent. Please try again.",
+    "liveness_required": "The face check is missing. Please do it again.",
+    "too_many_challenges": "Too many face checks were started for this verification. Return to the Confiance app to start again.",
+    "challenge_expired": "This face check took too long. Please start it again.",
+    "challenge_used": "This face check was already sent. Please start it again.",
+    "invalid_liveness": "The pictures of the face check could not be used. Please start it again.",
+    "interrupted": "The face check was interrupted. Please start it again and keep this page open."
   },
   "debug": {
     "title": "Debug",
@@ -289,7 +328,9 @@
       },
       "lines": "Corrected lines",
       "raw": "Raw OCR text"
-    }
+    },
+    "contrast": "contrast",
+    "backlight": "backlight"
   },
   "fatal": {
     "title": "Something went wrong",

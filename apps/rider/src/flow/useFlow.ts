@@ -19,7 +19,8 @@ import { createLazyMrzReader, unavailableRead } from "../mrz/lazyReader";
 import { type MrzModel, type MrzReader, mrzModelFor } from "../mrz/types";
 import { type FlowApi, createFlowApi } from "./api";
 import { type ChecksTiming, waitForChecks } from "./checks";
-import { isTransient, toFlowError } from "./errors";
+import type { LivenessService } from "../liveness/send";
+import { type FlowErrorCode, isTransient, toFlowError } from "./errors";
 import { listenForBack, pushBackGuard } from "./history";
 import { sessionLanguage } from "./language";
 import {
@@ -44,7 +45,8 @@ import { Uploader, uploadSteps } from "./upload";
 export interface FlowActions {
   start(): void;
   retryLoad(): void;
-  acceptConsent(): void;
+  /** `keepFaceImages`: the separate, optional box (M5), unticked unless the rider ticks it. */
+  acceptConsent(keepFaceImages: boolean): void;
   declineConsent(): void;
   reviewConsent(): void;
   chooseDocument(document: DeclaredDocument): void;
@@ -59,6 +61,12 @@ export interface FlowActions {
   chooseAnotherDocument(): void;
   /** M4, the document has expired: go on with it (staff see the flag). */
   continueExpired(): void;
+  /** M5: what the face check screen asks of the server; null without a session link. */
+  liveness: LivenessService | null;
+  /** M5: the server recorded the face check. */
+  livenessDone(): void;
+  /** M5: the face check met an error; one that ends the session shows the session's error screen. */
+  livenessFailed(error: FlowErrorCode): void;
 }
 
 export interface Boot {
@@ -200,10 +208,11 @@ export function useFlow(boot: Boot, options: FlowOptions = {}): { state: FlowSta
     };
   }, [readingShot, document, reader]);
 
-  // Closing or leaving the page during an upload, or while the server checks the photos before the
-  // submit, loses the photos: ask first (where browsers allow).
+  // Closing or leaving the page during an upload, while the server checks the photos or during the
+  // face check, before the submit, loses the photos: ask first (where browsers allow).
   const checking = screen.name === "checking";
-  const uploading = state.upload.status === "running" || state.upload.status === "queued" || checking;
+  const uploading =
+    state.upload.status === "running" || state.upload.status === "queued" || checking || screen.name === "liveness";
   useEffect(() => {
     if (!uploading) return;
     const warn = (event: BeforeUnloadEvent) => {
@@ -313,9 +322,9 @@ export function useFlow(boot: Boot, options: FlowOptions = {}): { state: FlowSta
     return {
       start: () => dispatch({ type: "start" }),
       retryLoad: () => void loadSession(),
-      acceptConsent: () =>
+      acceptConsent: (keepFaceImages) =>
         void request(
-          (a) => a.consent({ consentVersion: CONSENT_VERSION, language: language() }),
+          (a) => a.consent({ consentVersion: CONSENT_VERSION, language: language(), keepFaceImages }),
           (session) => ({ type: "consent/accepted", session }),
         ),
       declineConsent: () => dispatch({ type: "consent/decline" }),
@@ -340,8 +349,17 @@ export function useFlow(boot: Boot, options: FlowOptions = {}): { state: FlowSta
       retryUpload: () => dispatch({ type: "upload/retry" }),
       chooseAnotherDocument: () => dispatch({ type: "expired/another" }),
       continueExpired: () => dispatch({ type: "expired/continue" }),
+      liveness: api
+        ? {
+            challenge: () => api.livenessChallenge(),
+            upload: putObjectWithSupabase,
+            record: (body) => api.recordLiveness(body),
+          }
+        : null,
+      livenessDone: () => dispatch({ type: "liveness/done" }),
+      livenessFailed: (error) => dispatch({ type: "liveness/failed", error }),
     };
-  }, [i18n, loadSession, request]);
+  }, [i18n, loadSession, request, api]);
 
   return { state, actions };
 }

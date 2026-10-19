@@ -1,7 +1,7 @@
 // deno-lint-ignore-file require-await
 // M8 routes of the admin function: POST /decisions and POST /thresholds, with in-memory fakes that follow
 // staff_decide and staff_create_threshold_version (supabase/migrations/20261019000000_m8_decisions.sql;
-// the database itself is tested in supabase/tests/60_m8_test.sql).
+// the database itself is tested in supabase/tests/70_m8_test.sql).
 import { describe, expect, it, vi } from "vitest";
 import type { FunctionConfig } from "../_shared/config.ts";
 import type { DecisionOutcome } from "../_shared/contract.ts";
