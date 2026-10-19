@@ -1,0 +1,340 @@
+# Reviewed licences of the FACE worker's Python environment (worker-face/pyproject.toml, uv.lock; M6/M7).
+# Same format and checker as python-licenses.toml (the AI worker's): scripts/check-python-licenses.py
+# --table scripts/python-licenses-face.toml. The policy and the full notes are in docs/LICENSES.md.
+#
+# The model files are not Python packages: they are fetched at build time into worker-face/models/
+# (worker-face/scripts/fetch_models.py, pinned SHA-256) and listed under [[model]] below, which
+# worker-face/tests/test_deploy_config.py keeps equal to verify_face/model_manifest.py.
+
+# ---------------------------------------------------------------------------------------------------
+# Runtime packages
+# ---------------------------------------------------------------------------------------------------
+[packages.ai-edge-litert]
+version = "2.2.0"
+metadata = "Apache Software License"
+license = "Apache-2.0"
+group = "runtime"
+note = "LiteRT (TensorFlow Lite runtime) by Google AI Edge. The wheel ships no licence text: Apache-2.0 text and attribution in worker-face/NOTICE. Its declared dependencies tqdm, protobuf, ml-dtypes, backports-strenum, flatbuffers and typing-extensions are left out (pyproject override): the interpreter imports none of them."
+
+[packages.onnxruntime]
+version = "1.30.0"
+metadata = "MIT License"
+license = "MIT"
+group = "runtime"
+
+[packages.numpy]
+version = "2.5.3"
+metadata = "BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0"
+license = "BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0"
+group = "runtime"
+
+[packages.pillow]
+version = "12.3.0"
+metadata = "MIT-CMU"
+license = "MIT-CMU"
+group = "runtime"
+
+[packages.cryptography]
+version = "50.0.2"
+metadata = "Apache-2.0 OR BSD-3-Clause"
+license = "Apache-2.0 OR BSD-3-Clause"
+group = "runtime"
+
+[packages.cffi]
+version = "2.1.1"
+metadata = "MIT-0"
+license = "MIT-0"
+group = "runtime"
+
+[packages.pycparser]
+version = "3.0"
+metadata = "BSD-3-Clause"
+license = "BSD-3-Clause"
+group = "runtime"
+
+[packages.packaging]
+version = "26.3"
+metadata = "Apache-2.0 OR BSD-2-Clause"
+license = "Apache-2.0 OR BSD-2-Clause"
+group = "runtime"
+
+# ---------------------------------------------------------------------------------------------------
+# Development only: tests and this check. Never installed on Vercel (uv sync --no-dev).
+# ---------------------------------------------------------------------------------------------------
+[packages.pytest]
+version = "9.1.1"
+metadata = "MIT"
+license = "MIT"
+group = "dev"
+
+[packages.pluggy]
+version = "1.6.0"
+metadata = "MIT License"
+license = "MIT"
+group = "dev"
+
+[packages.iniconfig]
+version = "2.3.0"
+metadata = "MIT"
+license = "MIT"
+group = "dev"
+
+[packages.Pygments]
+version = "2.21.0"
+metadata = "BSD-2-Clause"
+license = "BSD-2-Clause"
+group = "dev"
+
+[packages.pip-licenses]
+version = "5.5.5"
+metadata = "MIT"
+license = "MIT"
+group = "dev"
+
+[packages.prettytable]
+version = "3.18.0"
+metadata = "BSD-3-Clause"
+license = "BSD-3-Clause"
+group = "dev"
+
+[packages.wcwidth]
+version = "0.9.1"
+metadata = "MIT License"
+license = "MIT"
+group = "dev"
+
+# ---------------------------------------------------------------------------------------------------
+# Native files in the production environment (Linux x86_64 wheels, as Vercel installs them)
+# ---------------------------------------------------------------------------------------------------
+# LiteRT: the interpreter the worker uses, and the parts of the wheel it never loads.
+[[native]]
+path = "ai_edge_litert/libpywrap_litert_common.so"
+component = "LiteRT shared runtime"
+license = "Apache-2.0 AND LicenseRef-litert-third-party"
+linking = "dynamic"
+note = "As the Python bindings."
+
+[[native]]
+path = "ai_edge_litert/libLiteRt.so"
+component = "LiteRT C API runtime"
+license = "Apache-2.0 AND LicenseRef-litert-third-party"
+linking = "dynamic"
+note = "As the Python bindings."
+
+[[native]]
+path = "ai_edge_litert/libLiteRtWebGpuAccelerator.so"
+component = "LiteRT WebGPU accelerator (Dawn; never loaded: CPU only)"
+license = "Apache-2.0 AND BSD-3-Clause"
+linking = "dynamic"
+
+[[native]]
+path = "ai_edge_litert/_pywrap_*"
+component = "LiteRT's Python bindings: the interpreter (the worker's only use of LiteRT, XNNPACK on the CPU) and the converter, analyzer, calibration, metrics, compiled-model, environment, tensor-buffer and string bindings (never imported)"
+license = "Apache-2.0 AND LicenseRef-litert-third-party"
+linking = "static"
+note = "TensorFlow Lite / LiteRT is Apache-2.0; compiled in, as in TensorFlow's own builds: Eigen (MPL-2.0), XNNPACK, cpuinfo, pthreadpool (BSD-2/BSD-3-Clause), ruy, gemmlowp, abseil, flatbuffers (Apache-2.0), FP16, farmhash (MIT), fft2d (Ooura, permissive), protobuf (BSD-3-Clause). All permissive or file-level copyleft."
+
+[[native]]
+path = "ai_edge_litert/tools/*"
+component = "LiteRT command-line tools (plugin application, benchmarks; never run)"
+license = "Apache-2.0 AND LicenseRef-litert-third-party"
+linking = "static"
+note = "As the Python bindings."
+
+[[native]]
+path = "ai_edge_litert/format_converter_wrapper_pybind11.so"
+component = "LiteRT format converter binding (never imported)"
+license = "Apache-2.0 AND BSD-3-Clause"
+linking = "static"
+
+[[native]]
+path = "ai_edge_litert/pywrap_genai_ops.so"
+component = "LiteRT generative-AI ops (never loaded)"
+license = "Apache-2.0 AND LicenseRef-litert-third-party"
+linking = "static"
+note = "As the Python bindings."
+
+[[native]]
+path = "ai_edge_litert/vendors/*"
+component = "LiteRT NPU compiler and dispatch plugins (Google Tensor, Intel OpenVINO, MediaTek, Qualcomm, Samsung; never loaded: CPU only)"
+license = "Apache-2.0"
+linking = "dynamic"
+note = "Google's plugins; each loads its vendor's SDK at run time only when present, which never happens on Vercel. No vendor SDK is in the wheel."
+
+[[native]]
+path = "onnxruntime/datasets/*.onnx"
+component = "ONNX Runtime's sample models (unused)"
+license = "MIT"
+linking = "data"
+
+[[native]]
+path = "onnxruntime/capi/libonnxruntime.so.*"
+component = "ONNX Runtime 1.30.0"
+license = "MIT AND LicenseRef-onnxruntime-ThirdPartyNotices"
+linking = "static"
+note = "MIT; the parts compiled in are listed in onnxruntime/ThirdPartyNotices.txt (Eigen MPL-2.0, protobuf and re2 BSD-3-Clause, abseil and flatbuffers Apache-2.0, and others), all permissive or file-level copyleft."
+
+[[native]]
+path = "onnxruntime/capi/libonnxruntime_providers_shared.so"
+component = "ONNX Runtime provider bridge"
+license = "MIT"
+linking = "dynamic"
+
+[[native]]
+path = "onnxruntime/capi/onnxruntime_pybind11_state.*.so"
+component = "ONNX Runtime Python binding (pybind11)"
+license = "MIT AND BSD-3-Clause AND LicenseRef-onnxruntime-ThirdPartyNotices"
+linking = "static"
+note = "pybind11 is BSD-3-Clause; the rest as libonnxruntime."
+
+[[native]]
+path = "numpy/*.so"
+component = "NumPy extension modules"
+license = "BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0"
+linking = "static"
+
+[[native]]
+path = "numpy.libs/libscipy_openblas64_-*"
+component = "OpenBLAS (scipy-openblas build)"
+license = "BSD-3-Clause"
+linking = "dynamic"
+
+[[native]]
+path = "numpy.libs/libgfortran-*"
+component = "libgfortran 5 (GCC runtime)"
+license = "GPL-3.0-or-later WITH GCC-exception-3.1"
+linking = "dynamic"
+
+[[native]]
+path = "numpy.libs/libquadmath-*"
+component = "libquadmath (GCC runtime)"
+license = "LGPL-2.1-or-later"
+linking = "dynamic"
+
+[[native]]
+path = "PIL/*.so"
+component = "Pillow extension modules"
+license = "MIT-CMU"
+linking = "static"
+
+[[native]]
+path = "pillow.libs/libjpeg-*"
+component = "libjpeg-turbo"
+license = "IJG AND BSD-3-Clause AND Zlib"
+linking = "dynamic"
+
+[[native]]
+path = "pillow.libs/libpng16-*"
+component = "libpng 1.6"
+license = "libpng-2.0"
+linking = "dynamic"
+
+[[native]]
+path = "pillow.libs/libtiff-*"
+component = "libtiff"
+license = "libtiff"
+linking = "dynamic"
+
+[[native]]
+path = "pillow.libs/libwebp*"
+component = "libwebp, libwebpdemux, libwebpmux"
+license = "BSD-3-Clause"
+linking = "dynamic"
+
+[[native]]
+path = "pillow.libs/libsharpyuv-*"
+component = "libsharpyuv (libwebp)"
+license = "BSD-3-Clause"
+linking = "dynamic"
+
+[[native]]
+path = "pillow.libs/libavif-*"
+component = "libavif"
+license = "BSD-2-Clause"
+linking = "dynamic"
+
+[[native]]
+path = "pillow.libs/libfreetype-*"
+component = "FreeType"
+license = "FTL OR GPL-2.0-or-later"
+linking = "dynamic"
+note = "Used under the FreeType Licence (FTL)."
+
+[[native]]
+path = "pillow.libs/libharfbuzz-*"
+component = "HarfBuzz"
+license = "MIT"
+linking = "dynamic"
+
+[[native]]
+path = "pillow.libs/liblcms2-*"
+component = "Little CMS 2"
+license = "MIT"
+linking = "dynamic"
+
+[[native]]
+path = "pillow.libs/libopenjp2-*"
+component = "OpenJPEG"
+license = "BSD-2-Clause"
+linking = "dynamic"
+
+[[native]]
+path = "pillow.libs/liblzma-*"
+component = "XZ Utils liblzma 5.8"
+license = "0BSD"
+linking = "dynamic"
+
+[[native]]
+path = "pillow.libs/libbrotli*"
+component = "Brotli (common, decoder)"
+license = "MIT"
+linking = "dynamic"
+
+[[native]]
+path = "pillow.libs/libzstd-*"
+component = "Zstandard"
+license = "BSD-3-Clause OR GPL-2.0-only"
+linking = "dynamic"
+note = "Used under BSD-3-Clause."
+
+[[native]]
+path = "pillow.libs/libxcb-*"
+component = "libxcb"
+license = "X11"
+linking = "dynamic"
+
+[[native]]
+path = "pillow.libs/libXau-*"
+component = "libXau"
+license = "MIT"
+linking = "dynamic"
+
+[[native]]
+path = "cryptography/hazmat/bindings/_rust.abi3.so"
+component = "cryptography's Rust extension, with OpenSSL 4.0.3 and Rust crates compiled in"
+license = "(Apache-2.0 OR BSD-3-Clause) AND Apache-2.0 AND (MIT OR Apache-2.0)"
+linking = "static"
+note = "OpenSSL 3 and later is Apache-2.0; the Rust crates are MIT OR Apache-2.0."
+
+[[native]]
+path = "_cffi_backend.*.so"
+component = "cffi backend"
+license = "MIT-0"
+linking = "static"
+
+# ---------------------------------------------------------------------------------------------------
+# Model files (worker-face/models/, fetched at build time; not in site-packages)
+# ---------------------------------------------------------------------------------------------------
+[[model]]
+name = "face_landmarker.task"
+component = "MediaPipe Face Landmarker v1 (float16): BlazeFace short-range, Face Mesh V2, Blendshapes V2"
+license = "Apache-2.0"
+sha256 = "64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff"
+note = "Google's own training data, model cards with a fairness evaluation (green in docs/research/FACE_MODELS.md)."
+
+[[model]]
+name = "glintr100.onnx"
+component = "AuraFace v1 recognition model (fal.ai), the only AuraFace file used"
+license = "Apache-2.0"
+sha256 = "a7933ea5330113b01c9b60351d8f4c33003f145d8470ac5f0e52ee2effe25c60"
+note = "AMBER: trained on an undisclosed 'commercial dataset'. Test sessions only (PM, 2026-10-19); lawyer items in docs/LICENSES.md. The four other files of fal/AuraFace-v1 are InsightFace's non-commercial antelopev2 files and are never fetched."

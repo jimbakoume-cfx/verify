@@ -1,0 +1,58 @@
+# The face worker (M6 liveness evaluation, M7 face match): measures the face check's frames with
+# MediaPipe Face Landmarker's models (on LiteRT) and compares the ID portrait with the best frame
+# (AuraFace). Runs as one Vercel Python function (api/process.py, project confiance-verify-face), a
+# second project beside the AI worker because the models do not fit in one 500 MB function. See README.md.
+[project]
+name = "confiance-verify-face"
+version = "1.0.0"
+description = "Confiance Verify face worker: server-side liveness evaluation and face match for rider KYC"
+readme = "README.md"
+classifiers = ["Private :: Do Not Upload"]
+requires-python = "==3.12.*"
+# Exact pins, each released at least two weeks before it was adopted (exclude-newer enforces it).
+# Licences, and the native libraries bundled in each wheel: docs/LICENSES.md.
+dependencies = [
+  # LiteRT (the TensorFlow Lite runtime), Apache-2.0: runs Face Landmarker's three .tflite models.
+  # Not the `mediapipe` package: its one native library is 112 MB (README.md, "Bundle size").
+  "ai-edge-litert==2.2.0",
+  # AuraFace's glintr100.onnx (face match).
+  "onnxruntime==1.30.0",
+  "numpy==2.5.3",
+  # JPEG decoding, resampling and the affine warps (alignment, crops).
+  "pillow==12.3.0",
+  # Ed25519 request signing.
+  "cryptography==50.0.2",
+]
+
+[dependency-groups]
+dev = [
+  "pytest==9.1.1",
+  "pip-licenses==5.5.5",
+]
+
+[tool.vercel]
+entrypoint = "api.process:handler"
+
+[tool.uv]
+package = false
+# Two weeks before adoption (2026-10-19).
+exclude-newer = "2026-10-05T00:00:00Z"
+# ai-edge-litert declares packages its interpreter never imports (checked: importing
+# ai_edge_litert.interpreter loads numpy only; tests/test_deploy_config.py keeps it so). Left out: less
+# to ship, fewer licences (tqdm is MPL-2.0 and MIT), and room under Vercel's 500 MB limit.
+override-dependencies = [
+  "tqdm; sys_platform == 'never'",
+  "protobuf; sys_platform == 'never'",
+  "ml-dtypes; sys_platform == 'never'",
+  "backports-strenum; sys_platform == 'never'",
+  "flatbuffers; sys_platform == 'never'",
+  "typing-extensions; sys_platform == 'never'",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra"
+markers = [
+  "models: needs the model files (scripts/fetch_models.py); skipped when they are missing",
+]

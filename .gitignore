@@ -18,3 +18,6 @@ test-data/
 
 # Python bytecode (scripts/make-mrz-fixtures.py)
 __pycache__/
+
+# Face worker model files (worker-face/scripts/fetch_models.py), fetched at build time, never in git
+worker-face/models/

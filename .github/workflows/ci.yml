@@ -27,10 +27,13 @@ jobs:
       - name: Edge Functions type check (Deno)
         run: >-
           npx deno check supabase/functions/flow/index.ts supabase/functions/admin/index.ts
-          supabase/functions/worker/index.ts supabase/functions/*/*.test.ts
+          supabase/functions/worker/index.ts supabase/functions/face/index.ts supabase/functions/*/*.test.ts
           worker/tests/tools/server_mrz.ts worker/tests/tools/server_worker.ts worker/tests/tools/server_consistency.ts
+          worker-face/tests/tools/server_face.ts
       - name: Edge Functions lint (Deno)
-        run: npx deno lint supabase/functions worker/tests/tools/server_mrz.ts worker/tests/tools/server_worker.ts worker/tests/tools/server_consistency.ts
+        run: >-
+          npx deno lint supabase/functions worker/tests/tools/server_mrz.ts worker/tests/tools/server_worker.ts
+          worker/tests/tools/server_consistency.ts worker-face/tests/tools/server_face.ts
       - run: npm test
       - run: npm run build
 
@@ -118,6 +121,44 @@ jobs:
         run: |
           UV_PROJECT_ENVIRONMENT="$RUNNER_TEMP/worker-prod" uv sync --frozen --no-dev
           uv run python ../scripts/check-python-licenses.py --prod-python "$RUNNER_TEMP/worker-prod/bin/python"
+
+  worker-face:
+    name: Face worker (Python lock, tests without the models, licences)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: worker-face
+    steps:
+      - uses: actions/checkout@v6
+      # Node and the repo's pinned Deno: tests/test_edge_function.py runs the real face Edge Function.
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+        working-directory: .
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.11.32"
+          enable-cache: true
+          cache-dependency-glob: worker-face/uv.lock
+      - name: The lock file matches pyproject.toml
+        run: uv lock --check
+      - run: uv sync --frozen
+      # The model files (AuraFace alone is 261 MB) are not fetched in CI: the tests marked `models` are
+      # skipped here and run locally after scripts/fetch_models.py (docs/M6_SPEC.md, "Tests").
+      - name: Tests, without the model files
+        run: uv run pytest
+        env:
+          FACE_REQUIRE_DENO: "1"
+      # The anti-spoofing manifest rules (training/antispoof/py/manifest.py): standard library only.
+      - name: Anti-spoofing manifest rules
+        run: python3 -m unittest discover -s ../training/antispoof/py -p "test_*.py"
+      - name: Python licences
+        run: |
+          UV_PROJECT_ENVIRONMENT="$RUNNER_TEMP/face-prod" uv sync --frozen --no-dev
+          uv run python ../scripts/check-python-licenses.py --prod-python "$RUNNER_TEMP/face-prod/bin/python" --table ../scripts/python-licenses-face.toml
 
   secrets:
     name: Secret scan
