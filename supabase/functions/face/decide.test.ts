@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   FACE_MATCH_DETAIL_KEYS,
@@ -318,8 +317,12 @@ describe("decideFaceMatch", () => {
   });
 });
 
+// node:fs through a variable, so that type checkers without Node's types (deno check) skip it.
+const nodeFs = "node:fs";
+const { readFileSync } = (await import(/* @vite-ignore */ nodeFs)) as { readFileSync(path: URL, encoding: "utf8"): string };
+const sql = readFileSync(new URL("../../migrations/20261020000000_m6_m7_face.sql", import.meta.url), "utf8");
+
 describe("the database refuses any other key or code (supabase/migrations/20261020000000_m6_m7_face.sql)", () => {
-  const sql = readFileSync(new URL("../../migrations/20261020000000_m6_m7_face.sql", import.meta.url), "utf8");
   const list = (values: readonly string[]) => `array[${values.map((v) => `'${v}'`).join(", ")}]`;
   const sorted = (values: readonly string[]) => [...values].sort();
   const squash = (text: string) => text.replace(/\s+/g, " ");

@@ -247,6 +247,7 @@ function setup(configOverrides: Partial<FunctionConfig> = {}, { logToConsole = f
     riderAppUrl: RIDER_APP_URL,
     testSessionTtlMinutes: 30,
     workerRingUrl: null,
+    faceRingUrl: null,
     ...configOverrides,
   };
   const handler = createAdminHandler({

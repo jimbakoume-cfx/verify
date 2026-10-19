@@ -104,6 +104,7 @@ function setup() {
     riderAppUrl: "https://rider.example",
     testSessionTtlMinutes: 30,
     workerRingUrl: null,
+    faceRingUrl: null,
   };
   const handler = createAdminHandler({
     repo,
