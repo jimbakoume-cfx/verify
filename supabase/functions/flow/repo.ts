@@ -1,16 +1,25 @@
 // Supabase implementation of FlowRepo and CaptureStorage (service role).
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { type CaptureSide, type DeclaredDocument, type FlowStatus, SERVER_CHECK_NAMES } from "../_shared/contract.ts";
+import {
+  type DeclaredDocument,
+  type FlowStatus,
+  type LivenessAction,
+  SERVER_CHECK_NAMES,
+} from "../_shared/contract.ts";
 import { ID_CAPTURES_BUCKET } from "../_shared/config.ts";
 import { dbError, insertAudit } from "../_shared/db.ts";
 import { InternalError } from "../_shared/log.ts";
 import type { CheckStateRow } from "./checks.ts";
 import type {
   CaptureStorage,
+  ChallengeIssue,
   FlowRepo,
   FlowVerification,
+  LivenessRecordResult,
   MrzRecordResult,
+  RequiredKind,
   StoredCapture,
+  StoredChallenge,
   SubmitResult,
 } from "./handler.ts";
 
@@ -61,6 +70,8 @@ export function createFlowRepo(db: SupabaseClient): FlowRepo {
         consent_version: c.consentVersion,
         language: c.language,
         user_agent: c.userAgent,
+        keep_face_images: c.keepFaceImages,
+        keep_face_images_version: c.keepFaceImagesVersion,
       });
       if (error) throw dbError("consent_record.insert", error);
     },
@@ -140,10 +151,10 @@ export function createFlowRepo(db: SupabaseClient): FlowRepo {
       return data.id;
     },
 
-    async submit(verificationId, requiredSides: readonly CaptureSide[]) {
+    async submit(verificationId, requiredKinds: readonly RequiredKind[]) {
       const { data, error } = await db.rpc("flow_submit", {
         p_verification: verificationId,
-        p_required: [...requiredSides],
+        p_required: [...requiredKinds],
       });
       if (error) throw dbError("rpc.flow_submit", error);
       if (data !== "ok" && data !== "already_submitted" && data !== "missing_sides") {
@@ -233,6 +244,100 @@ export function createFlowRepo(db: SupabaseClient): FlowRepo {
       if (error) throw dbError("check_result.consistency", error);
       const flags = data?.details?.flags;
       return Array.isArray(flags) ? flags.filter((flag): flag is string => typeof flag === "string") : [];
+    },
+
+    async issueLivenessChallenge(issue) {
+      const { data, error } = await db.rpc("flow_issue_liveness_challenge", {
+        p_verification: issue.verificationId,
+        p_actions: issue.actions,
+        p_code: issue.code,
+        p_ttl_seconds: issue.ttlSeconds,
+        p_max: issue.max,
+      });
+      if (error) throw dbError("rpc.flow_issue_liveness_challenge", error);
+      const row = ((data ?? []) as { result: string; challenge_id: string | null; expires_at: string | null }[])[0];
+      if (row?.result === "ok" && row.challenge_id && row.expires_at) {
+        return { result: "ok", challengeId: row.challenge_id, expiresAt: row.expires_at } satisfies ChallengeIssue;
+      }
+      if (row?.result === "too_many" || row?.result === "closed") return { result: row.result } satisfies ChallengeIssue;
+      throw new InternalError("rpc.flow_issue_liveness_challenge returned an unexpected value");
+    },
+
+    async getLivenessChallenge(verificationId, challengeId) {
+      const { data, error } = await db.from("liveness_challenge")
+        .select("id, actions, code, created_at, expires_at, superseded_at, used_at")
+        .eq("id", challengeId).eq("verification_id", verificationId)
+        .maybeSingle<{
+          id: string;
+          actions: LivenessAction[];
+          code: string;
+          created_at: string;
+          expires_at: string;
+          superseded_at: string | null;
+          used_at: string | null;
+        }>();
+      if (error) throw dbError("liveness_challenge.select", error);
+      if (!data) return null;
+      const challenge: StoredChallenge = {
+        id: data.id,
+        actions: data.actions,
+        code: data.code,
+        createdAt: data.created_at,
+        expiresAt: data.expires_at,
+        supersededAt: data.superseded_at,
+        usedAt: data.used_at,
+      };
+      return challenge;
+    },
+
+    async livenessFramePaths(challengeId) {
+      const { data, error } = await db.from("capture").select("storage_path")
+        .eq("liveness_challenge_id", challengeId).is("deleted_at", null);
+      if (error) throw dbError("capture.select_frames", error);
+      return (data as { storage_path: string }[]).map((row) => row.storage_path);
+    },
+
+    async shasUsedElsewhere(sha256s, verificationId) {
+      // Deleted rows count too, as for the photos (isShaUsedElsewhere).
+      const { data, error } = await db.from("capture").select("id").in("sha256", [...sha256s])
+        .neq("verification_id", verificationId).limit(1);
+      if (error) throw dbError("capture.select_frames_by_sha", error);
+      return data.length > 0;
+    },
+
+    async recordLiveness(r) {
+      // The code travels only as an RPC parameter (the project does not log parameters); the
+      // database compares it with the challenge's and never writes it to the audit log.
+      const { data, error } = await db.rpc("flow_record_liveness", {
+        p_verification: r.verificationId,
+        p_challenge: r.challengeId,
+        p_code: r.code,
+        p_frames: r.frames,
+        p_version: r.version,
+        p_outcome: r.outcome,
+        p_details: r.details,
+      });
+      if (error) throw dbError("rpc.flow_record_liveness", error);
+      const row = ((data ?? []) as { result: string; superseded_paths: string[] | null }[])[0];
+      switch (row?.result) {
+        case "ok":
+          return { result: "ok", supersededPaths: row.superseded_paths ?? [] } satisfies LivenessRecordResult;
+        case "not_found":
+        case "used":
+        case "expired":
+        case "code_mismatch":
+        case "closed":
+          return { result: row.result } satisfies LivenessRecordResult;
+        default:
+          throw new InternalError("rpc.flow_record_liveness returned an unexpected value");
+      }
+    },
+
+    async hasLiveness(verificationId) {
+      const { data, error } = await db.from("capture").select("id").eq("verification_id", verificationId)
+        .eq("kind", "liveness_frame").is("deleted_at", null).limit(1);
+      if (error) throw dbError("capture.select_liveness", error);
+      return data.length > 0;
     },
 
     async workerEnabledForRealSessions() {
