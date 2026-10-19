@@ -1,13 +1,16 @@
 // Shared checks on what reached the fake backend.
 import { expect } from "@playwright/test";
 import { CAPTURE_LIMITS, type ClientQuality } from "../../supabase/functions/_shared/contract";
-import type { StoredObject } from "./backend";
+import type { FakeBackend, StorageAttempt, StoredObject } from "./backend";
 import { hasApp1 } from "./jpeg";
+
+/** M5: the face check, between the server's checks and the submit: a challenge, then the frames' report. */
+export const LIVENESS = ["POST /liveness/challenge", "POST /liveness/captures"];
 
 /**
  * The calls of a complete ID-card flow: photos are sent after both sides are accepted, then the app
- * asks for the server's checks of them (M3) before submitting. The fake worker has checked them by
- * the first answer unless a test says otherwise (FakeBackend.worker).
+ * asks for the server's checks of them (M3), then the face check (M5), before submitting. The fake
+ * worker has checked them by the first answer unless a test says otherwise (FakeBackend.worker).
  */
 export const CARD_FLOW = [
   "GET /session",
@@ -18,11 +21,12 @@ export const CARD_FLOW = [
   "POST /upload-url",
   "POST /captures",
   "GET /checks",
+  ...LIVENESS,
   "POST /submit",
 ];
 
 /** The new CNI: as above, plus the report of its code lines once the back is on the server. */
-export const NEW_CNI_FLOW = [...CARD_FLOW.slice(0, -2), "POST /mrz", "GET /checks", "POST /submit"];
+export const NEW_CNI_FLOW = [...CARD_FLOW.slice(0, -4), "POST /mrz", "GET /checks", ...LIVENESS, "POST /submit"];
 
 /** A passport: one photo (the data page), the report of its code lines, the checks, then the submit. */
 export const PASSPORT_FLOW = [
@@ -33,8 +37,14 @@ export const PASSPORT_FLOW = [
   "POST /captures",
   "POST /mrz",
   "GET /checks",
+  ...LIVENESS,
   "POST /submit",
 ];
+
+/** The storage uploads of the document photos (M5: the face check's frames left out). */
+export function photoAttempts(backend: FakeBackend): StorageAttempt[] {
+  return backend.storageAttempts.filter((a) => /\/document_(front|back)-/.test(a.path));
+}
 
 /** The routes from the first photo's upload link on: what the server saw of the photos. */
 export function afterPhotos(routes: readonly string[]): string[] {

@@ -35,7 +35,7 @@ test("passport: only the photo page is taken, its code lines are read (every che
   await rider.usePhoto();
 
   // No "turn the card over" step: straight to the upload.
-  await expect(rider.heading("done.title")).toBeVisible({ timeout: 20_000 });
+  await rider.waitForSubmit();
   expect(backend.routes).toEqual(PASSPORT_FLOW);
   expect(backend.calls[2].body).toEqual({ declaredDocument: "passport" });
   expect(backend.calls[3].body).toEqual({ kind: "document_front" });

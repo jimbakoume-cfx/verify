@@ -1,7 +1,7 @@
 // Camera: a sharp, well-framed ID card, as a Full HD phone held upright sees it. These tests declare
 // the old CNI, which has no code lines: nothing is read. The new CNI is in capture-cni-biometric.spec.ts.
 import { CONSENT_VERSION } from "../supabase/functions/_shared/contract";
-import { CARD_FLOW, expectAutoQuality, expectCleanPhoto } from "./support/expectations";
+import { CARD_FLOW, expectAutoQuality, expectCleanPhoto, photoAttempts } from "./support/expectations";
 import { cameraRequests, expect, liveCameraTracks, test } from "./support/fixtures";
 
 const readStoredToken = () => sessionStorage.getItem("verify.session");
@@ -37,30 +37,33 @@ test("old CNI happy path: both sides captured automatically, uploaded and submit
   await expect(rider.mrzRead).toHaveCount(0);
   await rider.usePhoto();
 
-  await expect(rider.heading("done.title")).toBeVisible({ timeout: 20_000 });
+  await rider.waitForSubmit();
   await expect(page.getByText(rider.t("done.next"))).toBeVisible();
   expect(await liveCameraTracks(page)).toBe(0);
   expect(await rider.screensSeen()).not.toContain(rider.t("reading.title"));
 
-  // The app asked for the back camera at Full HD, without audio (spec).
+  // The app asked for the back camera at Full HD, without audio (spec), then (M5) the front camera.
   const requests = await cameraRequests(page);
-  expect(requests).toHaveLength(2);
-  for (const request of requests) {
+  expect(requests).toHaveLength(3);
+  for (const request of requests.slice(0, 2)) {
     expect(request).toEqual({
       video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } },
       audio: false,
     });
   }
+  expect(requests[2]).toEqual({ video: { facingMode: { ideal: "user" }, width: { ideal: 640 }, height: { ideal: 480 } }, audio: false });
 
   expect(backend.routes).toEqual(CARD_FLOW);
-  expect(backend.calls[1].body).toEqual({ consentVersion: CONSENT_VERSION, language: "fr" });
+  // M5: the optional "keep my face images" box is sent unticked.
+  expect(backend.calls[1].body).toEqual({ consentVersion: CONSENT_VERSION, language: "fr", keepFaceImages: false });
   expect(backend.calls[2].body).toEqual({ declaredDocument: "cni_legacy" });
   expect(backend.calls.filter((c) => c.route === "POST /upload-url").map((c) => c.body)).toEqual([
     { kind: "document_front" },
     { kind: "document_back" },
   ]);
-  expect(backend.storageAttempts.map((a) => a.status)).toEqual([200, 200]);
+  expect(photoAttempts(backend).map((a) => a.status)).toEqual([200, 200]);
   expect(backend.captures.map((c) => c.kind)).toEqual(["document_front", "document_back"]);
+  expect(backend.livenessRecords).toHaveLength(1);
   for (const capture of backend.captures) {
     expectCleanPhoto(capture.object);
     expectAutoQuality(capture.quality);
@@ -83,11 +86,11 @@ test("upload failure: automatic retries, then the rider's retry succeeds without
   expect(backend.storageAttempts.map((a) => a.status)).toEqual([503, 503, 503]);
 
   await rider.button("common.retry").click();
-  await expect(rider.heading("done.title")).toBeVisible({ timeout: 20_000 });
+  await rider.waitForSubmit();
 
   // The retry resumed with the same signed upload (no extra link counted against the session).
   expect(backend.routes).toEqual(CARD_FLOW);
-  const attempts = backend.storageAttempts;
+  const attempts = photoAttempts(backend);
   expect(attempts.map((a) => a.status)).toEqual([503, 503, 503, 200, 200]);
   expect(new Set(attempts.slice(0, 4).map((a) => a.path)).size).toBe(1);
   for (const capture of backend.captures) expectCleanPhoto(capture.object);
@@ -154,11 +157,11 @@ test.describe("language", () => {
     await rider.turnOver();
     await rider.autoCapture("cni_legacy", "document_back");
     await rider.usePhoto();
-    await expect(rider.heading("done.title")).toBeVisible({ timeout: 20_000 });
+    await rider.waitForSubmit();
 
     // Nothing was redone: one consent (given in French), one document choice, two photos.
     expect(backend.routes).toEqual(CARD_FLOW);
-    expect(backend.calls[1].body).toEqual({ consentVersion: CONSENT_VERSION, language: "fr" });
+    expect(backend.calls[1].body).toEqual({ consentVersion: CONSENT_VERSION, language: "fr", keepFaceImages: false });
     expect(backend.captures.map((c) => c.kind)).toEqual(["document_front", "document_back"]);
   });
 });

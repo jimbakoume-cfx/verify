@@ -3,7 +3,7 @@
 // and GET /flow/checks says so once the back is checked. "Checking your photos…" then stops waiting
 // and asks the rider to use another, valid document, or to continue anyway.
 import { expect, test } from "./support/fixtures";
-import { CARD_FLOW, NEW_CNI_FLOW, afterPhotos } from "./support/expectations";
+import { CARD_FLOW, LIVENESS, NEW_CNI_FLOW, afterPhotos } from "./support/expectations";
 
 /** The routes of one round of photos sent: an upload link and its confirmation per photo. */
 const SEND = (photos: number) => Array.from({ length: photos }, () => ["POST /upload-url", "POST /captures"]).flat();
@@ -32,7 +32,7 @@ test("expired document, 'Continue anyway': told at once, then the case is submit
   await rider.button("checks.expired.continue").click();
   await rider.waitForSubmit();
   // Asked once more after "Continue anyway", then submitted: staff see the hard flag.
-  expect(backend.routes).toEqual([...NEW_CNI_FLOW.slice(0, -1), "GET /checks", "POST /submit"]);
+  expect(backend.routes).toEqual([...NEW_CNI_FLOW.slice(0, -3), "GET /checks", ...LIVENESS, "POST /submit"]);
   expect(backend.status).toBe("submitted");
   await expect(page.getByRole("alert")).toHaveCount(0);
 });
@@ -73,6 +73,7 @@ test("expired document, 'Use another document': back to the list; the next docum
     "POST /document-type",
     ...SEND(2),
     "GET /checks",
+    ...LIVENESS,
     "POST /submit",
   ]);
   expect(backend.captures.map((c) => [c.kind, c.live])).toEqual([

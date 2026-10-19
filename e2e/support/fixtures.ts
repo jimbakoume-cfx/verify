@@ -51,16 +51,25 @@ function installCameraProbe({ portrait }: { portrait: boolean }): void {
  * Serialised into the page: it must not use anything from this module.
  */
 function installPageProbes(): void {
-  const page = window as unknown as { __screens: string[]; __cspViolation?: (text: string) => void };
+  const page = window as unknown as {
+    __screens: string[];
+    __screenTimes: number[];
+    __cspViolation?: (text: string) => void;
+  };
   document.addEventListener("securitypolicyviolation", (event) => {
     page.__cspViolation?.(`${event.effectiveDirective} blocked ${event.blockedURI || "inline code"}`);
   });
   const screens: string[] = [];
+  const times: number[] = [];
   page.__screens = screens;
+  page.__screenTimes = times;
   // A mutation observer runs before the browser paints: even a screen shown for one frame is seen.
   new MutationObserver(() => {
     const title = document.querySelector("h1")?.textContent ?? "";
-    if (title && screens[screens.length - 1] !== title) screens.push(title);
+    if (title && screens[screens.length - 1] !== title) {
+      screens.push(title);
+      times.push(Date.now());
+    }
   }).observe(document, { subtree: true, childList: true, characterData: true });
 }
 
