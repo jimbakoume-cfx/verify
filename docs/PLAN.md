@@ -121,7 +121,7 @@ Confiance ride app/backend ──(API key)──► Supabase Edge Function "sess
 - `decision`: system or reviewer, outcome, reason code, note.
 - `reason_code`: FR/EN text shown to riders.
 - `appeal`.
-- `threshold_config`: versioned; who changed it and when.
+- `threshold_config`: versioned; who changed it and when. Since M8: append-only, the highest version is active, each with its reason; the case's assessment is stored on `verification` and each `decision` records the version, the recommendation shown and whether it agreed.
 - `staff_profile`: role is reviewer, supervisor or admin; linked to the Supabase Auth user.
 - `audit_event`: append-only and hash-chained. No one, admins included, can edit or delete a row.
 - `webhook_delivery`.
@@ -148,7 +148,7 @@ The exact routes, request and response types, limits and error codes of the impl
 - Queue and case details: read directly via database rules. Each role sees only what it is allowed.
 - Since M1: `POST /admin/enroll {email, code, password}` (staff account set-up by one-time invite code) · `POST /admin/test-sessions` (test rider links, until M10) · `POST /admin/captures/view {captureId}` (audited, 60-second link).
 - Since M2: `POST /admin/document-data {verificationId}` (the code lines read on the phone, decrypted; audited before decryption; never for admins). Since M3 it also returns the code lines and printed fields read by the server.
-- Planned: `POST /admin/verifications/{id}/decision`
+- Since M8: `POST /admin/decisions {verificationId, outcome, reasonCode, note}` (supervisor or the assigned reviewer; never admin) · `POST /admin/thresholds {baseVersion, config, note}` (admins only; active at once).
 - Search: supervisors and above.
 - Thresholds: admins only.
 - Metrics, audit log, appeals.
@@ -262,6 +262,17 @@ Details: `docs/M4_SPEC.md`.
 2. **Face model (M7): research first, then you decide.** Most good public face models, and the datasets they were trained on, are non-commercial (InsightFace, the published ArcFace weights, VGGFace2). We will find the best option that is licensed for commercial use, or a plan to train our own. We document its licence and its accuracy limits, and show you before anything is built on it. The rest of M5–M7 is built around it in the meantime.
 3. **Hosting: Vercel Hobby, test sessions only, for now.** Liveness and face checks run only on test sessions, under the daily cap. Moving to Vercel Pro (with its DPA) or to another host is decided before the pilot.
 4. **Product decisions during the build: the safest default, recorded.** We pick the conservative option (more staff review, less automatic), record it in this file and list it at each milestone's ping for you to review. Anything legal, financial or licence-related still waits for you.
+
+### Decisions for M8 (2026-10-19, safest defaults, for your review)
+1. **Every case still goes to a person.** Automatic decisions exist but are off. Even switched on (a threshold setting), they apply to test sessions only and never approve a case with a check missing; liveness and face match do not exist before M6 and M7, so nothing is approved automatically, or even recommended for approval, before then.
+2. **Hard flags mean review, whatever the score.** Always: expired document, under 18, and the documents always checked by a person (M3/M4 decisions); by default also a photo already used in another verification and a foreign ID card. An admin can add hard flags, never remove those three.
+3. **Only firm signals can recommend a reject** (code lines with every check digit right, or the same photo bytes twice). Printed text, keywords, untuned quality thresholds and, later, liveness and face scores can only send a case to a person. Under 18 counts as provisional (it may come from print).
+4. **The documents you decided are always reviewed** (old CNI, residence permits and refugee cards, driving licence, voter card) stay so in every threshold version.
+5. **Decisions:** supervisors and the assigned reviewer, never admins (no routine access to photos or data). A reject needs a rider reason; a note is required to go against the recommendation or to approve a case with a hard flag. Each decision records the threshold version, the recommendation and score shown, and whether it agreed (for M12).
+6. **Thresholds:** admins only, from the dashboard, without a redeploy. Versions are never edited; each records who and why. A new version re-assesses every case waiting for a decision at once.
+7. **First weights and cut-offs are guesses** (approve at 0.15 or less, reject from 0.9 of firm signals), to calibrate in M12. Q1 (speed target) and Q4 (duplicate detection) stay open: nothing is matched across riders beyond the M1 "same photo" signal.
+
+Details: `docs/M8_SPEC.md`.
 
 ---
 
