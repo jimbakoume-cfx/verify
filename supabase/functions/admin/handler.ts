@@ -2,6 +2,7 @@
 // injected AdminRepo / StaffAuth / SignedUrlStorage so the rules can be tested with in-memory fakes.
 import {
   type CaptureViewResponse,
+  type DecisionResponse,
   type DocumentDataItem,
   type DocumentDataLinesItem,
   type DocumentDataResponse,
@@ -10,6 +11,7 @@ import {
   STAFF_PASSWORD_MAX_LENGTH,
   STAFF_PASSWORD_MIN_LENGTH,
   type TestSessionResponse,
+  type ThresholdVersionResponse,
   type WorkerFields,
 } from "../_shared/contract.ts";
 import { STAFF_PASSWORD_MAX_BYTES, passwordByteLength } from "../_shared/staffPassword.ts";
@@ -18,6 +20,7 @@ import { CAPTURE_VIEW_SECONDS, type FunctionConfig } from "../_shared/config.ts"
 import { randomHex as defaultRandomHex, randomToken as defaultRandomToken, sha256Hex } from "../_shared/crypto.ts";
 import { badRequest, createRouter, type Handler, HttpError, isUuid, jsonResponse, readJsonObject } from "../_shared/http.ts";
 import { consoleLogger, type Logger } from "../_shared/log.ts";
+import { type DecisionRepo, parseDecisionRequest, parseThresholdRequest } from "./decisions.ts";
 
 export type StaffRole = "reviewer" | "supervisor" | "admin";
 export type InviteResult = "ok" | "invalid";
@@ -93,6 +96,8 @@ export interface SignedUrlStorage {
 
 export interface AdminDeps {
   repo: AdminRepo;
+  /** M8: decisions and threshold versions. */
+  decisions: DecisionRepo;
   auth: StaffAuth;
   storage: SignedUrlStorage;
   config: FunctionConfig;
@@ -129,7 +134,7 @@ export function isAcceptablePassword(password: string, email: string): boolean {
 }
 
 export function createAdminHandler(deps: AdminDeps): Handler {
-  const { repo, auth, storage, config } = deps;
+  const { repo, auth, storage, config, decisions } = deps;
   const now = deps.now ?? (() => new Date());
   const randomToken = deps.randomToken ?? (() => defaultRandomToken());
   const randomHex = deps.randomHex ?? defaultRandomHex;
@@ -296,6 +301,68 @@ export function createAdminHandler(deps: AdminDeps): Handler {
     return jsonResponse(200, response);
   };
 
+  // M8. The database re-checks the access rule, records the decision with the threshold version and the
+  // recommendation shown, closes the case and writes the audit entry, all in one transaction.
+  const postDecisions: Handler = async (req) => {
+    const staff = await requireStaff(req);
+    // Plan: admins manage the system but have no routine access to cases.
+    if (staff.role === "admin") throw new HttpError(403, "forbidden_role");
+    const request = parseDecisionRequest(await readJsonObject(req));
+    if (!(await repo.verificationExists(request.verificationId))) throw new HttpError(404, "not_found");
+    // A reviewer who does not hold the case gets the same answer as for a missing one (see postCaptureView).
+    if (staff.role !== "supervisor" && !(await repo.isAssignedReviewer(request.verificationId, staff.userId))) {
+      throw new HttpError(404, "not_found");
+    }
+    const result = await decisions.decide({ ...request, actorId: staff.userId, role: staff.role });
+    switch (result.result) {
+      case "ok": {
+        const response: DecisionResponse = {
+          decisionId: result.decisionId,
+          status: result.status,
+          recommendation: result.recommendation,
+          agreesWithRecommendation: result.agreesWithRecommendation,
+          thresholdVersion: result.thresholdVersion,
+        };
+        return jsonResponse(200, response);
+      }
+      case "not_found":
+        throw new HttpError(404, "not_found");
+      case "forbidden":
+        throw new HttpError(403, "forbidden_role");
+      case "already_decided":
+      case "not_submitted":
+        throw new HttpError(409, result.result);
+      case "note_required":
+      case "invalid_reason":
+        throw new HttpError(422, result.result);
+    }
+  };
+
+  // M8: thresholds are for admins only. The new version is active at once (no redeploy) and every
+  // submitted, undecided case is assessed again with it; audited by the database (never the note).
+  const postThresholds: Handler = async (req) => {
+    const staff = await requireStaff(req);
+    if (staff.role !== "admin") throw new HttpError(403, "forbidden_role");
+    const request = parseThresholdRequest(await readJsonObject(req));
+    const result = await decisions.createThresholdVersion({ ...request, actorId: staff.userId });
+    switch (result.result) {
+      case "created": {
+        const response: ThresholdVersionResponse = { version: result.version, rescored: result.rescored };
+        return jsonResponse(200, response);
+      }
+      case "stale":
+        throw new HttpError(409, "stale_version");
+      case "forbidden":
+        throw new HttpError(403, "forbidden_role");
+      case "invalid":
+        throw new HttpError(400, "bad_request", `Invalid configuration: ${result.errors.slice(0, 10).join(", ")}`);
+      case "invalid_note":
+        throw new HttpError(400, "bad_request", "A reason (note) is required.");
+      case "unchanged":
+        throw new HttpError(400, "bad_request", "The configuration is the same as the active version.");
+    }
+  };
+
   return createRouter({
     name: "admin",
     allowedOrigins: config.allowedOrigins,
@@ -305,6 +372,8 @@ export function createAdminHandler(deps: AdminDeps): Handler {
       "/test-sessions": { POST: postTestSessions },
       "/captures/view": { POST: postCaptureView },
       "/document-data": { POST: postDocumentData },
+      "/decisions": { POST: postDecisions },
+      "/thresholds": { POST: postThresholds },
     },
   });
 }
