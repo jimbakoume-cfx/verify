@@ -26,6 +26,7 @@ export function FaceChecksSection({
   profile,
   onReload,
   initialPhotos,
+  faceMatchCounted = false,
 }: {
   /** Undefined until the first load ends. */
   checks: FaceChecks | undefined;
@@ -36,6 +37,11 @@ export function FaceChecksSection({
   onReload: () => void;
   /** Photos already open (dev screen preview only). */
   initialPhotos?: Record<string, OpenPhoto>;
+  /**
+   * Automatic approval: the case's assessment counted the (uncalibrated) face match, because the threshold
+   * version it used sets faceMatchCountsForApproval. Otherwise the face match is review-only.
+   */
+  faceMatchCounted?: boolean;
 }) {
   const { t } = useTranslation();
   return (
@@ -51,7 +57,14 @@ export function FaceChecksSection({
       {checks && (
         <>
           <LivenessEvaluation record={checks.liveness} job={checks.jobs.liveness} />
-          <FaceMatch record={checks.faceMatch} job={checks.jobs.face_match} captures={captures} profile={profile} initialPhotos={initialPhotos} />
+          <FaceMatch
+            record={checks.faceMatch}
+            job={checks.jobs.face_match}
+            captures={captures}
+            profile={profile}
+            initialPhotos={initialPhotos}
+            counted={faceMatchCounted}
+          />
         </>
       )}
     </section>
@@ -179,12 +192,14 @@ function FaceMatch({
   captures,
   profile,
   initialPhotos,
+  counted,
 }: {
   record: FaceChecks["faceMatch"];
   job: FaceJobState;
   captures: CaptureRecord[];
   profile: StaffProfile;
   initialPhotos?: Record<string, OpenPhoto>;
+  counted: boolean;
 }) {
   const { t, i18n } = useTranslation();
   const lang = toLanguage(i18n.language);
@@ -204,7 +219,9 @@ function FaceMatch({
         <span className="dash-row-badges">
           <OutcomeBadge outcome={record.outcome} />
           <span className="badge bad">{t("face.uncalibrated")}</span>
-          <span className="badge neutral">{t("face.reviewOnly")}</span>
+          {counted
+            ? <span className="badge warn">{t("face.countedForApproval")}</span>
+            : <span className="badge neutral">{t("face.reviewOnly")}</span>}
         </span>
       </header>
       <p className="muted dash-small">
@@ -214,7 +231,7 @@ function FaceMatch({
         <p className="dash-alert info">{t("face.unreadable")}</p>
       ) : (
         <>
-          <p className="dash-alert warn">{t("face.uncalibratedBody")}</p>
+          <p className="dash-alert warn">{t(counted ? "face.uncalibratedCountedBody" : "face.uncalibratedBody")}</p>
           <dl className="dash-facts compact">
             <div>
               <dt>{t("face.similarity")}</dt>

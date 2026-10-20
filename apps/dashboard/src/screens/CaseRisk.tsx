@@ -48,6 +48,10 @@ export function RiskSection({
   const decisions = useAsync(() => services.decisions(verification.id), `decisions:${verification.id}:${verification.status}`);
   const reasons = useAsync(() => services.reasonCodes(), "reason-codes");
   const latest = decisions.data?.[0] ?? null;
+  // Automatic approval: a case the system approved and no person has decided yet can be confirmed or
+  // overturned by a supervisor (or the reviewer it was assigned to); the database checks it again.
+  const awaitingCheck = latest?.actorType === "system" && verification.status === "approved" &&
+    !(decisions.data ?? []).some((d) => d.actorType === "staff");
 
   return (
     <section className="card" aria-labelledby="risk-title">
@@ -63,7 +67,25 @@ export function RiskSection({
       <div className="dash-subsection">
         <h3 className="dash-risk-h3">{t("decision.title")}</h3>
         {decisions.error !== null && decisions.error !== undefined && <ErrorText error={decisions.error} />}
-        {latest && <DecisionView decision={latest} profile={profile} reasonCodes={reasons.data ?? []} />}
+        {(decisions.data ?? []).map((d) => <DecisionView key={d.id} decision={d} profile={profile} reasonCodes={reasons.data ?? []} />)}
+        {awaitingCheck && (
+          canDecide(profile.role)
+            ? (
+              <>
+                <p className="dash-alert info">{t("decision.checkAutomatic")}</p>
+                <DecisionForm
+                  risk={verification.risk}
+                  reasonCodes={reasons.data ?? null}
+                  onSubmit={async (request) => {
+                    await services.decide({ ...request, verificationId: verification.id });
+                    decisions.reload();
+                    onDecided();
+                  }}
+                />
+              </>
+            )
+            : <p className="dash-alert info">{t("decision.adminNoDecision")}</p>
+        )}
         {!latest && decisions.data && verification.status === "submitted" && (
           canDecide(profile.role)
             ? (
@@ -139,6 +161,8 @@ export function RiskSummary({ risk, status }: { risk: CaseRisk; status: Verifica
       </ul>
       {a.rejectReasonCode && <p>{t("risk.rejectReason", { code: a.rejectReasonCode })}</p>}
 
+      <AutoApprovalSummary assessment={a} autoApprovedAt={risk.autoApprovedAt} thresholdVersion={risk.thresholdVersion} />
+
       <h4 className="dash-risk-h4">{t("risk.signalsTitle")}</h4>
       {a.contributions.length === 0 && a.unknownSignals.length === 0
         ? <p className="muted">{t("risk.noSignals")}</p>
@@ -212,6 +236,54 @@ export function RiskSummary({ risk, status }: { risk: CaseRisk; status: Verifica
   );
 }
 
+/** Automatic approval (PM 2026-10-20): whether the system approved, or every reason it could not. */
+export function AutoApprovalSummary({
+  assessment: a,
+  autoApprovedAt,
+  thresholdVersion,
+}: {
+  assessment: RiskAssessment;
+  autoApprovedAt: string | null;
+  thresholdVersion: number | null;
+}) {
+  const { t, i18n } = useTranslation();
+  const lang = toLanguage(i18n.language);
+  const { eligible, blockers } = a.autoApproval;
+  return (
+    <div className="dash-subsection" aria-label={t("risk.auto.title")}>
+      <h4 className="dash-risk-h4">{t("risk.auto.title")}</h4>
+      {autoApprovedAt
+        ? (
+          <p className="dash-alert ok">
+            {t("risk.auto.approved", { version: thresholdVersion ?? "—", at: formatDateTime(autoApprovedAt, lang) })}
+          </p>
+        )
+        : eligible
+        ? <p className="dash-alert ok">{t("risk.auto.eligible")}</p>
+        : blockers.length === 0
+        ? <p className="muted">{t("risk.auto.notAssessed")}</p>
+        : (
+          <>
+            <p className="muted">{t("risk.auto.blocked")}</p>
+            <ul className="dash-reasons">
+              {blockers.map((b) => (
+                <li key={b}>
+                  <strong>{t(`risk.auto.blockers.${b}`)}</strong>
+                  <code className="mono muted">{b}</code>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+      {a.uncalibratedCounted.length > 0 && (
+        <p className="dash-alert warn">
+          {t("risk.auto.uncalibratedCounted", { checks: a.uncalibratedCounted.map((c) => t(`risk.reviewOnly.${c}`, { defaultValue: c })).join(", ") })}
+        </p>
+      )}
+    </div>
+  );
+}
+
 /** The score on a 0–1 line, with the two cut-offs. Decorative: the numbers are written above. */
 function ScoreBar({ assessment: a, lang }: { assessment: RiskAssessment; lang: Language }) {
   const { t } = useTranslation();
@@ -254,7 +326,11 @@ export function DecisionView({
   return (
     <article className="dash-capture" aria-label={t("decision.title")}>
       <header className="dash-capture-head">
-        <h4 className="dash-risk-h4">{t(`decision.outcome.${d.outcome}`)}</h4>
+        <h4 className="dash-risk-h4">
+          {d.actorType === "system" && d.outcome === "approve"
+            ? t("decision.autoApproved", { version: d.thresholdVersion ?? "—" })
+            : t(`decision.outcome.${d.outcome}`)}
+        </h4>
         <span className="dash-row-badges">
           <RecommendationBadge outcome={d.outcome} kind="decision" />
           {d.actorType === "system" && <span className="badge info">{t("decision.automatic")}</span>}

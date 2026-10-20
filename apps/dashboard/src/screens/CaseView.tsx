@@ -136,6 +136,7 @@ export function CaseView({ id, profile, initialPhotos, initialDocumentData }: Ca
             profile={profile}
             onReload={reloadAll}
             initialPhotos={initialPhotos}
+            faceMatchCounted={state.data.verification.risk.assessment?.uncalibratedCounted.includes("face_match") ?? false}
           />
           <Captures
             captures={documentPhotos}

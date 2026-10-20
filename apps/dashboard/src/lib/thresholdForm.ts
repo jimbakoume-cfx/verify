@@ -5,6 +5,7 @@ import {
   DECLARED_DOCUMENTS,
   type DeclaredDocument,
   diffThresholdConfig,
+  faceMatchCounts,
   normaliseThresholdConfig,
   RISK_SIGNALS,
   type RiskSignal,
@@ -23,6 +24,8 @@ export interface ThresholdForm {
   rejectMin: string;
   alwaysReviewDocuments: DeclaredDocument[];
   autoDecide: boolean;
+  /** Automatic approval: the uncalibrated face match may count (faceMatchCountsForApproval). */
+  faceMatchCounts: boolean;
   note: string;
 }
 
@@ -47,6 +50,7 @@ export function formFromConfig(config: ThresholdConfig): ThresholdForm {
     rejectMin: String(config.rejectMin),
     alwaysReviewDocuments: [...config.alwaysReviewDocuments],
     autoDecide: config.autoDecide,
+    faceMatchCounts: faceMatchCounts(config),
     note: "",
   };
 }
@@ -63,6 +67,7 @@ export function configFromForm(form: ThresholdForm): Record<string, unknown> {
     hardFlags: RISK_SIGNALS.filter((code) => form.hardFlags.includes(code)),
     alwaysReviewDocuments: DECLARED_DOCUMENTS.filter((doc) => form.alwaysReviewDocuments.includes(doc)),
     autoDecide: form.autoDecide,
+    faceMatchCountsForApproval: form.faceMatchCounts,
   };
 }
 

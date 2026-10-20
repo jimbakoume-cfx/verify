@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_THRESHOLD_CONFIG } from "@verify/shared";
+import { AUTO_APPROVAL_CONFIG, DEFAULT_THRESHOLD_CONFIG } from "@verify/shared";
 import { checkForm, configFromForm, errorsFor, formFromConfig, parseScore } from "./thresholdForm";
 
 describe("parseScore", () => {
@@ -18,9 +18,16 @@ describe("parseScore", () => {
 describe("the threshold form", () => {
   it("gives back the configuration it was made from", () => {
     const form = formFromConfig(DEFAULT_THRESHOLD_CONFIG);
-    expect(configFromForm(form)).toEqual(DEFAULT_THRESHOLD_CONFIG);
+    expect(configFromForm(form)).toEqual({ ...DEFAULT_THRESHOLD_CONFIG, faceMatchCountsForApproval: false });
     const check = checkForm(form, DEFAULT_THRESHOLD_CONFIG);
     expect(check).toMatchObject({ ok: true, changes: [], noteError: "missing" });
+    expect(configFromForm(formFromConfig(AUTO_APPROVAL_CONFIG))).toEqual(AUTO_APPROVAL_CONFIG);
+  });
+
+  it("switches the face match off for approval (automatic approval)", () => {
+    const form = { ...formFromConfig(AUTO_APPROVAL_CONFIG), faceMatchCounts: false, note: "Face match off" };
+    const check = checkForm(form, AUTO_APPROVAL_CONFIG);
+    expect(check.ok && check.changes).toEqual([{ kind: "faceMatchCountsForApproval", from: true, to: false }]);
   });
 
   it("lists the changes against the active version, with the reason checked", () => {

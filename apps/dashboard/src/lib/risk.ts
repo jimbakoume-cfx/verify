@@ -1,6 +1,8 @@
 // M8: the risk assessment stored on each case, the decisions taken, the rider reasons and the threshold
 // versions, read directly from Supabase (RLS decides which rows come back) and checked field by field.
 import {
+  AUTO_APPROVAL_BLOCKERS,
+  type AutoApproval,
   DECISION_OUTCOMES,
   type DecisionOutcome,
   type DecisionRequest,
@@ -33,9 +35,12 @@ export interface CaseRisk {
   thresholdVersion: number | null;
   assessedAt: string | null;
   decidedAt: string | null;
+  /** When the system approved the case on its own (automatic approval); null otherwise. */
+  autoApprovedAt: string | null;
 }
 
-export const RISK_COLUMNS = "risk_score, risk_recommendation, risk_reasons, threshold_config_version, risk_assessed_at, decided_at";
+export const RISK_COLUMNS =
+  "risk_score, risk_recommendation, risk_reasons, threshold_config_version, risk_assessed_at, decided_at, auto_approved_at";
 
 export function toCaseRisk(value: unknown): CaseRisk {
   const row = asRow(value) ?? {};
@@ -46,7 +51,15 @@ export function toCaseRisk(value: unknown): CaseRisk {
     thresholdVersion: num(row.threshold_config_version),
     assessedAt: str(row.risk_assessed_at),
     decidedAt: str(row.decided_at),
+    autoApprovedAt: str(row.auto_approved_at),
   };
+}
+
+/** Automatic approval in a stored assessment; one stored before it existed reads as not eligible, no blocker listed. */
+function toAutoApproval(value: unknown): AutoApproval {
+  const a = asRow(value);
+  const blockers = strings(a?.blockers);
+  return { eligible: a?.eligible === true, blockers: AUTO_APPROVAL_BLOCKERS.filter((b) => blockers.includes(b)) };
 }
 
 /**
@@ -80,6 +93,7 @@ export function toRiskAssessment(value: unknown): RiskAssessment | null {
   const hardFlags = strings(d.hardFlags);
   const missing = strings(d.missing);
   const reviewOnly = strings(d.reviewOnly);
+  const uncalibratedCounted = strings(d.uncalibratedCounted);
   return {
     recommendation: d.recommendation,
     band: d.band,
@@ -91,6 +105,9 @@ export function toRiskAssessment(value: unknown): RiskAssessment | null {
     missing: [...REQUIRED_CHECKS.filter((check) => missing.includes(check)), ...missing.filter((m) => !(REQUIRED_CHECKS as readonly string[]).includes(m))],
     // M7: assessments stored before M6/M7 have no reviewOnly: none.
     reviewOnly: [...REQUIRED_CHECKS.filter((check) => reviewOnly.includes(check)), ...reviewOnly.filter((m) => !(REQUIRED_CHECKS as readonly string[]).includes(m))],
+    // Automatic approval: assessments stored before it have neither.
+    uncalibratedCounted: REQUIRED_CHECKS.filter((check) => uncalibratedCounted.includes(check)),
+    autoApproval: toAutoApproval(d.autoApproval),
     unknownSignals: strings(d.unknownSignals),
     rejectReasonCode: str(d.rejectReasonCode),
     approveMax,
@@ -102,6 +119,12 @@ export function toRiskAssessment(value: unknown): RiskAssessment | null {
 // The queue
 // ---------------------------------------------------------------------------
 export type QueueSort = "newest" | "recommendation";
+/** all: every case; autoApproved: the cases the system approved on its own (for staff to check afterwards). */
+export type QueueFilter = "all" | "autoApproved";
+
+export function filterQueue<T extends { risk: CaseRisk | null }>(items: readonly T[], filter: QueueFilter): T[] {
+  return filter === "all" ? [...items] : items.filter((v) => v.risk?.autoApprovedAt != null);
+}
 
 /** Reject first (the strongest signals), then review, then approve, then cases without an assessment. */
 const RECOMMENDATION_RANK: Record<DecisionOutcome | "none", number> = { reject: 0, review: 1, approve: 2, none: 3 };
@@ -212,10 +235,12 @@ export interface ThresholdVersionRecord {
   config: ThresholdConfig | null;
   note: string | null;
   createdBy: string | null;
+  /** A version made by a migration names it instead (automatic approval, 20261021000000_auto_approval). */
+  createdByMigration: string | null;
   createdAt: string;
 }
 
-export const THRESHOLD_COLUMNS = "version, config, note, created_by, created_at";
+export const THRESHOLD_COLUMNS = "version, config, note, created_by, created_by_migration, created_at";
 
 export function toThresholdVersion(value: unknown): ThresholdVersionRecord | null {
   const row = asRow(value);
@@ -227,6 +252,7 @@ export function toThresholdVersion(value: unknown): ThresholdVersionRecord | nul
     config: isThresholdConfig(row.config) ? normaliseThresholdConfig(row.config) : null,
     note: str(row.note),
     createdBy: str(row.created_by),
+    createdByMigration: str(row.created_by_migration),
     createdAt,
   };
 }

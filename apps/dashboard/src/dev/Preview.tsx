@@ -14,7 +14,7 @@ import type {
   TestSessionResponse,
   WorkerFields,
 } from "@verify/shared";
-import { DEFAULT_THRESHOLD_CONFIG, evaluateRisk, type RiskFacts, type ThresholdConfig } from "@verify/shared";
+import { AUTO_APPROVAL_CONFIG, DEFAULT_THRESHOLD_CONFIG, evaluateRisk, type RiskFacts, type ThresholdConfig } from "@verify/shared";
 import { StaffPages } from "../App";
 import { type DashboardServices, ServicesContext } from "../api/services";
 import type { OpenDocumentData } from "../components/DocumentDataViewer";
@@ -66,6 +66,8 @@ const EXPIRED_CASE_ID = "4d2a7c90-5b1e-4f36-9a8c-2e6f0b9d3c11";
 const PRINT_MISMATCH_CASE_ID = "1b6e3f82-7d4a-4c59-8e21-5a9c0d7f2e33";
 // M8: a passport a supervisor approved against a reject recommendation.
 const DECIDED_CASE_ID = "6f2c8a14-3e9b-4d07-b5a1-9c4e2f7d0b55";
+// Automatic approval: a clean, firm test passport approved by the system with the version below (4).
+const AUTO_CASE_ID = "8d3e1f52-7a4c-4b19-9e60-2c5b8a7f3d14";
 
 // M8: each submitted case assessed by the real rules (risk.ts) with version 3 of the thresholds below.
 const PREVIEW_CONFIG: ThresholdConfig = { ...DEFAULT_THRESHOLD_CONFIG, rejectMin: 0.8 };
@@ -80,19 +82,30 @@ const RISK_FACTS: Record<string, RiskFacts> = {
   [EXPIRED_CASE_ID]: { declaredDocument: "passport", signals: ["document_expired"], missing: LIVENESS_MISSING },
   [PRINT_MISMATCH_CASE_ID]: { declaredDocument: "passport", signals: ["mrz_print_mismatch", "under_18", "number_format"], missing: LIVENESS_MISSING },
   [DECIDED_CASE_ID]: { declaredDocument: "passport", signals: ["mrz_print_mismatch", "date_logic"], missing: LIVENESS_MISSING },
+  [AUTO_CASE_ID]: { declaredDocument: "passport", signals: [], missing: [], reviewOnly: ["face_match"], documentFirm: true, testSession: true },
 };
-const NOT_ASSESSED: CaseRisk = { score: null, recommendation: null, assessment: null, thresholdVersion: null, assessedAt: null, decidedAt: null };
+const NOT_ASSESSED: CaseRisk = {
+  score: null,
+  recommendation: null,
+  assessment: null,
+  thresholdVersion: null,
+  assessedAt: null,
+  decidedAt: null,
+  autoApprovedAt: null,
+};
 function previewRisk(id: string, status: VerificationListItem["status"]): CaseRisk {
   const facts = RISK_FACTS[id];
   if (!facts || status === "created" || status === "in_progress") return NOT_ASSESSED;
-  const assessment = evaluateRisk(facts, PREVIEW_CONFIG);
+  const auto = id === AUTO_CASE_ID;
+  const assessment = evaluateRisk(facts, auto ? AUTO_APPROVAL_CONFIG : PREVIEW_CONFIG);
   return {
     score: assessment.score,
     recommendation: assessment.recommendation,
     assessment,
-    thresholdVersion: 3,
+    thresholdVersion: auto ? 4 : 3,
     assessedAt: minutes(-3),
     decidedAt: status === "approved" || status === "rejected" ? minutes(-2) : null,
+    autoApprovedAt: auto ? minutes(-2) : null,
   };
 }
 
@@ -215,6 +228,16 @@ const BASE_VERIFICATIONS: Omit<VerificationListItem, "risk">[] = [
     createdAt: minutes(-140),
     submittedAt: minutes(-131),
     sessionExpiresAt: minutes(-110),
+    captureCount: 1,
+  },
+  {
+    id: AUTO_CASE_ID,
+    status: "approved",
+    declaredDocument: "passport",
+    isTest: true,
+    createdAt: minutes(-12),
+    submittedAt: minutes(-4),
+    sessionExpiresAt: minutes(18),
     captureCount: 1,
   },
 ];
@@ -782,6 +805,22 @@ const REASON_CODES: ReasonCodeRecord[] = [
 ];
 
 const DECISIONS: Record<string, DecisionRecord[]> = {
+  [AUTO_CASE_ID]: [
+    {
+      id: "a1b2c3d4-0000-4000-8000-000000000002",
+      actorType: "system",
+      actorId: null,
+      outcome: "approve",
+      reasonCode: null,
+      note: null,
+      thresholdVersion: 4,
+      recommendation: "approve",
+      band: "approve",
+      riskScore: 0,
+      agreesWithRecommendation: true,
+      createdAt: minutes(-2),
+    },
+  ],
   [DECIDED_CASE_ID]: [
     {
       id: "a1b2c3d4-0000-4000-8000-000000000001",
@@ -805,18 +844,35 @@ const V2: ThresholdVersionRecord = {
   config: DEFAULT_THRESHOLD_CONFIG,
   note: "M8: transparent weighted rules and hard flags (Phase 1). Automatic decisions off: every case is decided by a person.",
   createdBy: null,
+  createdByMigration: null,
   createdAt: minutes(-60 * 24 * 3),
 };
 const THRESHOLD_VERSIONS: ThresholdVersionRecord[] = [
+  {
+    version: 4,
+    config: { ...PREVIEW_CONFIG, autoDecide: true, faceMatchCountsForApproval: true },
+    note: "PM decision 2026-10-20: automatic approval",
+    createdBy: null,
+    createdByMigration: "20261021000000_auto_approval",
+    createdAt: minutes(-20),
+  },
   {
     version: 3,
     config: PREVIEW_CONFIG,
     note: "Lower the reject cut-off for the M8 phone test.",
     createdBy: PROFILES.admin.userId,
+    createdByMigration: null,
     createdAt: minutes(-30),
   },
   V2,
-  { version: 1, config: null, note: "Phase 1 (assisted): every verification goes to human review.", createdBy: null, createdAt: minutes(-60 * 24 * 6) },
+  {
+    version: 1,
+    config: null,
+    note: "Phase 1 (assisted): every verification goes to human review.",
+    createdBy: null,
+    createdByMigration: null,
+    createdAt: minutes(-60 * 24 * 6),
+  },
 ];
 
 function fakeServices(): DashboardServices {
@@ -826,7 +882,7 @@ function fakeServices(): DashboardServices {
     recentVerifications: async () => VERIFICATIONS,
     verification: async (id) => VERIFICATIONS.find((v) => v.id === id) ?? null,
     captures: async (id) => {
-      if ([PASSPORT_CASE_ID, PENDING_CASE_ID, EXPIRED_CASE_ID, PRINT_MISMATCH_CASE_ID, DECIDED_CASE_ID].includes(id)) return PASSPORT_CAPTURES;
+      if ([PASSPORT_CASE_ID, PENDING_CASE_ID, EXPIRED_CASE_ID, PRINT_MISMATCH_CASE_ID, DECIDED_CASE_ID, AUTO_CASE_ID].includes(id)) return PASSPORT_CAPTURES;
       if (id === CASE_ID) return [...CAPTURES, ...LIVENESS_FRAMES];
       return id === UNREADABLE_CASE_ID ? RETAKEN_CAPTURES : CAPTURES;
     },
@@ -882,6 +938,7 @@ const SCREENS = [
   "case-admin",
   "case-reject",
   "case-decided",
+  "case-auto-approved",
   "thresholds",
   "thresholds-edit",
 ] as const;
@@ -984,6 +1041,8 @@ export function Preview({ screen }: { screen: string }) {
       return staff(PROFILES.supervisor, supervisorCase(MISMATCH_CASE_ID));
     case "case-decided":
       return staff(PROFILES.supervisor, supervisorCase(DECIDED_CASE_ID));
+    case "case-auto-approved":
+      return staff(PROFILES.supervisor, supervisorCase(AUTO_CASE_ID));
     case "thresholds":
       return staff(PROFILES.admin, <ThresholdsPage profile={PROFILES.admin} />);
     case "thresholds-edit": {

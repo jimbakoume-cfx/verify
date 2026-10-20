@@ -161,7 +161,23 @@ describe("the section", () => {
     expect(html).toMatch(/Flat face\..*Provisional/s);
   });
 
-  it("always shows the face match as uncalibrated and review only, with its threshold", () => {
+  it("says when the active thresholds let the uncalibrated face match count (automatic approval)", () => {
+    const html = render(createElement(FaceChecksSection, {
+      checks,
+      captures: CAPTURES,
+      error: null,
+      loading: false,
+      profile: supervisor,
+      onReload: () => {},
+      faceMatchCounted: true,
+    }));
+    expect(html).toContain("Uncalibrated");
+    expect(html).toContain("Counts for automatic approval");
+    expect(html).not.toContain(">Review only<");
+    expect(html).toContain("compare the faces yourself");
+  });
+
+  it("shows the face match as uncalibrated and review only by default, with its threshold", () => {
     const html = section(checks);
     expect(html).toContain("Uncalibrated");
     expect(html).toContain("Review only");

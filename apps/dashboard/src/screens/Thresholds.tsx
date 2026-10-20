@@ -8,6 +8,7 @@ import {
   type ConfigChange,
   DECLARED_DOCUMENTS,
   diffThresholdConfig,
+  faceMatchCounts,
   FIRM_SIGNALS,
   type Language,
   MANDATORY_HARD_FLAGS,
@@ -78,8 +79,13 @@ export function ThresholdsPage({ profile }: { profile: StaffProfile }) {
   );
 }
 
-function byName(id: string | null, names: ReadonlyMap<string, string> | undefined, t: (key: string, options?: Record<string, unknown>) => string): string {
-  if (!id) return t("thresholds.bySystem");
+function byName(
+  version: ThresholdVersionRecord,
+  names: ReadonlyMap<string, string> | undefined,
+  t: (key: string, options?: Record<string, unknown>) => string,
+): string {
+  const id = version.createdBy;
+  if (!id) return version.createdByMigration ? t("thresholds.byMigration", { name: version.createdByMigration }) : t("thresholds.bySystem");
   return names?.get(id) ?? t("decision.byStaff", { id: shortId(id) });
 }
 
@@ -95,7 +101,7 @@ export function VersionFacts({ version: v, names }: { version: ThresholdVersionR
       </div>
       <div>
         <dt>{t("thresholds.createdBy")}</dt>
-        <dd>{byName(v.createdBy, names, t)}</dd>
+        <dd>{byName(v, names, t)}</dd>
       </div>
       {v.config && (
         <>
@@ -110,6 +116,10 @@ export function VersionFacts({ version: v, names }: { version: ThresholdVersionR
           <div>
             <dt>{t("thresholds.autoDecide")}</dt>
             <dd>{t(v.config.autoDecide ? "thresholds.on" : "thresholds.off")}</dd>
+          </div>
+          <div>
+            <dt>{t("thresholds.faceMatchCounts")}</dt>
+            <dd>{t(faceMatchCounts(v.config) ? "thresholds.yes" : "thresholds.no")}</dd>
           </div>
         </>
       )}
@@ -272,6 +282,11 @@ export function ThresholdEditor({
             {t("thresholds.autoDecideLabel")}
           </label>
           <p className="muted dash-small">{t("thresholds.autoDecideHint")}</p>
+          <label className="dash-check">
+            <input type="checkbox" checked={form.faceMatchCounts} onChange={(e) => update({ faceMatchCounts: e.target.checked })} />
+            {t("thresholds.faceMatchCountsLabel")}
+          </label>
+          <p className="dash-alert warn dash-small">{t("thresholds.faceMatchCountsHint")}</p>
         </fieldset>
 
         <label className="field">
@@ -309,6 +324,7 @@ export function ChangesList({ changes, lang }: { changes: readonly ConfigChange[
   const { t } = useTranslation();
   const score = (value: number) => formatScore(value, lang);
   const onOff = (value: boolean) => t(value ? "thresholds.on" : "thresholds.off");
+  const yesNo = (value: boolean) => t(value ? "thresholds.yes" : "thresholds.no");
   return (
     <ul className="dash-changes">
       {changes.map((c) => {
@@ -320,6 +336,9 @@ export function ChangesList({ changes, lang }: { changes: readonly ConfigChange[
             break;
           case "autoDecide":
             text = t("thresholds.change.autoDecide", { from: onOff(c.from), to: onOff(c.to) });
+            break;
+          case "faceMatchCountsForApproval":
+            text = t("thresholds.change.faceMatchCountsForApproval", { from: yesNo(c.from), to: yesNo(c.to) });
             break;
           case "weight":
             text = t("thresholds.change.weight", { signal: t(`risk.signals.${c.signal}`), from: score(c.from), to: score(c.to) });
@@ -335,7 +354,7 @@ export function ChangesList({ changes, lang }: { changes: readonly ConfigChange[
             break;
         }
         return (
-          <li key={`${c.kind}:${"signal" in c ? c.signal : "document" in c ? c.document : ""}`} className={c.kind === "autoDecide" && c.to ? "hard" : undefined}>
+          <li key={`${c.kind}:${"signal" in c ? c.signal : "document" in c ? c.document : ""}`} className={(c.kind === "autoDecide" || c.kind === "faceMatchCountsForApproval") && c.to ? "hard" : undefined}>
             {text}
           </li>
         );

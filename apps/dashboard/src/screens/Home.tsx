@@ -11,7 +11,7 @@ import { useAsync, useNow } from "../hooks";
 import { formatDateTime, shortId, toLanguage } from "../lib/format";
 import { type StaffProfile, sessionOpen, type VerificationListItem } from "../lib/records";
 import { debugRiderUrl } from "../lib/riderLink";
-import { type QueueSort, sortQueue } from "../lib/risk";
+import { filterQueue, type QueueFilter, type QueueSort, sortQueue } from "../lib/risk";
 import { canCreateTestSessions, seesAllVerifications } from "../lib/roles";
 import { casePath } from "../lib/routes";
 import { parseTime } from "../lib/time";
@@ -155,7 +155,9 @@ function RecentVerifications({
   const now = useNow(30_000);
   // M8: the queue sorted by the rules' recommendation (cases waiting for a decision first).
   const [sort, setSort] = useState<QueueSort>("newest");
-  const sorted = useMemo(() => (items ? sortQueue(items, sort) : undefined), [items, sort]);
+  // Automatic approval: the cases the system approved on its own, for staff to check afterwards.
+  const [filter, setFilter] = useState<QueueFilter>("all");
+  const sorted = useMemo(() => (items ? sortQueue(filterQueue(items, filter), sort) : undefined), [items, sort, filter]);
 
   return (
     <section className="card" aria-labelledby="recent-title" aria-busy={loading || undefined}>
@@ -169,6 +171,13 @@ function RecentVerifications({
               <option value="recommendation">{t("recent.sort.recommendation")}</option>
             </select>
           </label>
+          <label className="dash-sort">
+            <span>{t("recent.filterLabel")}</span>
+            <select value={filter} onChange={(e) => setFilter(e.target.value === "autoApproved" ? "autoApproved" : "all")}>
+              <option value="all">{t("recent.filter.all")}</option>
+              <option value="autoApproved">{t("recent.filter.autoApproved")}</option>
+            </select>
+          </label>
           <button type="button" className="small" onClick={onReload} disabled={loading}>
             {loading ? t("loading") : t("recent.refresh")}
           </button>
@@ -177,6 +186,7 @@ function RecentVerifications({
       {assignedOnly && <p className="muted">{t("recent.assignedOnly")}</p>}
       {error !== null && error !== undefined && <ErrorText error={error} />}
       {items && items.length === 0 && <p className="muted">{t("recent.empty")}</p>}
+      {items && items.length > 0 && sorted?.length === 0 && <p className="muted">{t("recent.filterEmpty")}</p>}
       {sorted && sorted.length > 0 && (
         <ul className="dash-list">
           {sorted.map((v) => (
@@ -193,6 +203,11 @@ function RecentVerifications({
                 <span className="dash-row-badges">
                   <StatusBadge status={v.status} />
                   {v.isTest && <TestBadge />}
+                  {v.risk.autoApprovedAt && (
+                    <span className="badge info">
+                      {t("recent.autoApproved", { version: v.risk.thresholdVersion ?? "—" })}
+                    </span>
+                  )}
                   {v.status === "submitted" && v.risk.recommendation && (
                     <span className="dash-row-risk" title={t("risk.score")}>
                       <RecommendationBadge outcome={v.risk.recommendation} />

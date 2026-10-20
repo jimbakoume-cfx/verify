@@ -6,13 +6,20 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { I18nextProvider, initReactI18next } from "react-i18next";
 import i18next from "i18next";
 import { describe, expect, it } from "vitest";
-import { DEFAULT_THRESHOLD_CONFIG, diffThresholdConfig, evaluateRisk, type RiskFacts, type ThresholdConfig } from "@verify/shared";
+import {
+  AUTO_APPROVAL_CONFIG,
+  DEFAULT_THRESHOLD_CONFIG,
+  diffThresholdConfig,
+  evaluateRisk,
+  type RiskFacts,
+  type ThresholdConfig,
+} from "@verify/shared";
 import en from "../locales/en.json";
 import fr from "../locales/fr.json";
 import type { StaffProfile } from "../lib/records";
 import type { CaseRisk, DecisionRecord, ThresholdVersionRecord } from "../lib/risk";
 import { formFromConfig } from "../lib/thresholdForm";
-import { DecisionForm, DecisionView, RecommendationBadge, RiskSummary } from "./CaseRisk";
+import { AutoApprovalSummary, DecisionForm, DecisionView, RecommendationBadge, RiskSummary } from "./CaseRisk";
 import { ChangesList, HistoryList, ThresholdEditor } from "./Thresholds";
 
 const i18n = i18next.createInstance();
@@ -40,6 +47,7 @@ function risk(facts: Partial<RiskFacts>, config: ThresholdConfig = DEFAULT_THRES
     thresholdVersion: 3,
     assessedAt: "2026-10-19T10:00:00Z",
     decidedAt: null,
+    autoApprovedAt: null,
   };
 }
 
@@ -79,7 +87,15 @@ describe("RiskSummary", () => {
   });
 
   it("says when a case is not assessed yet, or not yet submitted", () => {
-    const none: CaseRisk = { score: null, recommendation: null, assessment: null, thresholdVersion: null, assessedAt: null, decidedAt: null };
+    const none: CaseRisk = {
+      score: null,
+      recommendation: null,
+      assessment: null,
+      thresholdVersion: null,
+      assessedAt: null,
+      decidedAt: null,
+      autoApprovedAt: null,
+    };
     expect(render(createElement(RiskSummary, { risk: none, status: "in_progress" }))).toContain("Assessed when the rider submits.");
     expect(render(createElement(RiskSummary, { risk: none, status: "submitted" }))).toContain("Not assessed yet.");
   });
@@ -89,6 +105,42 @@ describe("RiskSummary", () => {
     expect(html).toContain("Moins de 18 ans");
     expect(html).toContain("Signal bloquant");
     expect(html).toContain("Version des seuils");
+  });
+});
+
+describe("AutoApprovalSummary (automatic approval)", () => {
+  const clean: Partial<RiskFacts> = { reviewOnly: ["face_match"], documentFirm: true, testSession: true };
+
+  it("says the system approved the case, with the version, and that the uncalibrated face match counted", () => {
+    const r = risk(clean, AUTO_APPROVAL_CONFIG);
+    const html = render(createElement(AutoApprovalSummary, { assessment: r.assessment!, autoApprovedAt: "2026-10-21T08:00:00Z", thresholdVersion: 3 }));
+    expect(html).toContain("Approved automatically with threshold version 3");
+    expect(html).toContain("Counted although uncalibrated: Face match (uncalibrated threshold).");
+  });
+
+  it("lists every reason the system did not approve, in both languages", () => {
+    const r = risk({ ...clean, signals: ["quality_poor"], documentFirm: false }, AUTO_APPROVAL_CONFIG);
+    const html = render(createElement(AutoApprovalSummary, { assessment: r.assessment!, autoApprovedAt: null, thresholdVersion: 3 }));
+    expect(html).toContain("Not approved automatically: a person decides.");
+    expect(html).toContain("The document check is not firm");
+    expect(html).toContain("The server&#x27;s photo check is missing or not ok");
+    const fr = render(createElement(AutoApprovalSummary, { assessment: r.assessment!, autoApprovedAt: null, thresholdVersion: 3 }), "fr");
+    expect(fr).toContain("Pas approuvé automatiquement : une personne décide.");
+    expect(fr).toContain("Le contrôle des photos par le serveur manque ou n&#x27;est pas bon");
+  });
+
+  it("says automatic approval is off, and nothing for an assessment stored before it existed", () => {
+    const off = risk(clean, { ...AUTO_APPROVAL_CONFIG, autoDecide: false });
+    expect(render(createElement(AutoApprovalSummary, { assessment: off.assessment!, autoApprovedAt: null, thresholdVersion: 4 })))
+      .toContain("Automatic approval is off in this threshold version");
+    const old = { ...risk({}).assessment!, autoApproval: { eligible: false, blockers: [] } };
+    expect(render(createElement(AutoApprovalSummary, { assessment: old, autoApprovedAt: null, thresholdVersion: 2 })))
+      .toContain("Not assessed for automatic approval");
+  });
+
+  it("is part of the risk summary", () => {
+    expect(render(createElement(RiskSummary, { risk: risk(clean, AUTO_APPROVAL_CONFIG), status: "submitted" })))
+      .toContain("Every condition holds: the system approves this case.");
   });
 });
 
@@ -137,6 +189,14 @@ describe("DecisionView", () => {
     expect(html).toContain("Informations non validées.");
     expect(html).toContain("Conforme à la recommandation.");
   });
+
+  it("shows an automatic approval as such, with its threshold version", () => {
+    const auto: DecisionRecord = { ...decision, actorType: "system", actorId: null, note: null, recommendation: "approve", band: "approve", riskScore: 0, agreesWithRecommendation: true };
+    const html = render(createElement(DecisionView, { decision: auto, profile: SUPERVISOR, reasonCodes: [] }));
+    expect(html).toContain("Approved automatically (version 3)");
+    expect(html).toContain("The rules (automatic decision)");
+    expect(render(createElement(DecisionView, { decision: auto, profile: SUPERVISOR, reasonCodes: [] }), "fr")).toContain("Approuvé automatiquement (version 3)");
+  });
 });
 
 describe("DecisionForm", () => {
@@ -184,7 +244,14 @@ describe("DecisionForm", () => {
 // ---------------------------------------------------------------------------
 // Thresholds page
 // ---------------------------------------------------------------------------
-const V2: ThresholdVersionRecord = { version: 2, config: DEFAULT_THRESHOLD_CONFIG, note: "M8 defaults", createdBy: null, createdAt: "2026-10-19T00:00:00Z" };
+const V2: ThresholdVersionRecord = {
+  version: 2,
+  config: DEFAULT_THRESHOLD_CONFIG,
+  note: "M8 defaults",
+  createdBy: null,
+  createdByMigration: null,
+  createdAt: "2026-10-19T00:00:00Z",
+};
 
 describe("ChangesList", () => {
   it("says each change in words", () => {
@@ -198,11 +265,19 @@ describe("ChangesList", () => {
     };
     const html = render(createElement(ChangesList, { changes: diffThresholdConfig(DEFAULT_THRESHOLD_CONFIG, next), lang: "en" }));
     expect(html).toContain("Reject cut-off: 0.9 → 0.5");
-    expect(html).toContain('<li class="hard">Automatic decisions: off → on</li>');
+    expect(html).toContain('<li class="hard">Automatic approval: off → on</li>');
     expect(html).toContain("Weight of “Dates contradict each other”: 0.4 → 0.25");
     expect(html).toContain("“Dates contradict each other” no longer counts in the score");
     expect(html).toContain("“Photo already used in another verification” is no longer a hard flag");
     expect(html).toContain("“Passport” always decided by a person");
+  });
+
+  it("says when the face match starts or stops counting for approval", () => {
+    const html = render(createElement(ChangesList, { changes: diffThresholdConfig(DEFAULT_THRESHOLD_CONFIG, AUTO_APPROVAL_CONFIG), lang: "en" }));
+    expect(html).toContain('<li class="hard">Automatic approval: off → on</li>');
+    expect(html).toContain('<li class="hard">Face match counts for approval: no → yes</li>');
+    const off = render(createElement(ChangesList, { changes: diffThresholdConfig(AUTO_APPROVAL_CONFIG, { ...AUTO_APPROVAL_CONFIG, faceMatchCountsForApproval: false }), lang: "fr" }), "fr");
+    expect(off).toContain("<li>La comparaison des visages compte pour l&#x27;approbation : oui → non</li>");
   });
 
   it("writes French numbers in French", () => {
@@ -219,9 +294,10 @@ describe("HistoryList", () => {
       config: { ...DEFAULT_THRESHOLD_CONFIG, rejectMin: 0.5 },
       note: "PM test",
       createdBy: "u-admin",
+      createdByMigration: null,
       createdAt: "2026-10-19T09:00:00Z",
     };
-    const v1: ThresholdVersionRecord = { version: 1, config: null, note: "M0", createdBy: null, createdAt: "2026-10-13T00:00:00Z" };
+    const v1: ThresholdVersionRecord = { version: 1, config: null, note: "M0", createdBy: null, createdByMigration: null, createdAt: "2026-10-13T00:00:00Z" };
     const html = render(createElement(HistoryList, { versions: [v1, V2, v3], names: new Map([["u-admin", "Ada Admin"]]) }));
     expect(html.indexOf("Version 3")).toBeLessThan(html.indexOf("Version 2"));
     expect(html.indexOf("Version 2")).toBeLessThan(html.indexOf("Version 1"));
@@ -231,6 +307,22 @@ describe("HistoryList", () => {
     expect(html).toContain("Reject cut-off: 0.9 → 0.5");
     expect(html).toContain("First version of the M8 rules.");
     expect(html).toContain("Earlier format (before M8)");
+  });
+
+  it("names the migration that made a version, and shows both automatic-approval settings", () => {
+    const v4: ThresholdVersionRecord = {
+      version: 4,
+      config: { ...AUTO_APPROVAL_CONFIG },
+      note: "PM decision 2026-10-20: automatic approval",
+      createdBy: null,
+      createdByMigration: "20261021000000_auto_approval",
+      createdAt: "2026-10-21T00:00:00Z",
+    };
+    const html = render(createElement(HistoryList, { versions: [V2, v4], names: new Map() }));
+    expect(html).toContain("The migration 20261021000000_auto_approval");
+    expect(html).toContain("PM decision 2026-10-20: automatic approval");
+    expect(html).toContain("Face match counts for approval: no → yes");
+    expect(html).toMatch(/<dt>Face match counts for approval<\/dt><dd>yes<\/dd>/);
   });
 });
 
@@ -254,6 +346,17 @@ describe("ThresholdEditor", () => {
     expect(html).toContain("Must be above the approve cut-off.");
     expect(html).toContain("Fix 2 problems above first.");
     expect(html).toMatch(/<button type="submit" class="primary dash-inline" disabled="">/);
+  });
+
+  it("offers both automatic-approval switches, with the uncalibrated face match warning", () => {
+    const v4: ThresholdVersionRecord = { ...V2, version: 4, config: AUTO_APPROVAL_CONFIG };
+    const form = { ...formFromConfig(AUTO_APPROVAL_CONFIG), faceMatchCounts: false, note: "Face match off for approval" };
+    const html = render(createElement(ThresholdEditor, { active: v4, initialForm: form, onSave: noop }));
+    expect(html).toContain("Approve automatically when every condition holds (never an automatic reject)");
+    expect(html).toContain("Let a passed face match count toward approval (uncalibrated)");
+    expect(html).toContain("about 14 times more false matches for West Africans");
+    expect(html).toContain("Face match counts for approval: yes → no");
+    expect(html).toMatch(/<button type="submit" class="primary dash-inline">Make version 5 active<\/button>/);
   });
 
   it("blocks saving without a change or without a reason", () => {

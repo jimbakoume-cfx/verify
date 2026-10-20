@@ -101,7 +101,14 @@
     "sort": {
       "newest": "Plus récentes",
       "recommendation": "Par recommandation"
-    }
+    },
+    "filterLabel": "Afficher",
+    "filter": {
+      "all": "Tout",
+      "autoApproved": "Approuvés automatiquement"
+    },
+    "filterEmpty": "Aucun dossier ne correspond à ce filtre.",
+    "autoApproved": "Approuvé automatiquement · v{{version}}"
   },
   "badges": {
     "test": "Test",
@@ -598,7 +605,9 @@
     "selfie": "Vérification du visage, image {{n}}",
     "selfieAlt": "Meilleure image de la vérification du visage",
     "noSelfie": "Aucune image à montrer.",
-    "photosGone": "La photo du document a été remplacée ou effacée."
+    "photosGone": "La photo du document a été remplacée ou effacée.",
+    "countedForApproval": "Compte pour l'approbation automatique",
+    "uncalibratedCountedBody": "Le seuil est une première estimation, pas encore fixé sur des visages camerounais (les fausses correspondances sont bien plus fréquentes pour les Africains de l'Ouest à seuil fixe). Les seuils actifs laissent une comparaison réussie compter pour une approbation automatique (décision du PM du 20/10/2026, sessions de test seulement) : comparez vous-même les visages."
   },
   "capture": {
     "size": "Taille",
@@ -713,7 +722,7 @@
         "score_between": "Le score est au-dessus de {{approveMax}} et sous {{rejectMin}} : une personne décide.",
         "score_low": "Le score est de {{approveMax}} ou moins : assez faible pour approuver.",
         "missing_checks": "Des vérifications manquent (liste ci-dessous) : pas d'approbation tant qu'elles n'existent pas.",
-        "review_only_check": "La comparaison des visages n'est pas encore calibrée : son résultat ne peut jamais faire approuver un dossier (voir ci-dessous)."
+        "review_only_check": "La comparaison des visages n'est pas calibrée et cette version des seuils ne la fait pas compter : son résultat ne fait jamais approuver un dossier (voir ci-dessous)."
       }
     },
     "rejectReason": "Motif donné à l'usager en cas de refus : {{code}}",
@@ -758,7 +767,32 @@
       "face_match": "Comparaison des visages (seuil non calibré)"
     },
     "approveUpTo": "Approuver jusqu'à {{value}}",
-    "rejectFrom": "Refuser à partir de {{value}} (signaux fermes)"
+    "rejectFrom": "Refuser à partir de {{value}} (signaux fermes)",
+    "auto": {
+      "title": "Approbation automatique",
+      "approved": "Approuvé automatiquement avec la version {{version}} des seuils ({{at}}) : toutes les conditions étaient remplies.",
+      "eligible": "Toutes les conditions sont remplies : le système approuve ce dossier.",
+      "notAssessed": "Pas évalué pour l'approbation automatique (évalué avant qu'elle n'existe).",
+      "blocked": "Pas approuvé automatiquement : une personne décide. Pourquoi :",
+      "uncalibratedCounted": "Compté bien que non calibré : {{checks}}.",
+      "blockers": {
+        "auto_decide_off": "L'approbation automatique est désactivée dans cette version des seuils",
+        "real_session": "Pas une session de test",
+        "not_recommended": "Les règles ne recommandent pas l'approbation",
+        "document_not_firm": "La vérification du document n'est pas sûre (lignes de code avec tous les chiffres de contrôle justes)",
+        "document_expired": "Document expiré",
+        "under_18": "Moins de 18 ans",
+        "mrz_print_mismatch": "Le texte imprimé diffère des lignes de code",
+        "hard_flag": "Un signal bloquant est présent",
+        "firm_signal": "Un signal sûr est présent",
+        "unknown_signal": "Un signal inconnu est présent",
+        "quality_not_ok": "Le contrôle des photos par le serveur manque ou n'est pas bon",
+        "liveness_not_passed": "Test de présence manquant ou non réussi",
+        "face_match_not_passed": "Comparaison des visages manquante ou non réussie",
+        "face_match_not_counted": "La comparaison des visages ne compte pas dans cette version des seuils",
+        "score_above_cutoff": "Score au-dessus du seuil d'approbation"
+      }
+    }
   },
   "decision": {
     "title": "Décision",
@@ -795,7 +829,9 @@
     "noteOptional": "Note (facultative)",
     "noteHint": "Pour l'équipe seulement, jamais montrée à l'usager. Obligatoire contre la recommandation, ou pour approuver un dossier avec un signal bloquant. Ne recopiez pas de données lues sur le document.",
     "saving": "Enregistrement…",
-    "submit": "Enregistrer la décision"
+    "submit": "Enregistrer la décision",
+    "autoApproved": "Approuvé automatiquement (version {{version}})",
+    "checkAutomatic": "Le système a approuvé ce dossier seul. Vérifiez-le : confirmez l'approbation, ou refusez-le (une note est requise pour aller contre)."
   },
   "thresholds": {
     "title": "Seuils de décision",
@@ -808,9 +844,9 @@
     "createdBy": "Par",
     "approveMax": "Seuil d'approbation",
     "rejectMin": "Seuil de refus",
-    "autoDecide": "Décisions automatiques",
-    "on": "activées",
-    "off": "désactivées",
+    "autoDecide": "Approbation automatique",
+    "on": "activée",
+    "off": "désactivée",
     "note": "Pourquoi",
     "editTitle": "Nouvelle version ({{version}})",
     "editIntro": "Les poids et les seuils sont des nombres de 0 à 1, avec 4 décimales au plus. Le score additionne les poids des signaux présents (plafonné à 1).",
@@ -824,8 +860,8 @@
     "mandatoryHard": "Exigé par une décision du PM",
     "alwaysReview": "Documents toujours décidés par une personne",
     "mandatoryDocument": "(exigé par une décision du PM)",
-    "autoDecideLabel": "Décider automatiquement quand les règles sont sûres",
-    "autoDecideHint": "Désactivé par défaut. Même activé : sessions de test seulement, et jamais d'approbation tant que le test de présence ou la comparaison des visages manque (jusqu'à M6 et M7, aucune approbation).",
+    "autoDecideLabel": "Approuver automatiquement quand toutes les conditions sont remplies (jamais de refus automatique)",
+    "autoDecideHint": "Sessions de test seulement. Le système n'approuve un dossier que si la vérification du document est sûre, rien n'est expiré ni mineur, aucun signal bloquant ni signal sûr, les photos, le test de présence et la comparaison des visages sont réussis et le score est au plus au seuil d'approbation ; tout le reste attend une personne. Il ne refuse jamais.",
     "reason": "Pourquoi ce changement (obligatoire)",
     "reasonHint": "De {{min}} à {{max}} caractères, conservés avec la version.",
     "noteError": {
@@ -841,14 +877,15 @@
     "change": {
       "approveMax": "Seuil d'approbation : {{from}} → {{to}}",
       "rejectMin": "Seuil de refus : {{from}} → {{to}}",
-      "autoDecide": "Décisions automatiques : {{from}} → {{to}}",
+      "autoDecide": "Approbation automatique : {{from}} → {{to}}",
       "weight": "Poids de « {{signal}} » : {{from}} → {{to}}",
       "counted": "« {{signal}} » compte de nouveau dans le score",
       "notCounted": "« {{signal}} » ne compte plus dans le score",
       "hard": "« {{signal}} » devient un signal bloquant",
       "notHard": "« {{signal}} » n'est plus un signal bloquant",
       "alwaysReview": "« {{document}} » toujours décidé par une personne",
-      "notAlwaysReview": "« {{document}} » n'est plus toujours décidé par une personne"
+      "notAlwaysReview": "« {{document}} » n'est plus toujours décidé par une personne",
+      "faceMatchCountsForApproval": "La comparaison des visages compte pour l'approbation : {{from}} → {{to}}"
     },
     "historyTitle": "Toutes les versions",
     "active": "Active",
@@ -868,6 +905,12 @@
       "duplicate": "En double.",
       "mandatory": "Un élément obligatoire manque.",
       "order": "Doit être au-dessus du seuil d'approbation."
-    }
+    },
+    "byMigration": "La migration {{name}}",
+    "faceMatchCounts": "La comparaison des visages compte pour l'approbation",
+    "faceMatchCountsLabel": "Laisser une comparaison des visages réussie compter pour l'approbation (non calibrée)",
+    "faceMatchCountsHint": "Le seuil de la comparaison des visages n'est pas calibré sur des visages camerounais (NIST : environ 14 fois plus de fausses correspondances pour les Africains de l'Ouest à un seuil par défaut), et son modèle est réservé aux sessions de test. Désactivé : chaque comparaison redevient consultative.",
+    "yes": "oui",
+    "no": "non"
   }
 }
