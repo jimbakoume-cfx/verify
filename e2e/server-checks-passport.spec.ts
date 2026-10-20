@@ -19,6 +19,8 @@ test("passport photo page retaken: its camera says why, the new photo is read an
   await rider.begin("passport");
   await rider.autoCapture("passport", "document_front");
   await rider.usePhoto();
+  // The retake is asked at the end, after the face check (PM, 2026-10-20).
+  await rider.passLiveness(5_000);
 
   // No other side to keep: back to the page's camera, which names it and says why.
   const alert = rider.cameraRetakeAlert("passport", "document_front");
@@ -28,18 +30,18 @@ test("passport photo page retaken: its camera says why, the new photo is read an
   await rider.shutterCapture("passport", "document_front");
   await expect(alert).toHaveCount(0);
   await rider.usePhoto();
-  await rider.waitForSubmit();
+  await rider.waitForResult();
 
   expect(afterPhotos(backend.routes)).toEqual([
     "POST /upload-url",
     "POST /captures",
     "POST /mrz",
+    ...LIVENESS,
     "GET /checks",
     "POST /upload-url",
     "POST /captures",
     "POST /mrz",
     "GET /checks",
-    ...LIVENESS,
     "POST /submit",
   ]);
   const [first, second] = backend.captures;

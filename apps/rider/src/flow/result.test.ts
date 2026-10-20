@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { type FlowResult, RESULT_POLL_MS, RESULT_WAIT_MS } from "@verify/shared";
+import { FAST_POLL_FOR_MS, FAST_POLL_MS, type FlowResult, RESULT_POLL_MS, RESULT_WAIT_MS } from "@verify/shared";
 import type { ChecksWait } from "./checks";
 import { FlowError } from "./errors";
 import { isFlowResult, parseResultTiming, safeReturnUrl, type SettledResult, waitForResult } from "./result";
@@ -41,11 +41,14 @@ afterEach(() => {
 });
 
 describe("waitForResult", () => {
-  it("asks at once, then every RESULT_POLL_MS while pending, until verified", async () => {
-    const { getResult, times } = server(pending, pending, verified);
+  it("asks at once, then every FAST_POLL_MS for FAST_POLL_FOR_MS, then every RESULT_POLL_MS, until verified", async () => {
+    // Fixes after the PM's first real test: the result within 10 s of the end of the face check.
+    const answers = [...Array.from({ length: 16 }, () => pending), verified];
+    const { getResult, times } = server(...answers);
     const { result } = await finish(waitForResult({ getResult }));
     expect(result).toEqual({ type: "decided", decision: { state: "verified", returnUrl: "https://ride.example/verified" } });
-    expect(times).toEqual([0, RESULT_POLL_MS, 2 * RESULT_POLL_MS]);
+    const fast = Array.from({ length: FAST_POLL_FOR_MS / FAST_POLL_MS + 1 }, (_, i) => i * FAST_POLL_MS);
+    expect(times).toEqual([...fast, FAST_POLL_FOR_MS + RESULT_POLL_MS]);
   });
 
   it("settles on review at once", async () => {

@@ -42,7 +42,7 @@ async function followFaceCheck(rider: Rider, backend: FakeBackend, challengeNo =
   }
 }
 
-test("face check: a random challenge with its code on screen, 13 small frames to their slots, recorded, then submitted", async ({
+test("face check: right after the photos, a random challenge with its code on screen, 14 small frames to their slots, recorded, then submitted", async ({
   page,
   rider,
   backend,
@@ -58,7 +58,11 @@ test("face check: a random challenge with its code on screen, 13 small frames to
     video: { facingMode: { ideal: "user" }, width: { ideal: 640 }, height: { ideal: 480 } },
     audio: false,
   });
-  expect(afterPhotos(backend.routes).slice(-3)).toEqual([...LIVENESS, "POST /submit"]);
+  // The face check came at once (the photos were sent meanwhile), then the checks and the submit.
+  expect(afterPhotos(backend.routes).slice(-4)).toEqual([...LIVENESS, "GET /checks", "POST /submit"]);
+  const screens = await rider.screensSeen();
+  expect(screens).not.toContain(rider.t("checks.title"));
+  expect(screens).not.toContain(rider.t("upload.title"));
 
   // The challenge: 3 different actions and a 6-digit code, drawn by the server's own code.
   const [challenge] = backend.challenges;
@@ -68,11 +72,12 @@ test("face check: a random challenge with its code on screen, 13 small frames to
   // What the server recorded, judged by the server's own rule: complete and plausible, not evaluated.
   const [record] = backend.livenessRecords;
   expect(record.outcome).toBe("pass");
-  expect(record.details).toMatchObject({ evaluated: false, frames: 13, framesPerStep: [1, 4, 4, 4], problems: [], startedWithWarning: false });
-  expect(record.details.durationMs).toBeGreaterThan(9_000);
-  expect(record.details.durationMs).toBeLessThan(11_500);
+  // 3.5 s per action and a tail frame for the last one since the PM's first real test.
+  expect(record.details).toMatchObject({ evaluated: false, frames: 14, framesPerStep: [1, 4, 4, 5], problems: [], startedWithWarning: false });
+  expect(record.details.durationMs).toBeGreaterThan(12_000);
+  expect(record.details.durationMs).toBeLessThan(14_500);
   expect(record.body.code).toBe(challenge.response.code);
-  expect(record.body.frames.map((f) => f.path)).toEqual(challenge.response.uploads.slice(0, 13).map((u) => u.path));
+  expect(record.body.frames.map((f) => f.path)).toEqual(challenge.response.uploads.slice(0, 14).map((u) => u.path));
 
   // Each frame: a canvas JPEG of the whole picture, 480 px long, no metadata, small enough for slow networks.
   let total = 0;
@@ -85,7 +90,7 @@ test("face check: a random challenge with its code on screen, 13 small frames to
     total += frame.bytes.length;
   }
   expect(total).toBeLessThanOrEqual(LIVENESS_LIMITS.maxTotalBytes);
-  expect(new Set(record.frames.map((f) => f.bytes.toString("base64"))).size).toBe(13);
+  expect(new Set(record.frames.map((f) => f.bytes.toString("base64"))).size).toBe(14);
   // The document photos are unchanged by the face check.
   for (const capture of backend.captures) expect(capture.object.bytes.length).toBeGreaterThanOrEqual(CAPTURE_LIMITS.minBytes);
   expect(backend.status).toBe("submitted");
@@ -117,7 +122,7 @@ test("a new challenge each time: a refused report, then 'Start again' with anoth
   expect(second.challengeId).not.toBe(first.challengeId);
   expect(backend.livenessRecords).toHaveLength(1);
   expect(backend.livenessRecords[0].body.challengeId).toBe(second.challengeId);
-  expect(afterPhotos(backend.routes).slice(-5)).toEqual([...LIVENESS, ...LIVENESS, "POST /submit"]);
+  expect(afterPhotos(backend.routes).slice(-6)).toEqual([...LIVENESS, ...LIVENESS, "GET /checks", "POST /submit"]);
 });
 
 test("the network fails while sending the frames: 'Try again' sends the same frames, with no new challenge", async ({
@@ -128,6 +133,8 @@ test("the network fails while sending the frames: 'Try again' sends the same fra
   await rider.begin("cni_legacy");
   await photographByShutter(rider);
   await expect(rider.livenessHeading).toBeVisible({ timeout: 30_000 });
+  // The photos upload during the face check: only the frames' uploads must fail.
+  await expect.poll(() => backend.captures.length).toBe(2);
   backend.failUploads(Number.POSITIVE_INFINITY);
   await followFaceCheck(rider, backend);
 
@@ -140,5 +147,6 @@ test("the network fails while sending the frames: 'Try again' sends the same fra
 
   expect(backend.challenges).toHaveLength(1);
   expect(backend.livenessRecords).toHaveLength(1);
+  expect(backend.livenessRecords[0].details.problems).toEqual([]);
   expect(backend.livenessRecords[0].outcome).toBe("pass");
 });

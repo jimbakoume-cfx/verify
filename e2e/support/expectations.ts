@@ -4,13 +4,14 @@ import { CAPTURE_LIMITS, type ClientQuality } from "../../supabase/functions/_sh
 import type { FakeBackend, StorageAttempt, StoredObject } from "./backend";
 import { hasApp1 } from "./jpeg";
 
-/** M5: the face check, between the server's checks and the submit: a challenge, then the frames' report. */
+/** M5: the face check, right after the photos: a challenge, then the frames' report. */
 export const LIVENESS = ["POST /liveness/challenge", "POST /liveness/captures"];
 
 /**
- * The calls of a complete ID-card flow: photos are sent after both sides are accepted, then the app
- * asks for the server's checks of them (M3), then the face check (M5), before submitting. The fake
- * worker has checked them by the first answer unless a test says otherwise (FakeBackend.worker).
+ * The calls of a complete ID-card flow ("ID and face steps all at once", PM 2026-10-20): the photos are
+ * sent as soon as both sides are accepted, while the rider does the face check (M5); then the app asks
+ * for the server's checks of the photos (M3), and submits. The fake worker has checked them by the
+ * first answer unless a test says otherwise (FakeBackend.worker).
  */
 export const CARD_FLOW = [
   "GET /session",
@@ -20,15 +21,15 @@ export const CARD_FLOW = [
   "POST /captures",
   "POST /upload-url",
   "POST /captures",
-  "GET /checks",
   ...LIVENESS,
+  "GET /checks",
   "POST /submit",
 ];
 
 /** The new CNI: as above, plus the report of its code lines once the back is on the server. */
-export const NEW_CNI_FLOW = [...CARD_FLOW.slice(0, -4), "POST /mrz", "GET /checks", ...LIVENESS, "POST /submit"];
+export const NEW_CNI_FLOW = [...CARD_FLOW.slice(0, -4), "POST /mrz", ...LIVENESS, "GET /checks", "POST /submit"];
 
-/** A passport: one photo (the data page), the report of its code lines, the checks, then the submit. */
+/** A passport: one photo (the data page), the report of its code lines, the face check, the checks, the submit. */
 export const PASSPORT_FLOW = [
   "GET /session",
   "POST /consent",
@@ -36,8 +37,8 @@ export const PASSPORT_FLOW = [
   "POST /upload-url",
   "POST /captures",
   "POST /mrz",
-  "GET /checks",
   ...LIVENESS,
+  "GET /checks",
   "POST /submit",
 ];
 

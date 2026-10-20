@@ -1,7 +1,7 @@
 // Camera: a sharp, well-framed ID card, as a Full HD phone held upright sees it. These tests declare
 // the old CNI, which has no code lines: nothing is read. The new CNI is in capture-cni-biometric.spec.ts.
 import { CONSENT_VERSION } from "../supabase/functions/_shared/contract";
-import { CARD_FLOW, expectAutoQuality, expectCleanPhoto, photoAttempts } from "./support/expectations";
+import { CARD_FLOW, LIVENESS, expectAutoQuality, expectCleanPhoto, photoAttempts } from "./support/expectations";
 import { cameraRequests, expect, liveCameraTracks, test } from "./support/fixtures";
 
 const readStoredToken = () => sessionStorage.getItem("verify.session");
@@ -79,17 +79,21 @@ test("upload failure: automatic retries, then the rider's retry succeeds without
   backend.failUploads(3); // every automatic try of the first photo
   await rider.begin("cni_legacy");
   await rider.photographCard("cni_legacy");
+  // The photos upload during the face check, which the failure never interrupts.
+  await expect.poll(() => photoAttempts(backend).map((a) => a.status), { timeout: 20_000 }).toEqual([503, 503, 503]);
+  await rider.passLiveness(5_000);
 
-  await expect(page.locator(".upload-status")).toHaveText(rider.t("upload.retrying", { attempt: 2, tries: 3 }));
+  // Told once the face check is done.
   await expect(rider.heading("upload.failedTitle")).toBeVisible({ timeout: 20_000 });
   await expect(page.getByRole("alert")).toHaveText(rider.t("errors.server_error"));
-  expect(backend.storageAttempts.map((a) => a.status)).toEqual([503, 503, 503]);
 
   await rider.button("common.retry").click();
-  await rider.waitForSubmit();
+  await rider.waitForResult();
 
   // The retry resumed with the same signed upload (no extra link counted against the session).
-  expect(backend.routes).toEqual(CARD_FLOW);
+  const notFace = (routes: string[]) => routes.filter((r) => !LIVENESS.includes(r));
+  expect(notFace(backend.routes)).toEqual(notFace(CARD_FLOW));
+  expect(backend.routes.filter((r) => LIVENESS.includes(r))).toEqual(LIVENESS);
   const attempts = photoAttempts(backend);
   expect(attempts.map((a) => a.status)).toEqual([503, 503, 503, 200, 200]);
   expect(new Set(attempts.slice(0, 4).map((a) => a.path)).size).toBe(1);

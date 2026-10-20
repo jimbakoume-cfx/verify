@@ -90,9 +90,17 @@ export type Screen =
   | { name: "reading"; side: CaptureSide }
   | { name: "review"; side: CaptureSide }
   | { name: "upload" }
-  /** "Checking your photos…": waiting for the server's check of the photos just sent (M3). */
+  /**
+   * The end of the flow, before the submit: the server's checks of the photos (M3), shown as "Checking
+   * your ID…" (the same as the result's wait). Since the PM's first real test the rider goes from the
+   * photos straight to the face check, so this comes after it, and only here is a retake or an expired
+   * document (M4) shown.
+   */
   | { name: "checking" }
-  /** M5: the face check (front camera, a random challenge), after the photos and before the submit. */
+  /**
+   * M5: the face check (front camera, a random challenge), right after the photos (PM, 2026-10-20: "ID
+   * and face steps all at once"): the photos upload and are checked meanwhile.
+   */
   | { name: "liveness" }
   /** Automatic approval: after the submit, "your ID is verified", "we're checking a few details", or waiting. */
   | { name: "result" }
@@ -188,6 +196,11 @@ export interface FlowState {
   livenessDone: boolean;
   /** Automatic approval: the result after the submit. */
   result: ResultState;
+  /**
+   * An upload of the photos that failed while the rider did the face check (they upload in the
+   * background meanwhile): shown once the face check is done, never in the middle of it.
+   */
+  deferredUploadError: { error: FlowErrorCode; side: CaptureSide | null } | null;
 }
 
 export type FlowAction =
@@ -270,6 +283,7 @@ export function initialFlowState(boot: { hasToken: boolean; invalidLink: boolean
     expiredNotice: "none",
     livenessDone: false,
     result: PENDING_RESULT,
+    deferredUploadError: null,
   };
 }
 
@@ -335,8 +349,8 @@ function captureStep(side: CaptureSide, fromReview: boolean): Screen {
 }
 
 /**
- * After the checking screen: the face check (M5) unless it is already recorded, then the submit,
- * shown on the upload screen.
+ * After the checks: the face check (M5) unless it is already recorded, then the submit (shown as the
+ * result's wait, "Checking your ID…").
  */
 function queueSubmit(state: FlowState): FlowState {
   if (!state.livenessDone) return { ...state, error: null, upload: IDLE_UPLOAD, screen: { name: "liveness" } };
@@ -498,12 +512,13 @@ export function flowReducer(state: FlowState, action: FlowAction): FlowState {
       if (!shot || !canUseShot(state, shot)) return state;
       const next = state.sides.find((side) => !state.shots[side]);
       if (next) return { ...state, error: null, screen: captureStep(next, true) };
-      return {
-        ...state,
-        error: null,
-        screen: { name: "upload" },
-        upload: { status: "queued", stage: "sides", progress: null },
-      };
+      const queued: UploadState = { status: "queued", stage: "sides", progress: null };
+      // "ID and face steps all at once" (PM, 2026-10-20): straight to the face check while the photos
+      // upload and the server checks them; after a retake (the face check already done), the upload screen.
+      if (!state.livenessDone) {
+        return { ...state, error: null, deferredUploadError: null, screen: { name: "liveness" }, upload: queued };
+      }
+      return { ...state, error: null, screen: { name: "upload" }, upload: queued };
     }
 
     case "turnOver/ready":
@@ -523,10 +538,24 @@ export function flowReducer(state: FlowState, action: FlowAction): FlowState {
 
     case "upload/sent":
       if (state.upload.status !== "running" || state.upload.stage !== "sides") return state;
-      return { ...state, error: null, upload: IDLE_UPLOAD, screen: { name: "checking" } };
+      // During the face check the rider stays on it; the checks are read once it is done.
+      if (state.screen.name === "liveness") return { ...state, upload: IDLE_UPLOAD };
+      return { ...state, error: null, upload: IDLE_UPLOAD, screen: state.livenessDone ? { name: "checking" } : { name: "liveness" } };
 
     case "upload/failed": {
       const { error, side } = action;
+      if (state.screen.name === "liveness" && !sessionErrorReason(error) && error !== "missing_sides" && error !== "liveness_required") {
+        // Never in the middle of the face check: kept for when it is done (liveness/done). A refused
+        // photo is dropped at once (it is taken again then); any other failure waits for "Try again".
+        const refused = side !== null && isImageRejection(error);
+        return {
+          ...state,
+          deferredUploadError: { error, side },
+          shots: refused ? without(state.shots, side) : state.shots,
+          uploaded: refused ? without(state.uploaded, side) : state.uploaded,
+          upload: refused ? IDLE_UPLOAD : { ...state.upload, status: "failed" },
+        };
+      }
       if (side && isImageRejection(error)) {
         // The server refused (and deleted) this photo: take it again, then upload what is left.
         return {
@@ -634,9 +663,21 @@ export function flowReducer(state: FlowState, action: FlowAction): FlowState {
       return retakes.length > 0 ? retakeSides(state, retakes) : queueSubmit(state);
     }
 
-    case "liveness/done":
+    case "liveness/done": {
       if (state.screen.name !== "liveness") return state;
-      return queueSubmit({ ...state, livenessDone: true });
+      const done: FlowState = { ...state, livenessDone: true, deferredUploadError: null };
+      const deferred = state.deferredUploadError;
+      if (deferred?.side && isImageRejection(deferred.error)) {
+        // A photo the server refused while the face check ran: take it again now.
+        return { ...done, error: deferred.error, upload: IDLE_UPLOAD, screen: { name: "capture", side: deferred.side } };
+      }
+      if (state.upload.status === "failed") {
+        // The photos could not be sent: "Try again" on the upload screen, then the checks.
+        return { ...done, error: deferred?.error ?? state.error, screen: { name: "upload" } };
+      }
+      // The checks (the photos may still be uploading: the wait starts once they are sent).
+      return { ...done, error: null, screen: { name: "checking" } };
+    }
 
     case "liveness/failed":
       if (state.screen.name !== "liveness" || !sessionErrorReason(action.error)) return state;

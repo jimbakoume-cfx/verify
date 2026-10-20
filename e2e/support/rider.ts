@@ -23,8 +23,8 @@ export const SHUTTER_TIMEOUT = 12_000;
  * whatever it says. Generous for CI.
  */
 export const LIVENESS_START_TIMEOUT = 12_000;
-/** M5: the capture (10.5 s), then the frames' upload and report. */
-export const LIVENESS_CAPTURE_TIMEOUT = 30_000;
+/** M5: the capture (13.2 s since the PM's first real test), then the frames' upload and report. */
+export const LIVENESS_CAPTURE_TIMEOUT = 35_000;
 
 export class Rider {
   /** The language the rider currently sees (French by default). */
@@ -57,9 +57,13 @@ export class Rider {
     return this.t(sideKey(document, side));
   }
 
-  /** "Checking your photos…" (M3): the app waits for the server's checks of the photos just sent. */
+  /**
+   * The end of the flow (PM, 2026-10-20: "ID and face steps all at once"): after the face check, the app
+   * waits for the server's checks of the photos (M3), then the submit, then the result, all shown as
+   * one result step, "Checking your ID…".
+   */
   get checkingHeading(): Locator {
-    return this.heading("checks.title");
+    return this.heading("result.pendingTitle");
   }
 
   /** "<Side>: please take this photo again", as the server asked (M3). */
@@ -194,9 +198,9 @@ export class Rider {
   }
 
   /**
-   * M5: waits for the face check (after the server's checks, within `timeout`), starts it as soon as
-   * the app allows, and waits until the frames are recorded and the screen moves on. The capture
-   * itself takes about 10.5 s.
+   * M5: waits for the face check (right after the last photo is accepted, within `timeout`), starts it
+   * as soon as the app allows, and waits until the frames are recorded and the screen moves on. The
+   * capture itself takes about 13 s.
    */
   async passLiveness(timeout = 30_000): Promise<void> {
     await expect(this.livenessHeading).toBeVisible({ timeout });
@@ -206,12 +210,17 @@ export class Rider {
   }
 
   /**
-   * From the checking screen to the end: the server's checks are over, the face check is done, the case
-   * is submitted, and the result screen has its answer (the fake backend's default: review).
+   * From the last photo to the end: the face check is done, the server's checks are over, the case is
+   * submitted, and the result screen has its answer (the fake backend's default: review).
    */
-  async waitForSubmit(timeout = 30_000): Promise<void> {
+  async waitForSubmit(timeout = 30_000, resultTimeout = 20_000): Promise<void> {
     await this.passLiveness(timeout);
-    await expect(this.heading("result.reviewTitle").or(this.heading("result.verifiedTitle"))).toBeVisible({ timeout: 20_000 });
+    await this.waitForResult(resultTimeout);
+  }
+
+  /** The result's answer (verified or review), the face check already done (after a retake). */
+  async waitForResult(timeout = 20_000): Promise<void> {
+    await expect(this.heading("result.reviewTitle").or(this.heading("result.verifiedTitle"))).toBeVisible({ timeout });
   }
 
   /** Every screen title shown since the link was opened, in order (logged by fixtures.ts). */

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CHECKS_POLL_MS, CHECKS_WAIT_MS, type FlowCheckSide, type FlowChecks } from "@verify/shared";
+import { CHECKS_POLL_MS, CHECKS_WAIT_MS, FAST_POLL_FOR_MS, FAST_POLL_MS, type FlowCheckSide, type FlowChecks } from "@verify/shared";
 import { FlowError } from "./errors";
 import { type ChecksWait, isFlowChecks, parseChecksTiming, waitForChecks } from "./checks";
 
@@ -47,11 +47,14 @@ afterEach(() => {
 });
 
 describe("waitForChecks", () => {
-  it("asks at once, then every CHECKS_POLL_MS until the checks are settled", async () => {
+  it("asks at once, then every FAST_POLL_MS for FAST_POLL_FOR_MS, then every CHECKS_POLL_MS, until settled", async () => {
     const { getChecks, times } = server(pending, pending, ok);
     const { result } = await finish(waitForChecks({ getChecks, decide }));
     expect(result).toEqual({ type: "decided", decision: "submit" });
-    expect(times).toEqual([0, CHECKS_POLL_MS, 2 * CHECKS_POLL_MS]);
+    expect(times).toEqual([0, FAST_POLL_MS, 2 * FAST_POLL_MS]);
+    const slow = server(...Array.from({ length: 17 }, () => pending), ok);
+    await finish(waitForChecks({ getChecks: slow.getChecks, decide }));
+    expect(slow.times.slice(-3)).toEqual([FAST_POLL_FOR_MS, FAST_POLL_FOR_MS + CHECKS_POLL_MS, FAST_POLL_FOR_MS + 2 * CHECKS_POLL_MS]);
   });
 
   it("gives up after CHECKS_WAIT_MS of pending answers", async () => {
@@ -60,7 +63,7 @@ describe("waitForChecks", () => {
     expect(result).toEqual({ type: "timeout" });
     expect(ms).toBeLessThanOrEqual(CHECKS_WAIT_MS + 100);
     expect(ms).toBeGreaterThanOrEqual(CHECKS_WAIT_MS);
-    expect(times.length).toBe(CHECKS_WAIT_MS / CHECKS_POLL_MS);
+    expect(times.length).toBe(FAST_POLL_FOR_MS / FAST_POLL_MS + Math.ceil((CHECKS_WAIT_MS - FAST_POLL_FOR_MS) / CHECKS_POLL_MS));
     expect(times.every((t) => t < CHECKS_WAIT_MS)).toBe(true);
   });
 

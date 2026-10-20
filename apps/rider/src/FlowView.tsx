@@ -108,7 +108,8 @@ export function FlowView({ state, actions, debug }: { state: FlowState; actions:
   // is reported by CaptureLoader when the camera is needed.
   useEffect(() => {
     if (screen.name === "consent" || screen.name === "document") loadCapture().catch(() => {});
-    if (screen.name === "upload" || screen.name === "checking") loadLiveness().catch(() => {});
+    // The face check follows the last photo at once: fetch its code while the rider takes the photos.
+    if (screen.name === "capture" || screen.name === "review" || screen.name === "reading") loadLiveness().catch(() => {});
   }, [screen.name]);
 
   switch (screen.name) {
@@ -185,13 +186,20 @@ export function FlowView({ state, actions, debug }: { state: FlowState; actions:
       );
     }
     case "upload":
+      // The submit is part of the result's wait ("Checking your ID…"); only a failure shows the upload.
+      if (state.upload.stage === "submit" && state.upload.status !== "failed") return <ResultScreen result={state.result} onContinue={actions.continueResult} />;
       return <UploadScreen upload={state.upload} error={state.error} onRetry={actions.retryUpload} />;
     case "checking":
+      // The photos could not be sent while the rider did the face check: "Try again".
+      if (state.upload.status === "failed") return <UploadScreen upload={state.upload} error={state.error} onRetry={actions.retryUpload} />;
+      // One result step at the end (PM, 2026-10-20): the wait looks like the result's; an expired
+      // document (M4) is told here, a retake sends the rider to the camera.
+      if (state.expiredNotice !== "shown") return <ResultScreen result={state.result} onContinue={actions.continueResult} />;
       return (
         <CheckingScreen
           shots={sideShots(state)}
           document={state.document}
-          expired={state.expiredNotice === "shown"}
+          expired
           onAnotherDocument={actions.chooseAnotherDocument}
           onContinueAnyway={actions.continueExpired}
         />

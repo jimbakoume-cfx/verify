@@ -14,9 +14,9 @@ const CHALLENGE: LivenessChallengeResponse = {
   uploads: Array.from({ length: 15 }, (_, i) => ({ path: `v/liveness-c-${String(i).padStart(2, "0")}.jpg`, token: `t${i}` })),
 };
 
-const META = { stepStartsMs: [0, 1500.4, 4500, 7500], startedWithWarning: false, videoWidth: 480, videoHeight: 640 };
+const META = { stepStartsMs: [0, 1500.4, 5000, 8500], startedWithWarning: false, videoWidth: 480, videoHeight: 640 };
 
-function frames(n = 13): TakenFrame[] {
+function frames(n = 14): TakenFrame[] {
   return frameSchedule(3).frames.slice(0, n).map((f, i) => ({
     blob: new Blob([new Uint8Array(100 + i)]),
     sha256: String(i).padStart(64, "0"),
@@ -26,14 +26,16 @@ function frames(n = 13): TakenFrame[] {
 }
 
 describe("frameSchedule", () => {
-  it("plans 1 frame before the actions and 4 during each, inside their steps", () => {
+  it("plans 1 frame before the actions, 4 during each and 1 in the tail, inside their steps", () => {
+    // 3.5 s per action and a tail frame since the PM's first real test (the rider was a step late).
     const plan = frameSchedule(3);
-    expect(plan.frames).toHaveLength(13);
+    expect(plan.frames).toHaveLength(14);
     expect(plan.frames.length).toBeGreaterThanOrEqual(LIVENESS_LIMITS.minFrames);
     expect(plan.frames.length).toBeLessThanOrEqual(LIVENESS_LIMITS.maxFrames);
-    expect(plan.stepStartsMs).toEqual([0, 1500, 4500, 7500]);
-    expect(plan.totalMs).toBe(10_500);
-    expect(plan.frames.map((f) => f.atMs)).toEqual([900, 2100, 2700, 3300, 3900, 5100, 5700, 6300, 6900, 8100, 8700, 9300, 9900]);
+    expect(plan.stepStartsMs).toEqual([0, 1500, 5000, 8500]);
+    expect(plan.totalMs).toBe(13_200);
+    expect(plan.frames.map((f) => f.atMs)).toEqual([900, 2200, 2900, 3600, 4300, 5700, 6400, 7100, 7800, 9200, 9900, 10600, 11300, 12600]);
+    expect(plan.frames.map((f) => f.step)).toEqual([0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3]);
     for (const frame of plan.frames) {
       expect(frame.atMs).toBeGreaterThanOrEqual(plan.stepStartsMs[frame.step]);
       expect(frame.atMs).toBeLessThan(plan.stepStartsMs[frame.step + 1] ?? plan.totalMs);
@@ -74,9 +76,9 @@ describe("captureReport", () => {
     const report = captureReport(CHALLENGE, frames(), META);
     expect(report.challengeId).toBe(CHALLENGE.challengeId);
     expect(report.code).toBe("482913");
-    expect(report.frames).toHaveLength(13);
-    expect(report.frames[2]).toEqual({ index: 2, path: CHALLENGE.uploads[2].path, sha256: frames()[2].sha256, atMs: 2701, step: 1 });
-    expect(report.stepStartsMs).toEqual([0, 1500, 4500, 7500]);
+    expect(report.frames).toHaveLength(14);
+    expect(report.frames[2]).toEqual({ index: 2, path: CHALLENGE.uploads[2].path, sha256: frames()[2].sha256, atMs: 2901, step: 1 });
+    expect(report.stepStartsMs).toEqual([0, 1500, 5000, 8500]);
     expect(Object.keys(report).sort()).toEqual(
       ["challengeId", "code", "frames", "startedWithWarning", "stepStartsMs", "videoHeight", "videoWidth"],
     );
@@ -108,10 +110,10 @@ describe("sendFaceCheck", () => {
     const s = service();
     const progress = vi.fn();
     expect(await sendFaceCheck(s, CHALLENGE, frames(), META, { ...NO_WAIT, onProgress: progress })).toEqual({ ok: true });
-    expect(s.uploads.sort()).toEqual(CHALLENGE.uploads.slice(0, 13).map((u) => u.path).sort());
+    expect(s.uploads.sort()).toEqual(CHALLENGE.uploads.slice(0, 14).map((u) => u.path).sort());
     expect(s.records).toHaveLength(1);
-    expect(progress).toHaveBeenLastCalledWith(14, 14);
-    expect(progress).toHaveBeenCalledTimes(15);
+    expect(progress).toHaveBeenLastCalledWith(15, 15);
+    expect(progress).toHaveBeenCalledTimes(16);
   });
 
   it("sends at most 3 frames at a time", async () => {
