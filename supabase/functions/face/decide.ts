@@ -32,8 +32,9 @@ export const FACE_MATCH_MODEL = "auraface-v1/glintr100";
  * Cosine similarity at or above which the two faces are taken to be the same person.
  * UNCALIBRATED — must be set on Cameroonian impostor pairs (NIST shows ~14x higher false-match rate
  * for West Africans at fixed thresholds). 0.35 is a common starting point for ArcFace-type models on
- * web photos, nothing more. Until it is calibrated, every face_match result is review-only: the
- * database never lets it approve a case (risk.ts REVIEW_ONLY_CHECKS, private.risk_facts).
+ * web photos, nothing more. Every face_match result is marked uncalibrated and review-only; since the
+ * PM's decision of 2026-10-20 a passed one counts toward an automatic approval only while the active
+ * threshold version sets faceMatchCountsForApproval (risk.ts REVIEW_ONLY_CHECKS, docs/AUTO_APPROVAL.md).
  */
 export const FACE_MATCH_THRESHOLD = 0.35;
 /** Below this the faces are taken to be different people (outcome "fail"). UNCALIBRATED, as above. */

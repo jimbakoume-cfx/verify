@@ -6,6 +6,8 @@
 // document decides the case's server checks again (photos of sides it does not need stop counting).
 // M5: the face check: a random challenge (POST /liveness/challenge), then its frames, checked and
 // recorded with the liveness_capture check (POST /liveness/captures). The submit needs them.
+// Automatic approval (PM 2026-10-20): GET /result tells the rider, after the submit, whether the ID is
+// verified, still being checked by the server (pending), or left to a person (review).
 import {
   CAPTURE_LIMITS,
   CAPTURE_SIDES,
@@ -16,6 +18,7 @@ import {
   type DeclaredDocument,
   type ErrorCode,
   type FlowCaptureSummary,
+  type FlowResult,
   type FlowSession,
   type FlowStatus,
   KEEP_FACE_IMAGES_VERSION,
@@ -45,6 +48,7 @@ import { type CaseStore, refreshCase } from "../worker/case.ts";
 import { assessLivenessCapture, LIVENESS_CHECK_VERSION } from "../worker/liveness.ts";
 import { type CheckStateRow, flowChecks } from "./checks.ts";
 import { cryptoRandomInt, drawChallenge, livenessFramePath, type RandomInt, validateLivenessCapture } from "./liveness.ts";
+import { toFlowResult } from "./result.ts";
 import { noRing, type WorkerRing } from "./ring.ts";
 import { buildCapturePath, isOwnCapturePath, sanitizeQuality, validateMrzReport } from "./validation.ts";
 
@@ -216,6 +220,8 @@ export interface FlowRepo {
   recordLiveness(record: LivenessRecord): Promise<LivenessRecordResult>;
   /** M5: whether the session has the live frames of a recorded face check. */
   hasLiveness(verificationId: string): Promise<boolean>;
+  /** Automatic approval: flow_result (verified, pending or review, and the return address); null for an unknown case. */
+  flowResult(verificationId: string): Promise<unknown>;
 }
 
 export interface CaptureStorage {
@@ -671,6 +677,17 @@ export function createFlowHandler(deps: FlowDeps): Handler {
     return sessionResponse(v.id);
   };
 
+  // Automatic approval: the result screen polls this after the submit (RESULT_POLL_MS, for at most
+  // RESULT_WAIT_MS). Allowed on a closed session (that is the point); an open one has nothing to tell yet.
+  const getResult: Handler = async (req) => {
+    const v = await loadSession(req, { allowClosed: true });
+    if (OPEN_STATUSES.includes(v.status)) throw new HttpError(409, "not_submitted");
+    const answer = await repo.flowResult(v.id);
+    if (answer === null) throw new Error("verification disappeared");
+    const response: FlowResult = toFlowResult(answer);
+    return jsonResponse(200, response);
+  };
+
   return createRouter({
     name: "flow",
     allowedOrigins: deps.allowedOrigins,
@@ -686,6 +703,7 @@ export function createFlowHandler(deps: FlowDeps): Handler {
       "/liveness/challenge": { POST: postLivenessChallenge },
       "/liveness/captures": { POST: postLivenessCaptures },
       "/submit": { POST: postSubmit },
+      "/result": { GET: getResult },
     },
   });
 }

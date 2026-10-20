@@ -148,6 +148,7 @@ export interface ClientQuality {
 //   POST /flow/liveness/challenge {}                       -> LivenessChallengeResponse (M5, see below)
 //   POST /flow/liveness/captures  LivenessCaptureRequest  -> LivenessCaptureResponse (M5)
 //   POST /flow/submit         (M5: needs the face check's frames: 409 liveness_required)
+//   GET  /flow/result         -> FlowResult (automatic approval, see below)
 // All except upload-url, captures, mrz, checks and liveness return FlowSession.
 // ---------------------------------------------------------------------------
 export const SESSION_TOKEN_HEADER = "x-session-token";
@@ -358,6 +359,34 @@ export const CHECKS_WAIT_MS = 20_000;
 export const CHECKS_POLL_MS = 2_000;
 /** Server-requested retakes allowed per side; after that the photo is flagged, never refused. */
 export const SERVER_RETAKES_PER_SIDE = 1;
+
+// ---------------------------------------------------------------------------
+// The rider's result after the submit (automatic approval, PM 2026-10-20). Edge Function "flow".
+//   GET /flow/result -> FlowResult      (409 not_submitted while the session is still open)
+// The rider polls it on the result screen every RESULT_POLL_MS, for at most RESULT_WAIT_MS. Nothing
+// personal is returned: one of three states, and the session's return address once verified.
+// ---------------------------------------------------------------------------
+/**
+ * pending: an automatic approval may still come (a test session, automatic approval switched on, a
+ * server check still running). verified: the case is approved. review: anything else; a person
+ * checks the case ("we're checking a few details, we'll let you know"). Never "rejected": a reject
+ * is never automatic, and a person's decision reaches the rider through the Confiance app (M10).
+ */
+export const FLOW_RESULT_STATES = ["pending", "verified", "review"] as const;
+export type FlowResultState = (typeof FLOW_RESULT_STATES)[number];
+
+export interface FlowResult {
+  state: FlowResultState;
+  /**
+   * With "verified" only: where "Continue" takes the rider (verification.return_url, an https
+   * address given by whoever created the session); null when the session has none.
+   */
+  returnUrl: string | null;
+}
+
+/** How long the rider waits on the result screen, and how often the app asks. */
+export const RESULT_WAIT_MS = 75_000;
+export const RESULT_POLL_MS = 2_500;
 
 // ---------------------------------------------------------------------------
 // Active liveness capture (M5). Edge Function "flow". Auth: session token.
@@ -1052,8 +1081,10 @@ export type FaceMatchProblem = (typeof FACE_MATCH_PROBLEMS)[number];
 /**
  * check_result.details of "face_match" (M7). The similarity and where each face is (boxes as fractions
  * of their photo, so the dashboard can show both crops through the audited viewer). Never an embedding.
- * calibrated and reviewOnly are fixed: until the threshold is set on Cameroonian impostor pairs, no
- * face match may ever approve a case (the database enforces it, see risk.ts REVIEW_ONLY_CHECKS).
+ * calibrated and reviewOnly are fixed: the threshold is not set on Cameroonian impostor pairs. Whether a
+ * passed face match may still count toward an automatic approval is the active threshold version's
+ * setting faceMatchCountsForApproval (PM decision 2026-10-20; risk.ts REVIEW_ONLY_CHECKS), which admins
+ * switch off from the dashboard.
  */
 export interface FaceMatchDetails {
   model: string;

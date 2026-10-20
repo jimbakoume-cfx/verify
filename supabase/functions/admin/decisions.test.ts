@@ -1,11 +1,12 @@
 // deno-lint-ignore-file require-await
 // M8 routes of the admin function: POST /decisions and POST /thresholds, with in-memory fakes that follow
-// staff_decide and staff_create_threshold_version (supabase/migrations/20261019000000_m8_decisions.sql;
-// the database itself is tested in supabase/tests/70_m8_test.sql).
+// staff_decide and staff_create_threshold_version (supabase/migrations/20261019000000_m8_decisions.sql and,
+// for automatic approval, 20261021000000_auto_approval.sql; the database itself is tested in
+// supabase/tests/70_m8_test.sql and 90_auto_approval_test.sql).
 import { describe, expect, it, vi } from "vitest";
 import type { FunctionConfig } from "../_shared/config.ts";
 import type { DecisionOutcome } from "../_shared/contract.ts";
-import { DEFAULT_THRESHOLD_CONFIG, type ThresholdConfig } from "../_shared/risk.ts";
+import { AUTO_APPROVAL_CONFIG, DEFAULT_THRESHOLD_CONFIG, type ThresholdConfig } from "../_shared/risk.ts";
 import { ALLOWED_ORIGIN, makeRequest, readJson } from "../_shared/test-helpers.ts";
 import { type DecideResult, type DecisionRepo, normaliseNote, type ThresholdResult } from "./decisions.ts";
 import { type AdminRepo, createAdminHandler, type StaffRole } from "./handler.ts";
@@ -19,6 +20,8 @@ interface FakeCase {
   recommendation: DecisionOutcome | null;
   hardFlags: string[];
   thresholdVersion: number | null;
+  /** Approved by the system (automatic approval) and not yet decided by a person. */
+  autoApproved?: boolean;
 }
 
 /** staff_decide and staff_create_threshold_version, reduced to their rules. */
@@ -43,13 +46,16 @@ class FakeDecisions implements DecisionRepo {
     }
     const c = this.cases.get(input.verificationId);
     if (!c) return { result: "not_found" };
-    if (c.status === "approved" || c.status === "rejected") return { result: "already_decided" };
-    if (c.status !== "submitted") return { result: "not_submitted" };
+    // A staff member may confirm or overturn an automatic approval, once.
+    const afterAutomatic = c.status === "approved" && c.autoApproved === true;
+    if ((c.status === "approved" || c.status === "rejected") && !afterAutomatic) return { result: "already_decided" };
+    if (c.status !== "submitted" && !afterAutomatic) return { result: "not_submitted" };
     const against = c.recommendation !== null && c.recommendation !== "review" && c.recommendation !== input.outcome;
     if (input.note === null && (c.recommendation === null || against || (input.outcome === "approve" && c.hardFlags.length > 0))) {
       return { result: "note_required" };
     }
     c.status = input.outcome === "approve" ? "approved" : "rejected";
+    c.autoApproved = false;
     return {
       result: "ok",
       decisionId: "d0000000-0000-4000-8000-000000000001",
@@ -237,6 +243,17 @@ describe("POST /decisions", () => {
     await expectError(await post("/decisions", { ...approve, verificationId: OTHER_CASE }, token), 409, "not_submitted");
   });
 
+  it("lets a supervisor confirm or overturn an automatic approval, once", async () => {
+    const { post, staff, decisions } = setup();
+    const { token } = staff("supervisor");
+    decisions.cases.set(CASE, { status: "approved", recommendation: "approve", hardFlags: [], thresholdVersion: 3, autoApproved: true });
+    await expectError(await post("/decisions", { verificationId: CASE, outcome: "reject", reasonCode: "DOC_INVALID" }, token), 422, "note_required");
+    const res = await post("/decisions", { verificationId: CASE, outcome: "reject", reasonCode: "DOC_INVALID", note: "Not the same person." }, token);
+    expect(res.status).toBe(200);
+    expect(await readJson(res)).toMatchObject({ status: "rejected", recommendation: "approve", agreesWithRecommendation: false });
+    await expectError(await post("/decisions", { verificationId: CASE, outcome: "approve", reasonCode: null, note: "Again" }, token), 409, "already_decided");
+  });
+
   it("answers 403 when the database refuses the staff member (role or assignment changed meanwhile)", async () => {
     const { post, staff, decisions } = setup();
     decisions.override = { result: "forbidden" };
@@ -285,6 +302,7 @@ describe("POST /thresholds", () => {
     ["crossed cut-offs", { ...request, config: { ...lower, approveMax: 0.6 } }],
     ["a mandatory hard flag removed", { ...request, config: { ...lower, hardFlags: ["document_expired"] } }],
     ["an unknown key", { ...request, config: { ...lower, autoApproveEverything: true } }],
+    ["faceMatchCountsForApproval not a boolean", { ...request, config: { ...lower, faceMatchCountsForApproval: "yes" } }],
     ["no reason", { ...request, note: undefined }],
     ["a reason too short", { ...request, note: " ok " }],
     ["a reason too long", { ...request, note: "x".repeat(501) }],
@@ -292,6 +310,16 @@ describe("POST /thresholds", () => {
     const { post, staff, decisions } = setup();
     await expectError(await post("/thresholds", body, staff("admin").token), 400, "bad_request");
     expect(decisions.thresholdCalls).toEqual([]);
+  });
+
+  it("passes on the automatic-approval switches (automatic approval and the face match counted, or not)", async () => {
+    const { post, staff, decisions } = setup();
+    const admin = staff("admin");
+    const on = { baseVersion: 2, config: structuredClone(AUTO_APPROVAL_CONFIG), note: "PM decision 2026-10-20: automatic approval" };
+    expect((await post("/thresholds", on, admin.token)).status).toBe(200);
+    const off = { baseVersion: 3, config: { ...structuredClone(AUTO_APPROVAL_CONFIG), faceMatchCountsForApproval: false }, note: "Face match off for approval" };
+    expect((await post("/thresholds", off, admin.token)).status).toBe(200);
+    expect(decisions.thresholdCalls.map((c) => c.config.faceMatchCountsForApproval)).toEqual([true, false]);
   });
 
   it("names the configuration errors (codes only) in the message", async () => {

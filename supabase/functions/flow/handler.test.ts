@@ -279,6 +279,16 @@ class MemoryFlowRepo implements FlowRepo {
     return this.facePending;
   }
 
+  /** Automatic approval: flow_result's answer per case; by default from the status, as the SQL function. */
+  results = new Map<string, unknown>();
+  async flowResult(verificationId: string) {
+    this.maybeFail("flowResult", verificationId);
+    if (this.results.has(verificationId)) return this.results.get(verificationId);
+    const v = this.verifications.get(verificationId);
+    if (!v) return null;
+    return { state: v.status === "approved" ? "verified" : "review", returnUrl: null };
+  }
+
   async workerEnabledForRealSessions() {
     return this.workerEnabled;
   }
@@ -2340,6 +2350,64 @@ describe("POST /liveness/captures", () => {
     repo.failOn = "recordLiveness";
     await expectError(await call("/liveness/captures", token, { body }), 500, "server_error");
     expect(JSON.stringify(log.error.mock.calls)).not.toContain(body.code);
+  });
+});
+
+describe("GET /result (automatic approval)", () => {
+  const get = (h: ReturnType<typeof setup>, token: string | null) => h.call("/result", token, { method: "GET" });
+
+  it("needs a session that was submitted", async () => {
+    const h = setup();
+    await expectError(await get(h, null), 401, "invalid_session");
+    const open = await h.ready();
+    await expectError(await get(h, open.token), 409, "not_submitted");
+    const created = await h.seed();
+    await expectError(await get(h, created.token), 409, "not_submitted");
+  });
+
+  it("answers after the submit, whatever the case's status, with no-store", async () => {
+    const h = setup();
+    const submitted = await h.ready({ status: "submitted" });
+    const res = await get(h, submitted.token);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(await readJson(res)).toEqual({ state: "review", returnUrl: null });
+    const approved = await h.ready({ status: "approved" });
+    expect(await readJson(await get(h, approved.token))).toEqual({ state: "verified", returnUrl: null });
+  });
+
+  it("passes on pending, verified with an https return address, and review", async () => {
+    const h = setup();
+    const { id, token } = await h.ready({ status: "submitted" });
+    h.repo.results.set(id, { state: "pending", returnUrl: null });
+    expect(await readJson(await get(h, token))).toEqual({ state: "pending", returnUrl: null });
+    h.repo.results.set(id, { state: "verified", returnUrl: "https://ride.example/verified?ride=42" });
+    expect(await readJson(await get(h, token))).toEqual({ state: "verified", returnUrl: "https://ride.example/verified?ride=42" });
+    h.repo.results.set(id, { state: "verified", returnUrl: "http://ride.example/plain" });
+    expect(await readJson(await get(h, token))).toEqual({ state: "verified", returnUrl: null });
+  });
+
+  it("never tells the rider more than the three states (a reject, a score, a reason)", async () => {
+    const h = setup();
+    const { id, token } = await h.ready({ status: "rejected" });
+    h.repo.results.set(id, { state: "rejected", returnUrl: "https://ride.example/", reason: "DOC_INVALID", score: 1 });
+    expect(await readJson(await get(h, token))).toEqual({ state: "review", returnUrl: null });
+  });
+
+  it("an expired link is still refused (410)", async () => {
+    const h = setup();
+    const { token } = await h.ready({ status: "approved" });
+    h.setClock(new Date(IN_30_MIN));
+    await expectError(await get(h, token), 410, "session_expired");
+  });
+
+  it("is a GET only, and fails closed when the database fails", async () => {
+    const h = setup();
+    const { token } = await h.ready({ status: "submitted" });
+    expect((await h.call("/result", token, { method: "POST", body: {} })).status).toBe(405);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    h.repo.failOn = "flowResult";
+    await expectError(await get(h, token), 500, "server_error");
   });
 });
 

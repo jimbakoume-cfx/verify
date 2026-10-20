@@ -346,6 +346,13 @@ export function createFlowRepo(db: SupabaseClient): FlowRepo {
       return data === true;
     },
 
+    async flowResult(verificationId) {
+      // Decided by the database (public.flow_result); the handler keeps only what the rider may see.
+      const { data, error } = await db.rpc("flow_result", { p_verification: verificationId });
+      if (error) throw dbError("rpc.flow_result", error);
+      return data ?? null;
+    },
+
     async workerEnabledForRealSessions() {
       const { data, error } = await db.from("worker_settings").select("enabled_for_real_sessions").limit(1)
         .maybeSingle<{ enabled_for_real_sessions: boolean }>();
