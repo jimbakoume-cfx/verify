@@ -155,6 +155,29 @@ describe("the section", () => {
     expect(html).toContain("Moved like a flat picture");
   });
 
+  it("shows the per-frame measures of liveness-eval-v2 and the time to the result (the PM's first real test)", () => {
+    const v2: LivenessDetails = {
+      ...LIVENESS,
+      timing: { ms: 380, cold: false, fetchMs: 900, wallMs: 1500, sinceJobMs: 4200 },
+      metrics: {
+        baseline: { yaw: -1.93, pitch: -4.43, smile: 0.0035, mouthWidth: 0.6118, eyeOpenness: 0.2757 },
+        windows: [[1, 2, 3, 4, 5, 6]],
+        frames: [{ index: 0, step: 0, faces: 1, yaw: -1.67, pitch: -4.79, blink: 0.13, eyeOpenness: 0.27, smile: 0.005, mouthWidth: 0.61 }],
+      },
+    };
+    const parsed = toFaceChecks([row("liveness", v2, "fail")], []);
+    expect(parsed.liveness?.details).toEqual(v2);
+    for (const lng of ["en", "fr"] as const) {
+      const html = section(parsed, supervisor, lng);
+      expect(html).toContain(lng === "en" ? "Measures per frame (for tuning)" : "Mesures par image (pour le réglage)");
+      expect(html).toContain(lng === "en" ? "From the face check to this result" : "De la vérification du visage à ce résultat");
+      expect(html).toMatch(/-1[.,]7/);
+    }
+    // A timing or metrics of another shape: unreadable (timing) or left out (metrics).
+    expect(toLivenessEvalDetails({ ...v2, timing: { ...v2.timing, photo: 1 } })).toBeNull();
+    expect(toLivenessEvalDetails({ ...v2, metrics: { ...v2.metrics, frames: [{ landmarks: [] }] } })?.metrics).toBeUndefined();
+  });
+
   it("marks the provisional parts", () => {
     const html = section(checks);
     expect(html).toContain("Provisional");

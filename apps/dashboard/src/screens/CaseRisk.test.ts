@@ -52,6 +52,21 @@ function risk(facts: Partial<RiskFacts>, config: ThresholdConfig = DEFAULT_THRES
 }
 
 describe("RiskSummary", () => {
+  it("never says reject when only the score band is in the reject zone (the PM's first real test)", () => {
+    // The PM's session: a firm signal and a failed liveness add up to 1, but provisional signals never
+    // reject: the recommendation is review, and only that is shown as a recommendation.
+    const pm = risk({ signals: ["mrz_print_mismatch", "liveness_flag"], reviewOnly: ["face_match"], documentFirm: true, testSession: true }, AUTO_APPROVAL_CONFIG);
+    expect(pm.assessment?.band).toBe("reject");
+    expect(pm.recommendation).toBe("review");
+    for (const lng of ["en", "fr"] as const) {
+      const html = render(createElement(RiskSummary, { risk: pm, status: "submitted" }), lng);
+      expect(html).not.toMatch(/Recommend: reject|Rejected|Recommandé : refuser|Refusé/);
+      expect(html).toContain(lng === "en" ? "Recommend: review" : "Recommandé : examiner");
+      expect(html).toContain(lng === "en" ? "At or above the reject cut-off" : "Au seuil de refus ou au-dessus");
+      expect(html).toContain(lng === "en" ? "Score band (the score alone, not a decision)" : "Zone du score (le score seul, pas une décision)");
+    }
+  });
+
   it("explains a review while liveness and face match are missing, with the score in the approve band", () => {
     const html = render(createElement(RiskSummary, { risk: risk({ missing: ["liveness", "face_match"] }), status: "submitted" }));
     expect(html).toContain("Version 3");

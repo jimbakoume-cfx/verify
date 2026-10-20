@@ -519,8 +519,22 @@
     "framesOf": "{{n}} of {{total}}",
     "processing": "Processing time",
     "coldStart": "models loaded first",
+    "sinceJob": "From the face check to this result",
+    "metrics": {
+      "title": "Measures per frame (for tuning)",
+      "body": "The numbers the decision used, frame by frame: the head's turn (yaw, + = the rider's left) and tilt (pitch, + = up) in degrees, the smile score, the mouth's width against the eyes, the eye opening and the blink score. Each action is judged on its step and the first frames after it, against the rider's own neutral. Provisional: not yet tuned on real riders.",
+      "frame": "Frame",
+      "step": "Step",
+      "yaw": "Yaw (°)",
+      "pitch": "Pitch (°)",
+      "smile": "Smile",
+      "mouthWidth": "Mouth / eyes",
+      "eyeOpenness": "Eye opening",
+      "blink": "Blink",
+      "neutral": "Rider's neutral"
+    },
     "engine": "Engine",
-    "livenessClean": "Every action seen in its own step; nothing else to note.",
+    "livenessClean": "Every action seen in its step (or just after it); nothing else to note.",
     "problems": {
       "action_not_done": {
         "title": "Action not seen.",
@@ -682,6 +696,7 @@
     "title": "Risk and decision",
     "intro": "What the rules recommend from the checks, with every signal and its weight, and the threshold version used. Today a person decides every case.",
     "notAssessedBadge": "Not assessed",
+    "recommendationLabel": "Recommendation",
     "recommendation": {
       "approve": "Recommend: approve",
       "review": "Recommend: review",
@@ -697,7 +712,12 @@
     "unknownShape": "This assessment was stored by a newer version of the rules. Reload the page.",
     "score": "Score",
     "firmScore": "Firm signals only",
-    "band": "Score band",
+    "band": "Score band (the score alone, not a decision)",
+    "bandValue": {
+      "approve": "At or under the approve cut-off",
+      "review": "Between the cut-offs",
+      "reject": "At or above the reject cut-off"
+    },
     "version": "Threshold version",
     "versionNumber": "Version {{version}}",
     "assessedAt": "Assessed",
@@ -747,6 +767,7 @@
       "date_logic": "Dates contradict each other",
       "number_format": "Unexpected number format",
       "manual_review_document": "Always checked by a person",
+      "print_name_mismatch": "Printed name differs from the code lines (provisional note: OCR)",
       "unrecognised_document": "Document not recognised",
       "mrz_unreadable_server": "Code lines not read by the server",
       "mrz_phone_flag": "Phone's reading of the code lines flagged",

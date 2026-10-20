@@ -21,11 +21,22 @@ import { canDecide } from "../lib/roles";
 
 const RECOMMENDATION_TONE: Record<DecisionOutcome, "ok" | "warn" | "bad"> = { approve: "ok", review: "warn", reject: "bad" };
 
-/** Approve, Review, Reject: the recommendation (or the band) of the rules. */
+/**
+ * Approve, Review, Reject: the recommendation of the rules, or a recorded decision (kind "decision").
+ * Never the score band: a band is not a recommendation (BandBadge), so a case whose score alone falls
+ * in the reject zone never reads "reject" unless the rules or a person said so (fixes after the PM's
+ * first real test, 2026-10-20).
+ */
 export function RecommendationBadge({ outcome, kind = "recommendation" }: { outcome: DecisionOutcome | null; kind?: "recommendation" | "decision" }) {
   const { t } = useTranslation();
   if (outcome === null) return <span className="badge neutral">{t("risk.notAssessedBadge")}</span>;
   return <span className={`badge ${RECOMMENDATION_TONE[outcome]}`}>{t(`risk.${kind}.${outcome}`)}</span>;
+}
+
+/** Where the score alone falls between the cut-offs: a neutral detail, never worded as a decision. */
+export function BandBadge({ band }: { band: DecisionOutcome }) {
+  const { t } = useTranslation();
+  return <span className="badge neutral">{t(`risk.bandValue.${band}`)}</span>;
 }
 
 /** A score or a weight: up to 4 decimals (they are stored with 4). */
@@ -120,6 +131,9 @@ export function RiskSummary({ risk, status }: { risk: CaseRisk; status: Verifica
   }
   return (
     <div className="dash-risk">
+      <p className="dash-risk-recommendation">
+        <span className="muted">{t("risk.recommendationLabel")}</span> <RecommendationBadge outcome={a.recommendation} />
+      </p>
       <dl className="dash-facts compact">
         <div>
           <dt>{t("risk.score")}</dt>
@@ -132,7 +146,7 @@ export function RiskSummary({ risk, status }: { risk: CaseRisk; status: Verifica
         <div>
           <dt>{t("risk.band")}</dt>
           <dd>
-            <RecommendationBadge outcome={a.band} />
+            <BandBadge band={a.band} />
           </dd>
         </div>
         <div>
