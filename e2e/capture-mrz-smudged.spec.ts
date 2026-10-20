@@ -59,5 +59,5 @@ test("smudged code lines: tips and Retake, then 'Continue anyway' after 3 tries,
   }
   expect(report.outcome).toBe("flag");
   expect(backend.status).toBe("submitted");
-  await expect(page.getByText(rider.t("done.next"))).toBeVisible();
+  await expect(page.getByText(rider.t("result.reviewBody"))).toBeVisible();
 });

@@ -60,7 +60,13 @@ export default defineConfig<TestOptions>({
   projects: [
     {
       name: "card",
-      testMatch: ["capture-card.spec.ts", "capture-cni-biometric.spec.ts", "server-checks.spec.ts", "server-checks-expired.spec.ts"],
+      testMatch: [
+        "capture-card.spec.ts",
+        "capture-cni-biometric.spec.ts",
+        "server-checks.spec.ts",
+        "server-checks-expired.spec.ts",
+        "result.spec.ts",
+      ],
       use: { camera: "card", launchOptions: launch(cameraArgs("card")) },
     },
     {

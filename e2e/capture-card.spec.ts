@@ -38,7 +38,7 @@ test("old CNI happy path: both sides captured automatically, uploaded and submit
   await rider.usePhoto();
 
   await rider.waitForSubmit();
-  await expect(page.getByText(rider.t("done.next"))).toBeVisible();
+  await expect(page.getByText(rider.t("result.reviewBody"))).toBeVisible();
   expect(await liveCameraTracks(page)).toBe(0);
   expect(await rider.screensSeen()).not.toContain(rider.t("reading.title"));
 

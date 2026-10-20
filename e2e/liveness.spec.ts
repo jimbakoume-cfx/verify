@@ -50,7 +50,7 @@ test("face check: a random challenge with its code on screen, 13 small frames to
   await rider.begin("cni_legacy");
   await photographByShutter(rider);
   await followFaceCheck(rider, backend);
-  await expect(rider.heading("done.title")).toBeVisible({ timeout: 30_000 });
+  await expect(rider.heading("result.reviewTitle")).toBeVisible({ timeout: 30_000 });
   expect(await liveCameraTracks(page)).toBe(0);
 
   // The front camera, at a modest size, without audio.
@@ -111,7 +111,7 @@ test("a new challenge each time: a refused report, then 'Start again' with anoth
   await rider.button("liveness.startAgain").click();
 
   await followFaceCheck(rider, backend, 2);
-  await expect(rider.heading("done.title")).toBeVisible({ timeout: 30_000 });
+  await expect(rider.heading("result.reviewTitle")).toBeVisible({ timeout: 30_000 });
 
   const [first, second] = backend.challenges.map((c) => c.response);
   expect(second.challengeId).not.toBe(first.challengeId);
@@ -136,7 +136,7 @@ test("the network fails while sending the frames: 'Try again' sends the same fra
   await expect(panel).toContainText(rider.t("errors.server_error"));
   backend.failUploads(0);
   await rider.button("common.retry").click();
-  await expect(rider.heading("done.title")).toBeVisible({ timeout: 30_000 });
+  await expect(rider.heading("result.reviewTitle")).toBeVisible({ timeout: 30_000 });
 
   expect(backend.challenges).toHaveLength(1);
   expect(backend.livenessRecords).toHaveLength(1);

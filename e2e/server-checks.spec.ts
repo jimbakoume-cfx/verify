@@ -64,7 +64,7 @@ test("checks pass: 'Checking your photos…' while the worker looks at them, eve
   }
   const screens = await rider.screensSeen();
   expect(screens.indexOf(rider.t("checks.title"))).toBeGreaterThan(screens.indexOf(rider.t("upload.title")));
-  expect(screens.indexOf(rider.t("checks.title"))).toBeLessThan(screens.indexOf(rider.t("done.title")));
+  expect(screens.indexOf(rider.t("checks.title"))).toBeLessThan(screens.indexOf(rider.t("result.reviewTitle")));
   expect(backend.status).toBe("submitted");
 });
 

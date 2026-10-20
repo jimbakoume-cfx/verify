@@ -6,6 +6,8 @@
 // (flow/validation.ts, assessMrzReport), and GET /checks the real rules (flow/checks.ts) on the jobs
 // of a scripted AI worker, so what the tests see is judged exactly as the server judges it. M4: a
 // declared document can be scripted as expired (the consistency check's firm document_expired flag).
+// Automatic approval: GET /result answers what `result` scripts (default: review at once), through the
+// real handler's filter (flow/result.ts toFlowResult), only once the case is submitted.
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { Page, Request, Route } from "@playwright/test";
 import {
@@ -20,6 +22,7 @@ import {
   type DeclaredDocument,
   type ErrorCode,
   type FlowChecks,
+  type FlowResult,
   type FlowSession,
   type FlowStatus,
   LIVENESS_LIMITS,
@@ -34,6 +37,7 @@ import {
 } from "../../supabase/functions/_shared/contract";
 import { type CheckStateRow, flowChecks } from "../../supabase/functions/flow/checks";
 import { assessMrzReport, checkFrame } from "../../supabase/functions/flow/handler";
+import { toFlowResult } from "../../supabase/functions/flow/result";
 import { drawChallenge, livenessFramePath, validateLivenessCapture } from "../../supabase/functions/flow/liveness";
 import { validateMrzReport } from "../../supabase/functions/flow/validation";
 import { assessLivenessCapture } from "../../supabase/functions/worker/liveness";
@@ -186,6 +190,13 @@ export class FakeBackend {
   checksOverride: ((checks: FlowChecks) => FlowChecks) | null = null;
   /** Requests the real backend would refuse or never receive: each one is a bug in the app. */
   readonly problems: string[] = [];
+  /**
+   * Automatic approval: what flow_result answers to the n-th GET /result (1-based), e.g. pending twice
+   * then verified. Default: review at once (a person checks the case, as for every real session).
+   */
+  result: (n: number) => FlowResult = () => ({ state: "review", returnUrl: null });
+  /** Automatic approval: every GET /result answer, in order, with when it was asked. */
+  readonly results: { at: number; answer: FlowResult }[] = [];
   /** M5: every challenge issued, in order. */
   readonly challenges: IssuedChallenge[] = [];
   /** M5: every face check recorded, in order (a retried report changes nothing). */
@@ -237,9 +248,12 @@ export class FakeBackend {
     this.worker = (capture, n) => ({ result: "done", verdict: bySide[capture.kind]?.[n - 1] ?? "ok", pendingFor });
   }
 
-  /** The flow routes called, e.g. ["GET /session", "POST /consent", ...]. */
+  /**
+   * The flow routes called up to the submit, e.g. ["GET /session", "POST /consent", ...]. The result
+   * screen's polls (GET /result, as many as the wait takes) are in `results` instead.
+   */
   get routes(): string[] {
-    return this.calls.map((c) => c.route);
+    return this.calls.map((c) => c.route).filter((route) => route !== "GET /result");
   }
 
   session(): FlowSession {
@@ -332,6 +346,15 @@ export class FakeBackend {
     if (req.headers()[SESSION_TOKEN_HEADER] !== this.token) throw new ApiError(401, "invalid_session");
     if (this.#expired) throw new ApiError(410, "session_expired");
     if (name === "GET /session") return this.session();
+    if (name === "GET /result") {
+      if (this.status === "created" || this.status === "in_progress") {
+        this.problems.push(`${name}: asked before the submit`);
+        throw new ApiError(409, "not_submitted");
+      }
+      const answer = toFlowResult(this.result(this.results.length + 1));
+      this.results.push({ at: Date.now(), answer });
+      return answer;
+    }
     if (this.status !== "created" && this.status !== "in_progress") throw new ApiError(409, "already_submitted");
     const input = (body ?? {}) as Record<string, unknown>;
 

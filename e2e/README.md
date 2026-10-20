@@ -81,6 +81,10 @@ Requirements: Node 22 and `python3` (standard library only).
     (`flow/liveness.ts`), the real per-file checks (`checkFrame`, the SHA-256 of each stored frame)
     and the real rule (`worker/liveness.ts`). `failLiveness` refuses the next reports (e.g. an
     expired challenge). The submit needs a recorded face check, as on the server;
+  - automatic approval: `GET /result`, after the submit only, answering what `backend.result` scripts
+    for each poll (default: review at once), through the real handler's filter (`toFlowResult`). The
+    polls are recorded in `backend.results` (with their times), not in `backend.routes`, which lists
+    the routes up to the submit;
   - the signed storage upload;
   - the health check.
 
@@ -96,6 +100,8 @@ Requirements: Node 22 and `python3` (standard library only).
 - **Screens.** `support/fixtures.ts` logs every screen title as it appears, with the time, so a test
   can check a screen that shows only briefly (the reading screen takes about half a second once the
   OCR engine is warm), and when it appeared.
+- **The result screen** (automatic approval) follows the submit in every complete scenario:
+  `Rider.waitForSubmit` ends on its answer ("review" unless a test scripts `backend.result`).
 - **The face check (M5)** follows the server's checks in every complete scenario:
   `Rider.passLiveness` waits for it, presses Start and waits for the capture (about 10.5 s) and the
   frames' report. `Rider.waitForSubmit` includes it. Each test may take up to 90 s.
@@ -119,6 +125,7 @@ Requirements: Node 22 and `python3` (standard library only).
 | `server-checks.spec.ts` | The server's check of the photos (M3), card camera. "Checking your photos…" with the photos sent, `GET /checks` at once then every 2 s, the submit once every side is checked. A retake of the front (no "turn over", the side named and the reason, only that photo sent again, the replaced one erased); both sides (in English: the front first, then "turn over" titled "Back: please take this photo again"); the code-lines side of the new CNI (read again on the phone, a second report with `attempts: 2`); never a retake when the phone read every check digit right, even if the server asked; the limit of one server retake per side, on the server and on the phone; the real 20 s time-out with the worker down; `unchecked` (out of budget, ring failed) submitted at once; the route answering 503 (with the `?debug=1&checksWaitMs=` override). No error is ever shown for the checks. |
 | `server-checks-expired.spec.ts` | An expired document (M4), new CNI: "Checking your photos…" stops asking and says "This document has expired". "Continue anyway": asked once more, then submitted. "Use another document" (in English): back to the list, the old CNI chosen, both sides photographed again (the new photos replace the old ones), then submitted. |
 | `liveness.spec.ts` | The face check (M5), `face` camera: the front camera asked for at 640×480 without audio; the prompts in the server's challenge order with "Step n of 3" and the code on screen; 13 frames into their slots, each a 480-pixel canvas JPEG without metadata, under 100 KB and 600 KB in all, judged "pass" by the real rule (1 + 4 + 4 + 4 frames, plausible timings); the camera released. A refused report (expired challenge): only "Start again", then a different challenge, in English. A network failure while sending: "Try again" sends the same frames, with no new challenge. |
+| `result.spec.ts` | The result screen after the submit (automatic approval), card camera. Verified after two pending answers: asked at once after the submit then every 2.5 s, "Votre pièce d'identité est vérifiée ✓", and **Continuer** goes to the session's return address. Verified without one, in English: **Continue** ends on "You're all set". Review: "Nous vérifions quelques détails, nous vous tiendrons informé.", nothing to press, no more polls. Time-out (debug `resultWaitMs=6000`): still pending, then the review message. |
 | `server-checks-passport.spec.ts` | A passport photo page retaken after the server's check: its camera names the "Photo page", and the new photo is read and reported again. |
 
 ## Settings

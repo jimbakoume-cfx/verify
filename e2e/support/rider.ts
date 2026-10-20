@@ -205,10 +205,13 @@ export class Rider {
     await expect(this.livenessHeading).toBeHidden({ timeout: LIVENESS_CAPTURE_TIMEOUT });
   }
 
-  /** From the checking screen to the end: the server's checks are over, the face check is done, the case is submitted. */
+  /**
+   * From the checking screen to the end: the server's checks are over, the face check is done, the case
+   * is submitted, and the result screen has its answer (the fake backend's default: review).
+   */
   async waitForSubmit(timeout = 30_000): Promise<void> {
     await this.passLiveness(timeout);
-    await expect(this.heading("done.title")).toBeVisible({ timeout: 20_000 });
+    await expect(this.heading("result.reviewTitle").or(this.heading("result.verifiedTitle"))).toBeVisible({ timeout: 20_000 });
   }
 
   /** Every screen title shown since the link was opened, in order (logged by fixtures.ts). */
