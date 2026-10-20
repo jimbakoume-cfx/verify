@@ -19,6 +19,7 @@ import { createLazyMrzReader, unavailableRead } from "../mrz/lazyReader";
 import { type MrzModel, type MrzReader, mrzModelFor } from "../mrz/types";
 import { type FlowApi, createFlowApi } from "./api";
 import { type ChecksTiming, waitForChecks } from "./checks";
+import { type ResultTiming, waitForResult } from "./result";
 import type { LivenessService } from "../liveness/send";
 import { type FlowErrorCode, isTransient, toFlowError } from "./errors";
 import { listenForBack, pushBackGuard } from "./history";
@@ -67,6 +68,8 @@ export interface FlowActions {
   livenessDone(): void;
   /** M5: the face check met an error; one that ends the session shows the session's error screen. */
   livenessFailed(error: FlowErrorCode): void;
+  /** Automatic approval: "Continue" on "Your ID is verified". */
+  continueResult(): void;
 }
 
 export interface Boot {
@@ -77,6 +80,8 @@ export interface Boot {
 export interface FlowOptions {
   /** How long to wait for the server's checks, and how often to ask (default: CHECKS_TIMING). */
   checks?: Partial<ChecksTiming>;
+  /** How long the result screen waits, and how often it asks (default: RESULT_TIMING). */
+  result?: Partial<ResultTiming>;
 }
 
 export function useFlow(boot: Boot, options: FlowOptions = {}): { state: FlowState; actions: FlowActions } {
@@ -317,6 +322,35 @@ export function useFlow(boot: Boot, options: FlowOptions = {}): { state: FlowSta
     return () => controller.abort();
   }, [waiting, api, waitMs, pollMs]);
 
+  // Automatic approval: the result screen asks whether the ID is verified until it is settled or the
+  // time is up (then it says what a review says). Leaving the screen stops the wait.
+  const resultWaitMs = options.result?.waitMs;
+  const resultPollMs = options.result?.pollMs;
+  const awaitingResult = screen.name === "result" && state.result.state === "pending";
+  useEffect(() => {
+    if (!awaitingResult || !api) return;
+    const controller = new AbortController();
+    void waitForResult({
+      getResult: (signal) => api.getResult(signal),
+      timing: { waitMs: resultWaitMs, pollMs: resultPollMs },
+      signal: controller.signal,
+    }).then((result) => {
+      if (!result || controller.signal.aborted) return;
+      dispatch(
+        result.type === "decided"
+          ? { type: "result/answer", state: result.decision.state, returnUrl: result.decision.returnUrl }
+          : { type: "result/timeout" },
+      );
+    });
+    return () => controller.abort();
+  }, [awaitingResult, api, resultWaitMs, resultPollMs]);
+
+  // "Continue" with a return address (an https one: result.ts): the rider goes back to the ride app.
+  const leaveTo = state.result.leaving ? state.result.returnUrl : null;
+  useEffect(() => {
+    if (leaveTo) window.location.assign(leaveTo);
+  }, [leaveTo]);
+
   const actions = useMemo<FlowActions>(() => {
     const language = () => (isSupportedLanguage(i18n.language) ? i18n.language : DEFAULT_LANGUAGE);
     return {
@@ -358,6 +392,7 @@ export function useFlow(boot: Boot, options: FlowOptions = {}): { state: FlowSta
         : null,
       livenessDone: () => dispatch({ type: "liveness/done" }),
       livenessFailed: (error) => dispatch({ type: "liveness/failed", error }),
+      continueResult: () => dispatch({ type: "result/continue" }),
     };
   }, [i18n, loadSession, request, api]);
 

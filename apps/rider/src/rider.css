@@ -371,3 +371,21 @@ button.primary, button.secondary { min-height: 52px; font-size: 1rem; }
 .liveness-start { width: min(420px, 100%); }
 .liveness .camera-error .progress { margin: 12px 0; }
 .check.optional { border-style: dashed; }
+
+/* Result (automatic approval) */
+.end-icon.info { background: var(--brand); }
+.result-pending { display: flex; align-items: center; gap: 14px; }
+.result-pending p { margin: 0; }
+.spinner {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 3px solid var(--border);
+  border-top-color: var(--brand);
+  animation: result-spin 0.9s linear infinite;
+}
+@keyframes result-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation-duration: 2.4s; }
+}

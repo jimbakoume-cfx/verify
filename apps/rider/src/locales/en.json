@@ -213,7 +213,8 @@
   "done": {
     "title": "Photos received",
     "next": "We have your document photos and your face check. Confiance will check them.",
-    "close": "You can now return to the Confiance app."
+    "close": "You can now return to the Confiance app.",
+    "verifiedTitle": "You're all set"
   },
   "sessionError": {
     "invalidTitle": "Link not valid",
@@ -336,5 +337,15 @@
     "title": "Something went wrong",
     "text": "Reload the page to continue. Your link still works.",
     "reload": "Reload"
+  },
+  "result": {
+    "pendingTitle": "Checking your ID…",
+    "pendingBody": "This usually takes less than a minute.",
+    "keepOpen": "Keep this page open.",
+    "verifiedTitle": "Your ID is verified ✓",
+    "verifiedBody": "Thank you. You can continue.",
+    "continue": "Continue",
+    "reviewTitle": "We're checking a few details…",
+    "reviewBody": "We're checking a few details, we'll let you know."
   }
 }

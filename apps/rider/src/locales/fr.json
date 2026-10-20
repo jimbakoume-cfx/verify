@@ -213,7 +213,8 @@
   "done": {
     "title": "Photos reçues",
     "next": "Nous avons reçu les photos de votre pièce et votre vérification du visage. Confiance va les vérifier.",
-    "close": "Vous pouvez maintenant revenir à l'application Confiance."
+    "close": "Vous pouvez maintenant revenir à l'application Confiance.",
+    "verifiedTitle": "C'est tout bon"
   },
   "sessionError": {
     "invalidTitle": "Lien non valide",
@@ -336,5 +337,15 @@
     "title": "Un problème est survenu",
     "text": "Rechargez la page pour continuer. Votre lien reste valable.",
     "reload": "Recharger"
+  },
+  "result": {
+    "pendingTitle": "Vérification de votre pièce d'identité…",
+    "pendingBody": "Cela prend en général moins d'une minute.",
+    "keepOpen": "Gardez cette page ouverte.",
+    "verifiedTitle": "Votre pièce d'identité est vérifiée ✓",
+    "verifiedBody": "Merci. Vous pouvez continuer.",
+    "continue": "Continuer",
+    "reviewTitle": "Nous vérifions quelques détails…",
+    "reviewBody": "Nous vérifions quelques détails, nous vous tiendrons informé."
   }
 }

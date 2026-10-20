@@ -94,6 +94,15 @@ describe("createFlowApi", () => {
     await expect(hanging.getSession()).rejects.toMatchObject({ code: "timeout" });
   });
 
+  it("asks for the result after the submit (automatic approval)", async () => {
+    const result = { state: "verified", returnUrl: "https://ride.example/back" };
+    const fetchMock = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => json(200, result));
+    expect(await apiWith(fetchMock as typeof fetch).getResult()).toEqual(result);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect([String(url).slice(BASE.length), init?.method, init?.body]).toEqual(["/result", "GET", undefined]);
+    expect(init?.cache).toBe("no-store");
+  });
+
   it("asks for the server's checks, and stops when the caller gives up", async () => {
     const checks = { done: false, sides: [{ kind: "document_front", captureId: "c1", state: "pending", reason: null }] };
     const fetchMock = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => json(200, checks));

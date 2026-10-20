@@ -305,14 +305,15 @@ describe("upload", () => {
     expect(run(running, { type: "upload/started", progress })).toBe(running);
   });
 
-  it("finishes on the done screen", () => {
+  it("finishes on the result screen, waiting for the result (automatic approval)", () => {
     const state = run(
       running,
       { type: "upload/sideDone", side: "document_front" },
       { type: "upload/sideDone", side: "document_back" },
       { type: "upload/submitted", session: withDocument("cni_legacy", ["document_front", "document_back"]) },
     );
-    expect(state.screen).toEqual({ name: "done" });
+    expect(state.screen).toEqual({ name: "result" });
+    expect(state.result).toEqual({ state: "pending", returnUrl: null, leaving: false });
     expect(state.upload.status).toBe("idle");
   });
 
@@ -762,7 +763,7 @@ describe("the server's checks (M3)", () => {
       type: "upload/submitted",
       session: withDocument("cni_legacy", ["document_front", "document_back"]),
     });
-    expect(done.screen).toEqual({ name: "done" });
+    expect(done.screen).toEqual({ name: "result" });
   });
 
   it("submits with no error shown when the checks time out or cannot be read", () => {

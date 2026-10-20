@@ -6,6 +6,7 @@ import {
   type ConsentRequest,
   type DocumentTypeRequest,
   type FlowChecks,
+  type FlowResult,
   type FlowSession,
   type LivenessCaptureRequest,
   type LivenessCaptureResponse,
@@ -32,6 +33,8 @@ export interface FlowApi {
   /** M5: the report of a face check's frames, once they are uploaded. */
   recordLiveness(body: LivenessCaptureRequest): Promise<LivenessCaptureResponse>;
   submit(): Promise<FlowSession>;
+  /** After the submit: verified, pending or review (automatic approval). `signal` abandons the request. */
+  getResult(signal?: AbortSignal): Promise<FlowResult>;
 }
 
 export interface FlowApiOptions {
@@ -114,5 +117,6 @@ export function createFlowApi(options: FlowApiOptions): FlowApi {
     livenessChallenge: () => call<LivenessChallengeResponse>("POST", "/liveness/challenge", {}),
     recordLiveness: (body) => call<LivenessCaptureResponse>("POST", "/liveness/captures", body),
     submit: () => call<FlowSession>("POST", "/submit", {}),
+    getResult: (signal) => call<FlowResult>("GET", "/result", undefined, signal),
   };
 }

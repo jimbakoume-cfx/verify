@@ -11,6 +11,7 @@ import { CheckingScreen } from "./screens/Checking";
 import { ConsentScreen, DeclinedScreen } from "./screens/Consent";
 import { DocumentChoiceScreen } from "./screens/DocumentChoice";
 import { DoneScreen, SessionErrorScreen } from "./screens/End";
+import { ResultScreen } from "./screens/Result";
 import { ReadingScreen } from "./screens/Reading";
 import { ReviewScreen } from "./screens/Review";
 import { TurnOverScreen } from "./screens/TurnOver";
@@ -205,8 +206,10 @@ export function FlowView({ state, actions, debug }: { state: FlowState; actions:
           onFailed={actions.livenessFailed}
         />
       );
+    case "result":
+      return <ResultScreen result={state.result} onContinue={actions.continueResult} />;
     case "done":
-      return <DoneScreen />;
+      return <DoneScreen verified={state.result.state === "verified"} />;
     case "sessionError":
       return <SessionErrorScreen reason={screen.reason} />;
   }
