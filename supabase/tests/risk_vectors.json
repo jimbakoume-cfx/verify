@@ -1,5 +1,5 @@
 {
-  "comment": "Shared test vectors for the risk rules (M8; M6/M7 added reviewOnly; automatic approval added documentFirm, testSession, faceMatchCountsForApproval, uncalibratedCounted and autoApproval), run by supabase/functions/_shared/risk.test.ts (TypeScript) and supabase/tests/70_m8_test.sql (private.risk_evaluate, private.risk_config_errors): both must give exactly these results. defaultConfig is threshold version 2 as the M8 migration seeds it; autoApprovalConfig is the version the automatic-approval migration adds.",
+  "comment": "Shared test vectors for the risk rules (M8; M6/M7 added reviewOnly; automatic approval added documentFirm, testSession, faceMatchCountsForApproval, uncalibratedCounted and autoApproval), run by supabase/functions/_shared/risk.test.ts (TypeScript) and supabase/tests/70_m8_test.sql (private.risk_evaluate, private.risk_config_errors): both must give exactly these results. The fixes after the PM's first real test added the provisional signal print_name_mismatch (optional in a configuration: a version without it uses weight 0) and realTestFixesConfig, the version 20261022000000_real_test_fixes.sql adds. defaultConfig is threshold version 2 as the M8 migration seeds it; autoApprovalConfig is the version the automatic-approval migration adds.",
   "signals": [
     "document_expired",
     "under_18",
@@ -12,6 +12,7 @@
     "date_logic",
     "number_format",
     "manual_review_document",
+    "print_name_mismatch",
     "unrecognised_document",
     "mrz_unreadable_server",
     "mrz_phone_flag",
@@ -7571,6 +7572,767 @@
         "approveMax": 0.15,
         "rejectMin": 0.9
       }
+    },
+    {
+      "name": "real test fixes: a printed name that differs is a note that does not block automatic approval",
+      "facts": {
+        "declaredDocument": "passport",
+        "signals": [
+          "print_name_mismatch"
+        ],
+        "missing": [],
+        "reviewOnly": [
+          "face_match"
+        ],
+        "documentFirm": true,
+        "testSession": true
+      },
+      "config": {
+        "schema": 2,
+        "signals": {
+          "document_expired": {
+            "weight": 1,
+            "enabled": true
+          },
+          "under_18": {
+            "weight": 1,
+            "enabled": true
+          },
+          "image_reused": {
+            "weight": 0.6,
+            "enabled": true
+          },
+          "unsupported_document": {
+            "weight": 0.5,
+            "enabled": true
+          },
+          "mrz_disagreement": {
+            "weight": 0.5,
+            "enabled": true
+          },
+          "mrz_invalid_server": {
+            "weight": 0.5,
+            "enabled": true
+          },
+          "mrz_print_mismatch": {
+            "weight": 0.5,
+            "enabled": true
+          },
+          "type_mismatch": {
+            "weight": 0.3,
+            "enabled": true
+          },
+          "date_logic": {
+            "weight": 0.4,
+            "enabled": true
+          },
+          "number_format": {
+            "weight": 0.2,
+            "enabled": true
+          },
+          "manual_review_document": {
+            "weight": 0,
+            "enabled": true
+          },
+          "unrecognised_document": {
+            "weight": 0.3,
+            "enabled": true
+          },
+          "mrz_unreadable_server": {
+            "weight": 0.2,
+            "enabled": true
+          },
+          "mrz_phone_flag": {
+            "weight": 0.1,
+            "enabled": true
+          },
+          "phone_report_missing": {
+            "weight": 0.1,
+            "enabled": true
+          },
+          "provisional_classification": {
+            "weight": 0.1,
+            "enabled": true
+          },
+          "quality_poor": {
+            "weight": 0.1,
+            "enabled": true
+          },
+          "liveness_flag": {
+            "weight": 0.5,
+            "enabled": true
+          },
+          "face_match_flag": {
+            "weight": 0.5,
+            "enabled": true
+          },
+          "print_name_mismatch": {
+            "weight": 0,
+            "enabled": true
+          }
+        },
+        "approveMax": 0.15,
+        "rejectMin": 0.9,
+        "hardFlags": [
+          "document_expired",
+          "under_18",
+          "image_reused",
+          "unsupported_document",
+          "manual_review_document"
+        ],
+        "alwaysReviewDocuments": [
+          "cni_legacy",
+          "residence_permit",
+          "driving_licence",
+          "voter_card"
+        ],
+        "autoDecide": true,
+        "faceMatchCountsForApproval": true
+      },
+      "expected": {
+        "recommendation": "approve",
+        "band": "approve",
+        "score": 0,
+        "firmScore": 0,
+        "reasons": [
+          "score_low"
+        ],
+        "contributions": [
+          {
+            "signal": "print_name_mismatch",
+            "weight": 0,
+            "counted": true,
+            "firm": false,
+            "hard": false
+          }
+        ],
+        "hardFlags": [],
+        "missing": [],
+        "reviewOnly": [],
+        "uncalibratedCounted": [
+          "face_match"
+        ],
+        "autoApproval": {
+          "eligible": true,
+          "blockers": []
+        },
+        "unknownSignals": [],
+        "rejectReasonCode": null,
+        "approveMax": 0.15,
+        "rejectMin": 0.9
+      }
+    },
+    {
+      "name": "real test fixes: a version stored without print_name_mismatch gives it weight 0",
+      "facts": {
+        "declaredDocument": "passport",
+        "signals": [
+          "print_name_mismatch"
+        ],
+        "missing": [],
+        "reviewOnly": [
+          "face_match"
+        ],
+        "documentFirm": true,
+        "testSession": true
+      },
+      "config": {
+        "schema": 2,
+        "signals": {
+          "document_expired": {
+            "weight": 1,
+            "enabled": true
+          },
+          "under_18": {
+            "weight": 1,
+            "enabled": true
+          },
+          "image_reused": {
+            "weight": 0.6,
+            "enabled": true
+          },
+          "unsupported_document": {
+            "weight": 0.5,
+            "enabled": true
+          },
+          "mrz_disagreement": {
+            "weight": 0.5,
+            "enabled": true
+          },
+          "mrz_invalid_server": {
+            "weight": 0.5,
+            "enabled": true
+          },
+          "mrz_print_mismatch": {
+            "weight": 0.5,
+            "enabled": true
+          },
+          "type_mismatch": {
+            "weight": 0.3,
+            "enabled": true
+          },
+          "date_logic": {
+            "weight": 0.4,
+            "enabled": true
+          },
+          "number_format": {
+            "weight": 0.2,
+            "enabled": true
+          },
+          "manual_review_document": {
+            "weight": 0,
+            "enabled": true
+          },
+          "unrecognised_document": {
+            "weight": 0.3,
+            "enabled": true
+          },
+          "mrz_unreadable_server": {
+            "weight": 0.2,
+            "enabled": true
+          },
+          "mrz_phone_flag": {
+            "weight": 0.1,
+            "enabled": true
+          },
+          "phone_report_missing": {
+            "weight": 0.1,
+            "enabled": true
+          },
+          "provisional_classification": {
+            "weight": 0.1,
+            "enabled": true
+          },
+          "quality_poor": {
+            "weight": 0.1,
+            "enabled": true
+          },
+          "liveness_flag": {
+            "weight": 0.5,
+            "enabled": true
+          },
+          "face_match_flag": {
+            "weight": 0.5,
+            "enabled": true
+          }
+        },
+        "approveMax": 0.15,
+        "rejectMin": 0.9,
+        "hardFlags": [
+          "document_expired",
+          "under_18",
+          "image_reused",
+          "unsupported_document",
+          "manual_review_document"
+        ],
+        "alwaysReviewDocuments": [
+          "cni_legacy",
+          "residence_permit",
+          "driving_licence",
+          "voter_card"
+        ],
+        "autoDecide": true,
+        "faceMatchCountsForApproval": true
+      },
+      "expected": {
+        "recommendation": "approve",
+        "band": "approve",
+        "score": 0,
+        "firmScore": 0,
+        "reasons": [
+          "score_low"
+        ],
+        "contributions": [
+          {
+            "signal": "print_name_mismatch",
+            "weight": 0,
+            "counted": true,
+            "firm": false,
+            "hard": false
+          }
+        ],
+        "hardFlags": [],
+        "missing": [],
+        "reviewOnly": [],
+        "uncalibratedCounted": [
+          "face_match"
+        ],
+        "autoApproval": {
+          "eligible": true,
+          "blockers": []
+        },
+        "unknownSignals": [],
+        "rejectReasonCode": null,
+        "approveMax": 0.15,
+        "rejectMin": 0.9
+      }
+    },
+    {
+      "name": "real test fixes: a printed number or date that differs stays firm and blocks",
+      "facts": {
+        "declaredDocument": "passport",
+        "signals": [
+          "mrz_print_mismatch"
+        ],
+        "missing": [],
+        "reviewOnly": [
+          "face_match"
+        ],
+        "documentFirm": true,
+        "testSession": true
+      },
+      "config": {
+        "schema": 2,
+        "signals": {
+          "document_expired": {
+            "weight": 1,
+            "enabled": true
+          },
+          "under_18": {
+            "weight": 1,
+            "enabled": true
+          },
+          "image_reused": {
+            "weight": 0.6,
+            "enabled": true
+          },
+          "unsupported_document": {
+            "weight": 0.5,
+            "enabled": true
+          },
+          "mrz_disagreement": {
+            "weight": 0.5,
+            "enabled": true
+          },
+          "mrz_invalid_server": {
+            "weight": 0.5,
+            "enabled": true
+          },
+          "mrz_print_mismatch": {
+            "weight": 0.5,
+            "enabled": true
+          },
+          "type_mismatch": {
+            "weight": 0.3,
+            "enabled": true
+          },
+          "date_logic": {
+            "weight": 0.4,
+            "enabled": true
+          },
+          "number_format": {
+            "weight": 0.2,
+            "enabled": true
+          },
+          "manual_review_document": {
+            "weight": 0,
+            "enabled": true
+          },
+          "unrecognised_document": {
+            "weight": 0.3,
+            "enabled": true
+          },
+          "mrz_unreadable_server": {
+            "weight": 0.2,
+            "enabled": true
+          },
+          "mrz_phone_flag": {
+            "weight": 0.1,
+            "enabled": true
+          },
+          "phone_report_missing": {
+            "weight": 0.1,
+            "enabled": true
+          },
+          "provisional_classification": {
+            "weight": 0.1,
+            "enabled": true
+          },
+          "quality_poor": {
+            "weight": 0.1,
+            "enabled": true
+          },
+          "liveness_flag": {
+            "weight": 0.5,
+            "enabled": true
+          },
+          "face_match_flag": {
+            "weight": 0.5,
+            "enabled": true
+          },
+          "print_name_mismatch": {
+            "weight": 0,
+            "enabled": true
+          }
+        },
+        "approveMax": 0.15,
+        "rejectMin": 0.9,
+        "hardFlags": [
+          "document_expired",
+          "under_18",
+          "image_reused",
+          "unsupported_document",
+          "manual_review_document"
+        ],
+        "alwaysReviewDocuments": [
+          "cni_legacy",
+          "residence_permit",
+          "driving_licence",
+          "voter_card"
+        ],
+        "autoDecide": true,
+        "faceMatchCountsForApproval": true
+      },
+      "expected": {
+        "recommendation": "review",
+        "band": "review",
+        "score": 0.5,
+        "firmScore": 0.5,
+        "reasons": [
+          "score_between"
+        ],
+        "contributions": [
+          {
+            "signal": "mrz_print_mismatch",
+            "weight": 0.5,
+            "counted": true,
+            "firm": true,
+            "hard": false
+          }
+        ],
+        "hardFlags": [],
+        "missing": [],
+        "reviewOnly": [],
+        "uncalibratedCounted": [
+          "face_match"
+        ],
+        "autoApproval": {
+          "eligible": false,
+          "blockers": [
+            "not_recommended",
+            "mrz_print_mismatch",
+            "firm_signal",
+            "score_above_cutoff"
+          ]
+        },
+        "unknownSignals": [],
+        "rejectReasonCode": null,
+        "approveMax": 0.15,
+        "rejectMin": 0.9
+      }
+    },
+    {
+      "name": "real test fixes: print_name_mismatch weighted 1 is provisional: review, never reject",
+      "facts": {
+        "declaredDocument": "passport",
+        "signals": [
+          "print_name_mismatch"
+        ],
+        "missing": [],
+        "reviewOnly": [
+          "face_match"
+        ],
+        "documentFirm": true,
+        "testSession": true
+      },
+      "config": {
+        "schema": 2,
+        "signals": {
+          "document_expired": {
+            "weight": 1,
+            "enabled": true
+          },
+          "under_18": {
+            "weight": 1,
+            "enabled": true
+          },
+          "image_reused": {
+            "weight": 0.6,
+            "enabled": true
+          },
+          "unsupported_document": {
+            "weight": 0.5,
+            "enabled": true
+          },
+          "mrz_disagreement": {
+            "weight": 0.5,
+            "enabled": true
+          },
+          "mrz_invalid_server": {
+            "weight": 0.5,
+            "enabled": true
+          },
+          "mrz_print_mismatch": {
+            "weight": 0.5,
+            "enabled": true
+          },
+          "type_mismatch": {
+            "weight": 0.3,
+            "enabled": true
+          },
+          "date_logic": {
+            "weight": 0.4,
+            "enabled": true
+          },
+          "number_format": {
+            "weight": 0.2,
+            "enabled": true
+          },
+          "manual_review_document": {
+            "weight": 0,
+            "enabled": true
+          },
+          "unrecognised_document": {
+            "weight": 0.3,
+            "enabled": true
+          },
+          "mrz_unreadable_server": {
+            "weight": 0.2,
+            "enabled": true
+          },
+          "mrz_phone_flag": {
+            "weight": 0.1,
+            "enabled": true
+          },
+          "phone_report_missing": {
+            "weight": 0.1,
+            "enabled": true
+          },
+          "provisional_classification": {
+            "weight": 0.1,
+            "enabled": true
+          },
+          "quality_poor": {
+            "weight": 0.1,
+            "enabled": true
+          },
+          "liveness_flag": {
+            "weight": 0.5,
+            "enabled": true
+          },
+          "face_match_flag": {
+            "weight": 0.5,
+            "enabled": true
+          },
+          "print_name_mismatch": {
+            "weight": 1,
+            "enabled": true
+          }
+        },
+        "approveMax": 0.15,
+        "rejectMin": 0.9,
+        "hardFlags": [
+          "document_expired",
+          "under_18",
+          "image_reused",
+          "unsupported_document",
+          "manual_review_document"
+        ],
+        "alwaysReviewDocuments": [
+          "cni_legacy",
+          "residence_permit",
+          "driving_licence",
+          "voter_card"
+        ],
+        "autoDecide": true,
+        "faceMatchCountsForApproval": true
+      },
+      "expected": {
+        "recommendation": "review",
+        "band": "reject",
+        "score": 1,
+        "firmScore": 0,
+        "reasons": [
+          "provisional_signals"
+        ],
+        "contributions": [
+          {
+            "signal": "print_name_mismatch",
+            "weight": 1,
+            "counted": true,
+            "firm": false,
+            "hard": false
+          }
+        ],
+        "hardFlags": [],
+        "missing": [],
+        "reviewOnly": [],
+        "uncalibratedCounted": [
+          "face_match"
+        ],
+        "autoApproval": {
+          "eligible": false,
+          "blockers": [
+            "not_recommended",
+            "score_above_cutoff"
+          ]
+        },
+        "unknownSignals": [],
+        "rejectReasonCode": null,
+        "approveMax": 0.15,
+        "rejectMin": 0.9
+      }
+    },
+    {
+      "name": "real test fixes: the PM's session after the fix (name note, liveness failed): review",
+      "facts": {
+        "declaredDocument": "passport",
+        "signals": [
+          "liveness_flag",
+          "print_name_mismatch"
+        ],
+        "missing": [],
+        "reviewOnly": [
+          "face_match"
+        ],
+        "documentFirm": true,
+        "testSession": true
+      },
+      "config": {
+        "schema": 2,
+        "signals": {
+          "document_expired": {
+            "weight": 1,
+            "enabled": true
+          },
+          "under_18": {
+            "weight": 1,
+            "enabled": true
+          },
+          "image_reused": {
+            "weight": 0.6,
+            "enabled": true
+          },
+          "unsupported_document": {
+            "weight": 0.5,
+            "enabled": true
+          },
+          "mrz_disagreement": {
+            "weight": 0.5,
+            "enabled": true
+          },
+          "mrz_invalid_server": {
+            "weight": 0.5,
+            "enabled": true
+          },
+          "mrz_print_mismatch": {
+            "weight": 0.5,
+            "enabled": true
+          },
+          "type_mismatch": {
+            "weight": 0.3,
+            "enabled": true
+          },
+          "date_logic": {
+            "weight": 0.4,
+            "enabled": true
+          },
+          "number_format": {
+            "weight": 0.2,
+            "enabled": true
+          },
+          "manual_review_document": {
+            "weight": 0,
+            "enabled": true
+          },
+          "unrecognised_document": {
+            "weight": 0.3,
+            "enabled": true
+          },
+          "mrz_unreadable_server": {
+            "weight": 0.2,
+            "enabled": true
+          },
+          "mrz_phone_flag": {
+            "weight": 0.1,
+            "enabled": true
+          },
+          "phone_report_missing": {
+            "weight": 0.1,
+            "enabled": true
+          },
+          "provisional_classification": {
+            "weight": 0.1,
+            "enabled": true
+          },
+          "quality_poor": {
+            "weight": 0.1,
+            "enabled": true
+          },
+          "liveness_flag": {
+            "weight": 0.5,
+            "enabled": true
+          },
+          "face_match_flag": {
+            "weight": 0.5,
+            "enabled": true
+          },
+          "print_name_mismatch": {
+            "weight": 0,
+            "enabled": true
+          }
+        },
+        "approveMax": 0.15,
+        "rejectMin": 0.9,
+        "hardFlags": [
+          "document_expired",
+          "under_18",
+          "image_reused",
+          "unsupported_document",
+          "manual_review_document"
+        ],
+        "alwaysReviewDocuments": [
+          "cni_legacy",
+          "residence_permit",
+          "driving_licence",
+          "voter_card"
+        ],
+        "autoDecide": true,
+        "faceMatchCountsForApproval": true
+      },
+      "expected": {
+        "recommendation": "review",
+        "band": "review",
+        "score": 0.5,
+        "firmScore": 0,
+        "reasons": [
+          "score_between"
+        ],
+        "contributions": [
+          {
+            "signal": "print_name_mismatch",
+            "weight": 0,
+            "counted": true,
+            "firm": false,
+            "hard": false
+          },
+          {
+            "signal": "liveness_flag",
+            "weight": 0.5,
+            "counted": true,
+            "firm": false,
+            "hard": false
+          }
+        ],
+        "hardFlags": [],
+        "missing": [],
+        "reviewOnly": [],
+        "uncalibratedCounted": [
+          "face_match"
+        ],
+        "autoApproval": {
+          "eligible": false,
+          "blockers": [
+            "not_recommended",
+            "liveness_not_passed",
+            "score_above_cutoff"
+          ]
+        },
+        "unknownSignals": [],
+        "rejectReasonCode": null,
+        "approveMax": 0.15,
+        "rejectMin": 0.9
+      }
     }
   ],
   "configErrors": [
@@ -9262,6 +10024,427 @@
         "faceMatchCountsForApproval": true
       },
       "expected": []
+    },
+    {
+      "name": "valid with print_name_mismatch written out (the real-test-fixes version)",
+      "config": {
+        "schema": 2,
+        "signals": {
+          "document_expired": {
+            "weight": 1,
+            "enabled": true
+          },
+          "under_18": {
+            "weight": 1,
+            "enabled": true
+          },
+          "image_reused": {
+            "weight": 0.6,
+            "enabled": true
+          },
+          "unsupported_document": {
+            "weight": 0.5,
+            "enabled": true
+          },
+          "mrz_disagreement": {
+            "weight": 0.5,
+            "enabled": true
+          },
+          "mrz_invalid_server": {
+            "weight": 0.5,
+            "enabled": true
+          },
+          "mrz_print_mismatch": {
+            "weight": 0.5,
+            "enabled": true
+          },
+          "type_mismatch": {
+            "weight": 0.3,
+            "enabled": true
+          },
+          "date_logic": {
+            "weight": 0.4,
+            "enabled": true
+          },
+          "number_format": {
+            "weight": 0.2,
+            "enabled": true
+          },
+          "manual_review_document": {
+            "weight": 0,
+            "enabled": true
+          },
+          "unrecognised_document": {
+            "weight": 0.3,
+            "enabled": true
+          },
+          "mrz_unreadable_server": {
+            "weight": 0.2,
+            "enabled": true
+          },
+          "mrz_phone_flag": {
+            "weight": 0.1,
+            "enabled": true
+          },
+          "phone_report_missing": {
+            "weight": 0.1,
+            "enabled": true
+          },
+          "provisional_classification": {
+            "weight": 0.1,
+            "enabled": true
+          },
+          "quality_poor": {
+            "weight": 0.1,
+            "enabled": true
+          },
+          "liveness_flag": {
+            "weight": 0.5,
+            "enabled": true
+          },
+          "face_match_flag": {
+            "weight": 0.5,
+            "enabled": true
+          },
+          "print_name_mismatch": {
+            "weight": 0,
+            "enabled": true
+          }
+        },
+        "approveMax": 0.15,
+        "rejectMin": 0.9,
+        "hardFlags": [
+          "document_expired",
+          "under_18",
+          "image_reused",
+          "unsupported_document",
+          "manual_review_document"
+        ],
+        "alwaysReviewDocuments": [
+          "cni_legacy",
+          "residence_permit",
+          "driving_licence",
+          "voter_card"
+        ],
+        "autoDecide": true,
+        "faceMatchCountsForApproval": true
+      },
+      "expected": []
+    },
+    {
+      "name": "print_name_mismatch with a weight out of range and enabled not a boolean",
+      "config": {
+        "schema": 2,
+        "signals": {
+          "document_expired": {
+            "weight": 1,
+            "enabled": true
+          },
+          "under_18": {
+            "weight": 1,
+            "enabled": true
+          },
+          "image_reused": {
+            "weight": 0.6,
+            "enabled": true
+          },
+          "unsupported_document": {
+            "weight": 0.5,
+            "enabled": true
+          },
+          "mrz_disagreement": {
+            "weight": 0.5,
+            "enabled": true
+          },
+          "mrz_invalid_server": {
+            "weight": 0.5,
+            "enabled": true
+          },
+          "mrz_print_mismatch": {
+            "weight": 0.5,
+            "enabled": true
+          },
+          "type_mismatch": {
+            "weight": 0.3,
+            "enabled": true
+          },
+          "date_logic": {
+            "weight": 0.4,
+            "enabled": true
+          },
+          "number_format": {
+            "weight": 0.2,
+            "enabled": true
+          },
+          "manual_review_document": {
+            "weight": 0,
+            "enabled": true
+          },
+          "unrecognised_document": {
+            "weight": 0.3,
+            "enabled": true
+          },
+          "mrz_unreadable_server": {
+            "weight": 0.2,
+            "enabled": true
+          },
+          "mrz_phone_flag": {
+            "weight": 0.1,
+            "enabled": true
+          },
+          "phone_report_missing": {
+            "weight": 0.1,
+            "enabled": true
+          },
+          "provisional_classification": {
+            "weight": 0.1,
+            "enabled": true
+          },
+          "quality_poor": {
+            "weight": 0.1,
+            "enabled": true
+          },
+          "liveness_flag": {
+            "weight": 0.5,
+            "enabled": true
+          },
+          "face_match_flag": {
+            "weight": 0.5,
+            "enabled": true
+          },
+          "print_name_mismatch": {
+            "weight": 2,
+            "enabled": "yes"
+          }
+        },
+        "approveMax": 0.15,
+        "rejectMin": 0.9,
+        "hardFlags": [
+          "document_expired",
+          "under_18",
+          "image_reused",
+          "unsupported_document",
+          "manual_review_document"
+        ],
+        "alwaysReviewDocuments": [
+          "cni_legacy",
+          "residence_permit",
+          "driving_licence",
+          "voter_card"
+        ],
+        "autoDecide": true,
+        "faceMatchCountsForApproval": true
+      },
+      "expected": [
+        "signals.print_name_mismatch.enabled:not_boolean",
+        "signals.print_name_mismatch.weight:out_of_range"
+      ]
+    },
+    {
+      "name": "a required signal left out (only print_name_mismatch may be)",
+      "config": {
+        "schema": 2,
+        "signals": {
+          "document_expired": {
+            "weight": 1,
+            "enabled": true
+          },
+          "under_18": {
+            "weight": 1,
+            "enabled": true
+          },
+          "image_reused": {
+            "weight": 0.6,
+            "enabled": true
+          },
+          "unsupported_document": {
+            "weight": 0.5,
+            "enabled": true
+          },
+          "mrz_disagreement": {
+            "weight": 0.5,
+            "enabled": true
+          },
+          "mrz_invalid_server": {
+            "weight": 0.5,
+            "enabled": true
+          },
+          "mrz_print_mismatch": {
+            "weight": 0.5,
+            "enabled": true
+          },
+          "type_mismatch": {
+            "weight": 0.3,
+            "enabled": true
+          },
+          "date_logic": {
+            "weight": 0.4,
+            "enabled": true
+          },
+          "number_format": {
+            "weight": 0.2,
+            "enabled": true
+          },
+          "manual_review_document": {
+            "weight": 0,
+            "enabled": true
+          },
+          "unrecognised_document": {
+            "weight": 0.3,
+            "enabled": true
+          },
+          "mrz_unreadable_server": {
+            "weight": 0.2,
+            "enabled": true
+          },
+          "mrz_phone_flag": {
+            "weight": 0.1,
+            "enabled": true
+          },
+          "phone_report_missing": {
+            "weight": 0.1,
+            "enabled": true
+          },
+          "provisional_classification": {
+            "weight": 0.1,
+            "enabled": true
+          },
+          "quality_poor": {
+            "weight": 0.1,
+            "enabled": true
+          },
+          "face_match_flag": {
+            "weight": 0.5,
+            "enabled": true
+          },
+          "print_name_mismatch": {
+            "weight": 0,
+            "enabled": true
+          }
+        },
+        "approveMax": 0.15,
+        "rejectMin": 0.9,
+        "hardFlags": [
+          "document_expired",
+          "under_18",
+          "image_reused",
+          "unsupported_document",
+          "manual_review_document"
+        ],
+        "alwaysReviewDocuments": [
+          "cni_legacy",
+          "residence_permit",
+          "driving_licence",
+          "voter_card"
+        ],
+        "autoDecide": true,
+        "faceMatchCountsForApproval": true
+      },
+      "expected": [
+        "signals.liveness_flag:missing_key"
+      ]
     }
-  ]
+  ],
+  "realTestFixesConfig": {
+    "schema": 2,
+    "signals": {
+      "document_expired": {
+        "weight": 1,
+        "enabled": true
+      },
+      "under_18": {
+        "weight": 1,
+        "enabled": true
+      },
+      "image_reused": {
+        "weight": 0.6,
+        "enabled": true
+      },
+      "unsupported_document": {
+        "weight": 0.5,
+        "enabled": true
+      },
+      "mrz_disagreement": {
+        "weight": 0.5,
+        "enabled": true
+      },
+      "mrz_invalid_server": {
+        "weight": 0.5,
+        "enabled": true
+      },
+      "mrz_print_mismatch": {
+        "weight": 0.5,
+        "enabled": true
+      },
+      "type_mismatch": {
+        "weight": 0.3,
+        "enabled": true
+      },
+      "date_logic": {
+        "weight": 0.4,
+        "enabled": true
+      },
+      "number_format": {
+        "weight": 0.2,
+        "enabled": true
+      },
+      "manual_review_document": {
+        "weight": 0,
+        "enabled": true
+      },
+      "unrecognised_document": {
+        "weight": 0.3,
+        "enabled": true
+      },
+      "mrz_unreadable_server": {
+        "weight": 0.2,
+        "enabled": true
+      },
+      "mrz_phone_flag": {
+        "weight": 0.1,
+        "enabled": true
+      },
+      "phone_report_missing": {
+        "weight": 0.1,
+        "enabled": true
+      },
+      "provisional_classification": {
+        "weight": 0.1,
+        "enabled": true
+      },
+      "quality_poor": {
+        "weight": 0.1,
+        "enabled": true
+      },
+      "liveness_flag": {
+        "weight": 0.5,
+        "enabled": true
+      },
+      "face_match_flag": {
+        "weight": 0.5,
+        "enabled": true
+      },
+      "print_name_mismatch": {
+        "weight": 0,
+        "enabled": true
+      }
+    },
+    "approveMax": 0.15,
+    "rejectMin": 0.9,
+    "hardFlags": [
+      "document_expired",
+      "under_18",
+      "image_reused",
+      "unsupported_document",
+      "manual_review_document"
+    ],
+    "alwaysReviewDocuments": [
+      "cni_legacy",
+      "residence_permit",
+      "driving_licence",
+      "voter_card"
+    ],
+    "autoDecide": true,
+    "faceMatchCountsForApproval": true
+  }
 }

@@ -699,18 +699,20 @@ describe("POST /result", () => {
       const h = await setup();
       const c = h.repo.addCase("cni_biometric", ["document_front", "document_back"], "claimed");
       const bodies = {
-        document_front: result(c.document_front!.jobId, { fields: { surname: "Autre", givenNames: "Testa", birthDate: "01.01.1990" } }),
+        document_front: result(c.document_front!.jobId, {
+          fields: { surname: "Autre", givenNames: "Testa", birthDate: "01.01.1990", documentNumber: "ZZ9999999" },
+        }),
         document_back: result(c.document_back!.jobId, { mrzCandidates: td1Cmr(), fields: { issueDate: "2025-03-01" } }),
       };
       for (const side of order) expect(await readJson(await h.send("/result", bodies[side]))).toEqual({ status: "recorded" });
       const checks = h.repo.caseChecks.get(c.verificationId)!;
       expect(checks.consistency).toEqual({
         outcome: "flag",
-        details: { flags: ["mrz_print_mismatch"], provisional: [], basis: "mrz", mismatches: ["name"] },
+        details: { flags: ["mrz_print_mismatch"], provisional: [], basis: "mrz", mismatches: ["name", "number"] },
       });
       expect(checks.reasons).toEqual(["mrz_print_mismatch"]);
       // Only codes: nothing printed or read reaches the case checks.
-      expect(JSON.stringify(checks)).not.toMatch(/AUTRE|Autre|TESTA|SPECIMEN|1990/);
+      expect(JSON.stringify(checks)).not.toMatch(/AUTRE|Autre|TESTA|SPECIMEN|1990|ZZ9999999/);
     }
   });
 

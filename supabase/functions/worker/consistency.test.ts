@@ -205,8 +205,15 @@ describe("decideConsistency: under 18", () => {
 
 describe("decideConsistency: printed fields against the code lines", () => {
   it.each([
-    ["the surname", { surname: "DIFFERENT" }, ["name"]],
-    ["the given names", { givenNames: "MARIE ESSAI" }, ["name"]],
+    ["the surname", { surname: "DIFFERENT" }],
+    ["the given names", { givenNames: "MARIE ESSAI" }],
+  ] as const)("notes a real difference in %s as provisional only (printed names are OCR: fixes after the PM's first real test)", (_label, change) => {
+    const d = decide("passport", [front({ ...PASSPORT, ...change }, td3())]);
+    expect(d.details).toEqual({ flags: [], provisional: ["mrz_print_mismatch"], basis: "mrz", mismatches: ["name"] });
+    expect(d.outcome).toBe("pass");
+  });
+
+  it.each([
     ["the number", { documentNumber: "SP7654329" }, ["number"]],
     ["the birth date", { birthDate: "05.07.1985" }, ["birth_date"]],
     ["the expiry date", { expiryDate: "30 JUIN/JUN 2029" }, ["expiry_date"]],
@@ -220,6 +227,7 @@ describe("decideConsistency: printed fields against the code lines", () => {
 
   it.each([
     ["accents and case", { surname: "Échantillon", givenNames: "François Essai" }],
+    ["labels, another order and a missing middle name", { surname: "NOM ESSAI", givenNames: "PRÉNOMS ECHANTILLON" }],
     ["look-alikes in the number", { documentNumber: "SP765432I" }],
     ["another date format", { birthDate: "04 JUIL/JUL 1985", expiryDate: "30.06.2028" }],
     ["an unreadable date", { birthDate: "XX.07.1985" }],

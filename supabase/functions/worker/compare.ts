@@ -34,17 +34,98 @@ export function normalizeName(value: string, icao = false): string {
 }
 
 /**
- * A printed name against the same name in the code lines. `mrzFull`: the code lines' name field is
- * full, so the name there may be cut short (ICAO truncation); one may then start with the other.
+ * Words a printed layout writes beside the names ("NOM / SURNAME", "PRÉNOMS / GIVEN NAMES"...), which the
+ * OCR may take into the value. Compared after normalizeName (accents dropped, upper case).
+ */
+const NAME_LABELS = new Set([
+  "NOM", "NOMS", "SURNAME", "SURNAMES", "PRENOM", "PRENOMS", "GIVEN", "NAME", "NAMES", "GIVENNAMES",
+  "FORENAME", "FORENAMES", "FIRSTNAME", "FIRSTNAMES", "LASTNAME", "NOMDEFAMILLE",
+]);
+
+/** The words of a name: split on spaces, hyphens, commas, slashes, fillers; apostrophes joined; labels dropped. */
+export function nameTokens(value: string | null | undefined, icao = false): string[] {
+  if (!value) return [];
+  return value
+    .replace(/['’`´]/g, "")
+    .split(/[\s\-,;:/<.()]+/)
+    .map((word) => normalizeName(word, icao))
+    .filter((word) => word.length > 0 && !NAME_LABELS.has(word));
+}
+
+/** Levenshtein distance, stopping early above `limit`. */
+function editDistance(a: string, b: string, limit: number): number {
+  if (Math.abs(a.length - b.length) > limit) return limit + 1;
+  let previous = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const current = [i];
+    let best = i;
+    for (let j = 1; j <= b.length; j++) {
+      current[j] = Math.min(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      best = Math.min(best, current[j]);
+    }
+    if (best > limit) return limit + 1;
+    previous = current;
+  }
+  return previous[b.length];
+}
+
+/** One OCR misread letter is forgiven in a word of this many letters or more. */
+export const NAME_OCR_TOLERANCE_MIN_LENGTH = 5;
+
+/**
+ * Two words (or runs of words joined) are the same name: equal, one OCR letter apart (two single long words only),
+ * or, when `truncated` (the code lines' last word, cut short by a full name field), a prefix of it.
+ */
+function sameWord(word: string, other: string, truncated: boolean, fuzzy: boolean): boolean {
+  if (word === other) return true;
+  if (truncated && word.length > 0 && other.startsWith(word)) return true;
+  return fuzzy && Math.min(word.length, other.length) >= NAME_OCR_TOLERANCE_MIN_LENGTH && editDistance(word, other, 1) <= 1;
+}
+
+/**
+ * Whether every word of `part` is found in `whole`, each against a word of `whole` or several adjacent
+ * words joined (OCR splits and merges words), in any order, each word of `whole` used once. A word of
+ * `part` may also be several adjacent words of `part` joined. `truncatedLast`: the last word of `part` is
+ * the code lines' last word, possibly cut short.
+ */
+function coveredBy(part: readonly string[], whole: readonly string[], truncatedLast = false): boolean {
+  const used = new Array(whole.length).fill(false);
+  const match = (i: number): boolean => {
+    if (i >= part.length) return true;
+    // A run of `part` words (1 to 3) against a run of `whole` words (1 to 3).
+    for (let pLen = 1; pLen <= 3 && i + pLen <= part.length; pLen++) {
+      const word = part.slice(i, i + pLen).join("");
+      const truncated = truncatedLast && i + pLen === part.length;
+      for (let start = 0; start < whole.length; start++) {
+        for (let wLen = 1; wLen <= 3 && start + wLen <= whole.length; wLen++) {
+          if (used.slice(start, start + wLen).some(Boolean)) break;
+          if (!sameWord(word, whole.slice(start, start + wLen).join(""), truncated, pLen === 1 && wLen === 1)) continue;
+          for (let k = start; k < start + wLen; k++) used[k] = true;
+          if (match(i + pLen)) return true;
+          for (let k = start; k < start + wLen; k++) used[k] = false;
+        }
+      }
+    }
+    return false;
+  };
+  return match(0);
+}
+
+/**
+ * A printed name against the same name in the code lines, word by word (nameTokens). They agree when
+ * every word of one is found in the other (in any order, OCR splits and merges and one misread letter
+ * forgiven): a middle name printed but not in the code lines, or the other way round, still agrees.
+ * `mrzFull`: the code lines' name field is full, so their last word may be cut short (ICAO truncation).
  */
 export function compareName(printed: string | null | undefined, mrz: string | null | undefined, mrzFull: boolean): Agreement {
-  if (!printed || !mrz) return "unknown";
-  const m = normalizeName(mrz);
+  const m = nameTokens(mrz);
   if (m.length === 0) return "unknown";
-  for (const p of new Set([normalizeName(printed), normalizeName(printed, true)])) {
+  for (const icao of [false, true]) {
+    const p = nameTokens(printed, icao);
     if (p.length === 0) return "unknown";
-    if (p === m) return "agree";
-    if (mrzFull && (p.startsWith(m) || m.startsWith(p))) return "agree";
+    if (p.join("") === m.join("")) return "agree";
+    if (coveredBy(m, p, mrzFull) || coveredBy(p, m)) return "agree";
+    if (mrzFull && (p.join("").startsWith(m.join("")) || m.join("").startsWith(p.join("")))) return "agree";
   }
   return "disagree";
 }
@@ -55,19 +136,30 @@ export interface NameParts {
 }
 
 /**
- * The printed names against the code lines' names: each part on its own, then both together (a
- * printed layout may put a name in the other field). Parts that are missing are not compared.
+ * The printed names against the code lines' names. Printed text comes from OCR on layouts not yet seen
+ * on real cards, so the fields may be swapped, split or merged differently, carry a label, miss a middle
+ * name or misread a letter: the names agree when the surname is found among all the other side's names
+ * and one side's names are all found in the other's (compareName's rules). Parts that are missing are
+ * not compared; given names the code lines lost entirely to truncation (or a holder with none) neither.
  */
 export function compareNames(printed: NameParts, mrz: { surname: string; givenNames: string }, mrzFull: boolean): Agreement {
   const surname = compareName(printed.surname, mrz.surname, mrzFull);
-  // Given names the code lines lost entirely to truncation (or a holder with none) are not compared.
   const given = compareName(printed.givenNames, mrz.givenNames, mrzFull);
   if (surname !== "disagree" && given !== "disagree") return surname === "unknown" && given === "unknown" ? "unknown" : "agree";
-  if (!printed.surname || !printed.givenNames) return "disagree";
-  // Both parts were printed: the same names in other fields (or split differently) still agree.
-  return compareName(`${printed.surname} ${printed.givenNames}`, `${mrz.surname} ${mrz.givenNames}`, mrzFull) === "agree"
-    ? "agree"
-    : "disagree";
+  const all = (a?: string | null, b?: string | null) => [a ?? "", b ?? ""].join(" ");
+  for (const icao of [false, true]) {
+    const p = nameTokens(all(printed.surname, printed.givenNames), icao);
+    const m = nameTokens(all(mrz.surname, mrz.givenNames));
+    if (p.length === 0 || m.length === 0) continue;
+    const mrzSurname = nameTokens(mrz.surname);
+    const printedSurname = nameTokens(printed.surname, icao);
+    // The surname is found among the other side's names (fields may be swapped or split differently).
+    const surnameFound = (mrzSurname.length > 0 && coveredBy(mrzSurname, p, mrzFull && nameTokens(mrz.givenNames).length === 0)) ||
+      (printedSurname.length > 0 && coveredBy(printedSurname, m));
+    if (!surnameFound && printedSurname.length > 0) continue;
+    if (p.join("") === m.join("") || coveredBy(m, p, mrzFull) || coveredBy(p, m)) return "agree";
+  }
+  return "disagree";
 }
 
 // ---------------------------------------------------------------------------

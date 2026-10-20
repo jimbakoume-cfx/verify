@@ -12,9 +12,12 @@ import {
   MANDATORY_HARD_FLAGS,
   MANDATORY_REVIEW_DOCUMENTS,
   normaliseThresholdConfig,
+  OPTIONAL_SIGNALS,
+  REAL_TEST_FIXES_CONFIG,
   RISK_SIGNALS,
   type RiskFacts,
   SIGNAL_REJECT_CODES,
+  signalSetting,
   type ThresholdConfig,
   thresholdConfigErrors,
 } from "./risk.ts";
@@ -31,6 +34,7 @@ describe("the shared vectors (also run by the database: supabase/tests/70_m8_tes
     expect(vectors.signals).toEqual([...RISK_SIGNALS]);
     expect(vectors.defaultConfig).toEqual(DEFAULT_THRESHOLD_CONFIG);
     expect(vectors.autoApprovalConfig).toEqual(AUTO_APPROVAL_CONFIG);
+    expect(vectors.realTestFixesConfig).toEqual(REAL_TEST_FIXES_CONFIG);
   });
 
   it.each(vectors.assessments.map((v) => [v.name, v] as const))("assessment: %s", (_name, vector) => {
@@ -45,7 +49,10 @@ describe("the shared vectors (also run by the database: supabase/tests/70_m8_tes
 describe("the default configuration", () => {
   it("is valid, with every signal, and auto decisions off", () => {
     expect(thresholdConfigErrors(DEFAULT_THRESHOLD_CONFIG)).toEqual([]);
-    expect(Object.keys(DEFAULT_THRESHOLD_CONFIG.signals)).toEqual([...RISK_SIGNALS]);
+    // Version 2 predates the optional signals (print_name_mismatch): they take their default.
+    expect(Object.keys(DEFAULT_THRESHOLD_CONFIG.signals)).toEqual(RISK_SIGNALS.filter((code) => !OPTIONAL_SIGNALS.includes(code as never)));
+    expect(Object.keys(normaliseThresholdConfig(DEFAULT_THRESHOLD_CONFIG).signals)).toEqual([...RISK_SIGNALS]);
+    expect(signalSetting(DEFAULT_THRESHOLD_CONFIG, "print_name_mismatch")).toEqual({ weight: 0, enabled: true });
     expect(DEFAULT_THRESHOLD_CONFIG.autoDecide).toBe(false);
   });
 
@@ -68,7 +75,7 @@ describe("signals", () => {
   });
 
   it("never count under_18, printed or keyword evidence, or uncalibrated scores as firm", () => {
-    for (const code of ["under_18", "provisional_classification", "quality_poor", "liveness_flag", "face_match_flag"] as const) {
+    for (const code of ["under_18", "print_name_mismatch", "provisional_classification", "quality_poor", "liveness_flag", "face_match_flag"] as const) {
       expect(FIRM_SIGNALS).not.toContain(code);
     }
   });
@@ -94,8 +101,8 @@ describe("evaluateRisk", () => {
   });
 
   it("never recommends a reject from provisional signals, however heavy", () => {
-    const heavy = clone(DEFAULT_THRESHOLD_CONFIG);
-    for (const code of RISK_SIGNALS) heavy.signals[code].weight = 1;
+    const heavy = normaliseThresholdConfig(clone(DEFAULT_THRESHOLD_CONFIG));
+    for (const code of RISK_SIGNALS) heavy.signals[code]!.weight = 1;
     heavy.hardFlags = [...MANDATORY_HARD_FLAGS];
     heavy.rejectMin = 0.01;
     heavy.approveMax = 0;
@@ -119,7 +126,11 @@ describe("normaliseThresholdConfig and diffThresholdConfig", () => {
     const shuffled = clone(DEFAULT_THRESHOLD_CONFIG);
     shuffled.hardFlags.reverse();
     shuffled.alwaysReviewDocuments.reverse();
-    expect(normaliseThresholdConfig(shuffled)).toEqual({ ...DEFAULT_THRESHOLD_CONFIG, faceMatchCountsForApproval: false });
+    expect(normaliseThresholdConfig(shuffled)).toEqual({
+      ...DEFAULT_THRESHOLD_CONFIG,
+      signals: { ...DEFAULT_THRESHOLD_CONFIG.signals, print_name_mismatch: { weight: 0, enabled: true } },
+      faceMatchCountsForApproval: false,
+    });
     expect(diffThresholdConfig(DEFAULT_THRESHOLD_CONFIG, shuffled)).toEqual([]);
   });
 
