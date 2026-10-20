@@ -6,6 +6,8 @@ The PM's test: a new challenge appears each time.
 
 The HTTP contract stays in `supabase/functions/_shared/contract.ts` (section "Active liveness capture (M5)").
 
+> **Since 2026-10-20 (fixes after the PM's first real test):** the face check comes **right after the photos** ("ID and face steps all at once", PM), the photos uploading meanwhile; the checks, a retake or an expired document come after it. Each action lasts **3.5 s** (frames at 0.7, 1.4, 2.1, 2.8 s) and the capture ends with a 1.2 s tail and one more frame of the last action: **14 frames**, about 13.2 s.
+
 ## Decisions taken for M5 (safest defaults; the PM reviews them, see `PLAN.md`)
 1. **The face check is required before the submit.** The server refuses a submit without it (`409 liveness_required`), and the database checks it again inside `flow_submit`. A phone without a front camera gets whatever camera it has (`facingMode: ideal`), as for the document photos.
 2. **Three actions per challenge**, drawn at random by the server from five (turn the head left, turn it right, look up, blink, smile), in a random order, plus a **6-digit one-time code** shown on screen during the capture. A challenge lasts **10 minutes** and can be recorded **once**; asking for a new one replaces any unused one. **At most 5 challenges per session**; then the rider must start again from the Confiance app.

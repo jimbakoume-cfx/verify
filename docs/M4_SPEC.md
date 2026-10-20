@@ -11,6 +11,8 @@ The PM's test: try an expired ID, and a test card whose printed data does not ma
 
 The HTTP contract stays in `supabase/functions/_shared/contract.ts`.
 
+> **Since 2026-10-20 (fixes after the PM's first real test):** a printed **name** that differs from firm code lines is **provisional** (`provisional: ["mrz_print_mismatch"]`, `mismatches: ["name"]`, outcome pass), not a flag: printed text is OCR, not tuned on real cards. A differing number or date stays the firm flag. The name comparison (`compare.ts`) works word by word: words in any order, a middle name on one side only, OCR splits and merges (up to 3 words joined), labels read into the value (NOM, SURNAME, PRÉNOMS, GIVEN NAMES...), accents, and one misread letter in a word of 5 letters or more; the surname must be found among the other side's names. In the risk rules a name-only difference becomes the provisional note `print_name_mismatch` when the code lines are trustworthy (`M8_SPEC.md`). The specimen `passport-mismatch.jpg` (a different surname) now shows the note.
+
 ## Decisions taken by the PM (2026-10-15)
 1. **Expired document.** The server reads the expiry date from the code lines, or else from the printed expiry date (provisional). When the code lines say so (every check digit right), the rider is told at once on "Checking your photos…" to use another, valid document, with **"Use another document"** (back to the document list) and **"Continue anyway"**. Continuing leaves the hard flag `document_expired` for staff. A printed-only expiry is a provisional staff flag: the rider is told nothing.
 2. **Under 18** (birth date from the code lines, else printed): hard flag `under_18`, staff review, never auto-approved. The rider sees nothing special.
