@@ -10,9 +10,11 @@ The PM's test: change a threshold and see the decision change, with no redeploy 
 - **Hard flag:** a signal that sends the case to a person whatever the score.
 - **Recommendation:** approve, review or reject, from the rules. **Decision:** what a person (or, when switched on, the system) records.
 
+> **Since 2026-10-20 (PM decision, `AUTO_APPROVAL.md`): automatic approval.** The system approves a test case on its own when every condition holds, and never rejects on its own. The face match counts toward approval through a threshold setting (`faceMatchCountsForApproval`) instead of M7's hard rule. The migration `20261021000000_auto_approval.sql` adds a version with it and `autoDecide` on. Where this spec says otherwise below, the notes marked **(automatic approval)** apply.
+
 ## Decisions for M8 (safest defaults, 2026-10-19)
 Recorded in `PLAN.md` under "Decisions for M8". In short:
-1. **Every case still goes to a person.** Automatic decisions exist but are off (`autoDecide: false`). Even switched on, they apply to test sessions only, and never approve a case with a required check missing. Liveness and face match do not exist before M6 and M7, so no case can be approved automatically, or even recommended for approval, before then.
+1. **Every case still goes to a person.** Automatic decisions exist but are off (`autoDecide: false`). Even switched on, they apply to test sessions only, and never approve a case with a required check missing. Liveness and face match do not exist before M6 and M7, so no case can be approved automatically, or even recommended for approval, before then. **(automatic approval)** Superseded: `autoDecide` now means automatic approval only (never a reject), on in the migration's version, for test sessions whose every condition holds (`AUTO_APPROVAL_BLOCKERS`).
 2. **Hard flags mean review.** Mandatory: `document_expired`, `under_18` (M4) and `manual_review_document` (M3). By default also `image_reused` and `unsupported_document`. An admin can add hard flags but cannot remove the mandatory ones.
 3. **Provisional signals never reject**, however heavy their weights: a reject needs the firm signals alone to reach the cut-off. `under_18` counts as provisional (it may come from printed text).
 4. **Documents always decided by a person** (old CNI, residence permits, driving licence, voter card; PM decisions of M3) are a setting no version can remove.
@@ -33,9 +35,12 @@ band      = approve if score <= approveMax, reject if score >= rejectMin, else r
 recommendation:
   review   if a hard flag or an unknown signal is present, or the document is always reviewed
   reject   else if firmScore >= rejectMin
-  approve  else if score <= approveMax and no required check is missing
+  approve  else if score <= approveMax, no required check is missing and no review-only check is present
   review   otherwise
+autoApproval (automatic approval): eligible when no AUTO_APPROVAL_BLOCKERS holds; never a reject
 ```
+**(automatic approval)** The facts gain `documentFirm` (firm code lines, classification and dates from them) and `testSession`; the face match listed under `reviewOnly` (uncalibrated) stops being review-only when the version sets `faceMatchCountsForApproval`, and is then listed under `uncalibratedCounted`. The assessment gains `uncalibratedCounted` and `autoApproval: {eligible, blockers}`.
+
 The stored assessment (`verification.risk_reasons`, `RiskAssessment`) lists every condition that holds (`RISK_REASONS`: `hard_flag`, `unknown_signal`, `always_review_document`, `firm_score_high`, `provisional_signals`, `score_between`, `score_low`, `missing_checks`), every signal present with its weight and whether it counted, was firm or hard, the missing checks, and the rider reason a reject would use (`rejectReasonCode`, from the first firm signal: `SIGNAL_REJECT_CODES`).
 
 **Signals and default weights (version 2):**
@@ -62,7 +67,7 @@ The stored assessment (`verification.risk_reasons`, `RiskAssessment`) lists ever
 | `liveness_flag` | placeholder: a `liveness` check that did not pass (M6) | no | 0.5 | |
 | `face_match_flag` | placeholder: a `face_match` check that did not pass (M7) | no | 0.5 | |
 
-Cut-offs: `approveMax` 0.15, `rejectMin` 0.9. Required checks (not configurable): `server_checks` (each side the document needs has a server result, and no `server_unchecked`), `liveness`, `face_match` (a `check_result` of that name, until M6/M7 write one).
+Cut-offs: `approveMax` 0.15, `rejectMin` 0.9. **(automatic approval)** Optional setting `faceMatchCountsForApproval` (missing means false; written by every new version). Version 3 (the migration's): version 2 with `autoDecide` and `faceMatchCountsForApproval` true (`AUTO_APPROVAL_CONFIG`). Required checks (not configurable): `server_checks` (each side the document needs has a server result, and no `server_unchecked`), `liveness`, `face_match` (a `check_result` of that name, until M6/M7 write one).
 
 ## The database (`supabase/migrations/20261019000000_m8_decisions.sql`)
 No table removed, no function replaced, no `DROP`.
@@ -72,23 +77,26 @@ No table removed, no function replaced, no `DROP`.
 - **When a case is assessed:** deferred triggers, which run as the writing transaction commits: when the verification becomes `submitted`, and whenever a `check_result` of a submitted, undecided case is written or removed (late worker results, the phone's report, the sweep giving up). Each change of the stored assessment is audited (`risk.assess`, with the version, score, recommendation, band and trigger). Open and decided cases are never re-assessed: a decision keeps what it was shown.
 - **`public.staff_decide`** (service role): re-checks the access rule (active reviewer or supervisor matching the profile; a reviewer only on an assigned case), the rider reason and the note rule, then records the decision, closes the review task, sets the case `approved` or `rejected`, and audits `decision.create` (never the note).
 - **`public.staff_create_threshold_version`** (service role): active admins only; refuses a stale base version, an invalid configuration, a missing reason and an unchanged configuration; inserts the version, audits `threshold_config.create` with the paths that changed (never the note), and re-assesses every submitted, undecided case in the same transaction.
-- **Automatic decisions** (`autoDecide`): `private.risk_refresh` records a system decision only for a test session whose recommendation is reject, or approve with no required check missing.
+- **Automatic decisions** (`autoDecide`): `private.risk_refresh` records a system decision only for a test session whose recommendation is reject, or approve with no required check missing. **(automatic approval)** Superseded by `20261021000000_auto_approval.sql`: approval only, when `autoApproval.eligible` (re-checked in the function), never during a migration's re-assessment; recorded with actor system, audited `decision.create` and `decision.auto_approve`, and `verification.auto_approved_at` set. A staff member may confirm or overturn it once (`staff_decide`). Versions made by a migration name it (`created_by_migration`) instead of a staff member.
 - **Lock order:** the verification row is locked `FOR NO KEY UPDATE` after any case lock (M3), so a concurrent photo upload (whose foreign key takes `KEY SHARE`) never deadlocks with an assessment.
 
 ## Edge Functions (`admin`)
 - `POST /admin/decisions` `{verificationId, outcome: approve|reject, reasonCode, note}` → `{decisionId, status, recommendation, agreesWithRecommendation, thresholdVersion}`. Supervisors and the assigned reviewer; admins 403 `forbidden_role`; another reviewer 404. Errors: 409 `already_decided`, 409 `not_submitted`, 422 `note_required`, 422 `invalid_reason`, 400 for a malformed body (note over 1,000 characters, control characters).
+- **(automatic approval)** `POST /admin/decisions` also confirms or overturns an automatic approval (once).
 - `POST /admin/thresholds` `{baseVersion, config, note}` → `{version, rescored}`. Admins only. The configuration is checked with `thresholdConfigErrors` before the database checks it again; 409 `stale_version` when someone saved a version meanwhile; 400 for an invalid configuration, a missing reason or no change.
 - Contract: `contract.ts` "Decisions and thresholds", and five error codes.
 
 ## The dashboard (`apps/dashboard`)
 - **Case page → "Risk and decision" / "Risque et décision"** (`screens/CaseRisk.tsx`): the recommendation badge, the score, the firm score, the band (with a bar showing both cut-offs), the threshold version and time, every reason that holds, a table of the signals (weight, firm or provisional, hard flag in red, switched off), the missing checks, and the rider reason a reject would use. Under it, the decision: the form (approve or reject; for a reject the rider reasons, the recommended one chosen; a note marked required when it is) or the recorded decision (by whom, when, the recommendation and version shown, agreement, reason, note). Admins see why they cannot decide.
 - **Queue (home) → sort "By recommendation"**: cases waiting for a decision first, reject, review (highest score first), approve, then not assessed; the recommendation and score on each waiting row.
+- **(automatic approval)** The case page says whether the system approved the case, or why not; the system's decision reads "Approved automatically (version N)", with a form to confirm or overturn it; the queue has a filter "Approved automatically"; the Thresholds page has "Let a passed face match count toward approval (uncalibrated)" beside "Automatic approval".
 - **Thresholds page (`/thresholds`, admins; "Thresholds" in the top bar)** (`screens/Thresholds.tsx`): the active version (who, when, why, cut-offs, automatic decisions), the form for the next version (weights, counts, hard flags with the mandatory ones locked, always-reviewed documents, automatic decisions, the reason), checked as you type with the server's own rules, with "Changes from version N" listed before saving; then every version with what it changed. A French "0,5" is accepted.
 - Dev previews: `case-reject`, `case-decided`, `thresholds`, `thresholds-edit`.
 
 ## Tests
 - **Shared vectors** (`supabase/tests/risk_vectors.json`): 22 assessments and 17 configurations, run by `risk.test.ts` (TypeScript) and by `70_m8_test.sql` (`private.risk_evaluate`, `private.risk_config_errors`); both must give exactly the same results. The file also pins the signal list and version 2. `scripts/test-db.sh` passes `repo_root` to psql so the SQL test can read it.
 - **`70_m8_test.sql`:** RLS (nobody writes `threshold_config`, admins included; anon reads nothing; the dashboard roles cannot call the RPCs; a reviewer sees no decision of another's case); append-only, gap-free, valid, authored versions; only an active admin creates one (stale, invalid, no reason, unchanged refused); assessment at submit, after a late check, never for open or decided cases, and no audit entry when nothing changes (determinism); the PM's test (version 3 turns A's review into reject); decisions (roles, reasons, notes, agreement, closing, audit without the note); automatic decisions (test session rejected by the system; real session and missing liveness untouched); no failed assessment during the M1–M4 tests.
+- **(automatic approval)** The vectors gain 24 assessments (every blocking condition alone, the switch-off, never an automatic reject) and `autoApprovalConfig`; `70_m8_test.sql` checks version 3 and restores the M8 defaults as version 4 for its own tests; `90_auto_approval_test.sql` tests the automatic approval in the database.
 - **`risk.test.ts`:** the vectors, the defaults, firm signals, determinism, never an approval with a check missing, never a reject from provisional signals, the diff.
 - **`admin/decisions.test.ts`:** both routes with fakes that follow the SQL functions: access, validation, every answer mapped, no note in logs; the parsers of the database's answers.
 - **Dashboard:** `lib/risk.test.ts` (parsers, queue sort, note rule, versions), `lib/thresholdForm.test.ts`, `screens/CaseRisk.test.ts` (the section, the decision form and record, the editor, history and changes, rendered on the server side, FR and EN), the locale coverage.
@@ -109,9 +117,12 @@ Use test sessions only.
 
 Order: the migration first. The old dashboard ignores the new columns; the old admin function has no new routes.
 
+**(automatic approval)** Deploy steps: `AUTO_APPROVAL.md`, "Deploy" (the migration, then `flow` and `admin`, then both web apps).
+
 ## Known limits
 - Weights and cut-offs are first guesses, to calibrate in M12 against staff decisions (`agrees_with_recommendation`, `risk_band`, `risk_score`).
 - The placeholders count any `liveness` or `face_match` check of the case, newest first; M6/M7 will say which result counts.
+- **(automatic approval)** The face match that can now approve a test case is uncalibrated (NIST: about 14 times more false matches for West Africans at a default threshold) and test-only (AuraFace, Vercel Hobby). See `THREAT_MODEL.md`.
 - The server checks run on test sessions only until the worker's switch is on: real sessions miss `server_checks`, so they are always review.
 - The queue sort works on the 20 most recent cases (the queue proper arrives in M9).
 - Assignment of reviewers is still by SQL until M9.

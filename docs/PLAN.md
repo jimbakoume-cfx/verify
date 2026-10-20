@@ -84,7 +84,7 @@ Confiance ride app/backend ──(API key)──► Supabase Edge Function "sess
 | Face detection, landmarks and alignment (since M6, on the face worker) | MediaPipe Face Landmarker's three models (from Google's `face_landmarker.task`), run on LiteRT with MediaPipe's pipeline written out by us (the `mediapipe` package is too large for Vercel beside AuraFace). **Not YuNet, not SCRFD** (PM decision) | Apache-2.0 (models, LiteRT) |
 | Live face guidance on the phone (blink, head turn) | MediaPipe Face Landmarker (the only face detector allowed: green in `docs/research/FACE_MODELS.md`). **Not on the phone in M5:** too heavy a download (see "Decisions for M5"); the phone checks brightness only, and M6 runs MediaPipe on the server | Apache-2.0 |
 | Passive anti-spoofing | **Since M6: our own provisional cues** (moiré, screen glare, low detail; heuristics, no model) and the flat-plane check from the landmarks. Our own detectors later, trained on consented attack captures (`training/antispoof/`). Silent-Face-Anti-Spoofing allowed as a low-weight test-only signal, **not shipped** (see "Decisions for M6") | Ours |
-| **Face matching** (since M7, **test sessions only**) | **AuraFace v1 `glintr100.onnx` only** on ONNX Runtime; uncalibrated threshold, every result review-only. **Before the pilot: a paid licence, a vendor SDK or our own model** (see "Decisions for M7"). SFace and dlib were rejected by the research (`docs/research/FACE_MODELS.md`) | Apache-2.0 on the weights, amber (undisclosed training data); see `LICENSES.md` |
+| **Face matching** (since M7, **test sessions only**) | **AuraFace v1 `glintr100.onnx` only** on ONNX Runtime; uncalibrated threshold, review-only unless the threshold version lets it count (automatic approval, 2026-10-20). **Before the pilot: a paid licence, a vendor SDK or our own model** (see "Decisions for M7"). SFace and dlib were rejected by the research (`docs/research/FACE_MODELS.md`) | Apache-2.0 on the weights, amber (undisclosed training data); see `LICENSES.md` |
 | Risk model (Phase 2) | scikit-learn | BSD-3 |
 
 **Licence warnings:**
@@ -143,6 +143,7 @@ The exact routes, request and response types, limits and error codes of the impl
 - Since M2: `POST /flow/mrz` (what the phone read from the code lines; the server recomputes every check digit).
 - Since M3: `GET /flow/checks` (the server's check of each photo: pending, ok, retake with a reason, or unchecked; the rider waits for it for at most 20 seconds). Since M4 it also says when the code lines show an expired document.
 - Since M5: `POST /flow/liveness/challenge` (a random challenge and its upload slots) · `POST /flow/liveness/captures` (the frames' report; the server checks every file). The submit needs the face check.
+- Since automatic approval (2026-10-20): `GET /flow/result` (after the submit: verified, pending or review; nothing else).
 - Planned: `GET /flow/status` (result, reason, retries left; M10) · `POST /flow/appeal` (M10).
 
 ### API 3: Ops dashboard → Verify (Supabase Auth with 2FA required; enforced by role)
@@ -298,7 +299,7 @@ Details: `docs/M6_SPEC.md`.
 2. **Your decision: detection and alignment with MediaPipe** (not YuNet, not SCRFD); the portrait is searched on the document front (or the passport's data page), the best selfie frame (one face, frontal, eyes open, largest) is chosen by the worker.
 3. **Your decision: the result is a `check_result` named exactly `face_match`**, with the similarity.
 4. **Your decision: the threshold is uncalibrated**: `FACE_MATCH_THRESHOLD` (0.35) is marked "uncalibrated — must be set on Cameroonian impostor pairs (NIST shows ~14x higher false-match rate for West Africans at fixed thresholds)".
-5. **Review-only is a hard rule in the database, not a threshold setting** (the safest of the two options): `private.face_match_review_only()` returns true, so a case with a face match is never recommended for approval (`review_only_check`) and never approved automatically. No admin can turn it off; only a migration, after calibration and your decision. The face match never rejects either. **Consequence: no case is recommended for approval while this holds** (Phase 1: a person decides every case).
+5. **Review-only is a hard rule in the database, not a threshold setting** (the safest of the two options): `private.face_match_review_only()` returns true, so a case with a face match is never recommended for approval (`review_only_check`) and never approved automatically. No admin can turn it off; only a migration, after calibration and your decision. The face match never rejects either. **Consequence: no case is recommended for approval while this holds** (Phase 1: a person decides every case). *Superseded on 2026-10-20: a threshold setting now (see "Decisions for automatic approval").*
 6. **The face match never runs on a real session**, whatever the face switch (licence).
 7. **No crop or embedding is stored:** the details hold each face's box; the dashboard shows the portrait and the frame side by side by framing the whole photos, each opened through the audited viewer.
 8. **Your decision: before the pilot, switch to a paid licence (InsightFace), an on-premise vendor SDK, or our own model.** The lawyer's items (AuraFace's undisclosed dataset, InsightFace files relabelled in its repository, biometric data) are in `LICENSES.md`.
@@ -306,7 +307,7 @@ Details: `docs/M6_SPEC.md`.
 Details: `docs/M7_SPEC.md`.
 
 ### Decisions for M8 (2026-10-19, safest defaults, for your review)
-1. **Every case still goes to a person.** Automatic decisions exist but are off. Even switched on (a threshold setting), they apply to test sessions only and never approve a case with a check missing; liveness and face match do not exist before M6 and M7, so nothing is approved automatically, or even recommended for approval, before then. **Since M7, the face match is review-only (hard rule), so still no case is recommended for approval.**
+1. **Every case still goes to a person.** Automatic decisions exist but are off. Even switched on (a threshold setting), they apply to test sessions only and never approve a case with a check missing; liveness and face match do not exist before M6 and M7, so nothing is approved automatically, or even recommended for approval, before then. **Since M7, the face match is review-only (hard rule), so still no case is recommended for approval.** *Superseded on 2026-10-20 for test sessions: see "Decisions for automatic approval".*
 2. **Hard flags mean review, whatever the score.** Always: expired document, under 18, and the documents always checked by a person (M3/M4 decisions); by default also a photo already used in another verification and a foreign ID card. An admin can add hard flags, never remove those three.
 3. **Only firm signals can recommend a reject** (code lines with every check digit right, or the same photo bytes twice). Printed text, keywords, untuned quality thresholds and, later, liveness and face scores can only send a case to a person. Under 18 counts as provisional (it may come from print).
 4. **The documents you decided are always reviewed** (old CNI, residence permits and refugee cards, driving licence, voter card) stay so in every threshold version.
@@ -315,6 +316,30 @@ Details: `docs/M7_SPEC.md`.
 7. **First weights and cut-offs are guesses** (approve at 0.15 or less, reject from 0.9 of firm signals), to calibrate in M12. Q1 (speed target) and Q4 (duplicate detection) stay open: nothing is matched across riders beyond the M1 "same photo" signal.
 
 Details: `docs/M8_SPEC.md`.
+
+### Decisions for automatic approval (2026-10-20)
+**Your decision:** "When a user uploads their face and ID, the system tells them if their ID is verified and they move forward."
+
+**What you were told before deciding:**
+- **The face match threshold is not calibrated on Cameroonian faces.** NIST measures about 14 times more false matches for West Africans at default thresholds. An impostor with a similar face may therefore be approved, with no person before the decision.
+- **The free AuraFace model is for test sessions only** (licence and provenance; `LICENSES.md`).
+- **Vercel Hobby is for test sessions only** (non-commercial terms, no DPA).
+
+**How it is built:** the safest version of the decision, for you to review. Details: `docs/AUTO_APPROVAL.md`.
+1. **Automatic approval only, never an automatic reject.** Anything not approved goes to staff. The rider then sees "Nous vérifions quelques détails, nous vous tiendrons informé / We're checking a few details, we'll let you know".
+2. **Every condition must hold.** The system approves a case only when:
+   - the document check is firm: code lines with every check digit right; a document without code lines never qualifies;
+   - the document is not expired and the holder is not under 18;
+   - the printed text does not differ from the code lines;
+   - there is no hard flag and no firm signal;
+   - the server's photo check is ok;
+   - liveness passed and the face match passed;
+   - the score is at or under the approve cut-off of the active threshold version.
+3. **The M7 hard rule "the face match is always review-only" becomes a threshold setting** (`faceMatchCountsForApproval`). A new threshold version made by the migration sets it, with automatic approval on, and the reason "PM decision 2026-10-20: automatic approval". Admins can switch either off from the Thresholds page, with no redeploy.
+4. **Test sessions only.** The face worker runs on test sessions only, so a real session has no face match and goes to staff.
+5. **The system's approval is recorded like a staff decision** (actor system, threshold version, recommendation and score) and audited. Staff can still confirm or overturn it afterwards (once; a note is required to go against it). The dashboard shows "Approved automatically" with the version, and the queue can show only those cases.
+6. **The rider's result screen** asks the server for at most 75 s, every 2.5 s: verified (with "Continue", to the session's return address or an end screen), review, or waiting. A time-out shows the review message. Nothing personal is returned.
+7. **Before any real rider:** calibrate the face match on Cameroonian impostor pairs, move to a licensed model (`M7_SPEC.md`), move to Vercel Pro with its DPA, and decide again whether automatic approval stays. The ride app must treat a later staff reject (M10 webhook) as final.
 
 ---
 
