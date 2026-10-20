@@ -85,7 +85,7 @@ select pg_temp.assert_eq((select count(*) from public.audit_event), 0, 'reviewer
 select pg_temp.assert_eq((select count(*) from public.api_client), 0, 'reviewer cannot read api clients');
 select pg_temp.assert_eq((select count(*) from public.staff_profile), 1, 'reviewer sees only own staff profile');
 select pg_temp.assert_eq((select count(*) from public.reason_code), 10, 'reviewer reads reason codes');
-select pg_temp.assert_eq((select count(*) from public.threshold_config), 2, 'reviewer reads every threshold version (M8 seeds version 2)');
+select pg_temp.assert_eq((select count(*) from public.threshold_config), 3, 'reviewer reads every threshold version (M8 seeds version 2, automatic approval adds version 3)');
 do $$ begin
   insert into public.decision (verification_id, actor_type, actor_id, outcome)
     values ('30000000-0000-0000-0000-000000000001', 'staff', auth.uid(), 'approve');
@@ -133,7 +133,7 @@ rollback;
 begin;
 set local role authenticated;
 set local request.jwt.claim.sub = '00000000-0000-0000-0000-00000000000d';
-select pg_temp.assert_eq((select count(*) from public.audit_event), 1, 'admin reads audit log');
+select pg_temp.assert_eq((select count(*) from public.audit_event), 2, 'admin reads audit log (the fixture''s entry and the automatic-approval version''s)');
 select pg_temp.assert_eq((select count(*) from public.staff_profile), 5, 'admin reads all staff profiles');
 do $$ begin
   insert into public.audit_event (actor_type, action) values ('staff', 'forged');
@@ -147,7 +147,7 @@ begin;
 set local role service_role;
 insert into public.audit_event (actor_type, actor_id, action, target_type, target_id, details)
   values ('staff', '00000000-0000-0000-0000-00000000000a', 'capture.view', 'capture', 'x', '{"reason":"review"}');
-select pg_temp.assert_eq((select count(*) from public.audit_event), 2, 'service role appends audit events');
+select pg_temp.assert_eq((select count(*) from public.audit_event), 3, 'service role appends audit events');
 do $$ begin
   update public.audit_event set action = 'edited';
   raise exception 'FAIL: audit event was updated';

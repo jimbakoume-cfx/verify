@@ -2,8 +2,9 @@
 -- them, test sessions only for the face match), its scoped keys and nonces, claims (inputs, lease, cap,
 -- attempts, eligibility), the relay lookup (only the job's own inputs), the results (strict details,
 -- first result wins, audited without values), the sweep, what staff may read, the training-consent
--- list, and M8: liveness and face match counted, the face match review-only (a clean case is never
--- recommended for approval, nor approved automatically). Run by scripts/test-db.sh after 70_m8_test.sql
+-- list, and M8: liveness and face match counted, the face match review-only under the M8 defaults (a clean
+-- case is never recommended for approval, nor approved automatically, while the active version does not
+-- set faceMatchCountsForApproval; the automatic approval is tested in 90_auto_approval_test.sql). Run by scripts/test-db.sh after 70_m8_test.sql
 -- in the same database; the ids used here (a6...) do not overlap with the earlier files' fixtures.
 \set ON_ERROR_STOP on
 
@@ -487,7 +488,8 @@ select pg_temp.assert_text(public.staff_create_threshold_version('81000000-0000-
     (select config from public.threshold_config where version = 2), 'M6/M7 test: back to the defaults') ->> 'result', 'created',
   'M8: back to the defaults');
 commit;
-select pg_temp.assert_true(private.face_match_review_only(), 'M8: the review-only rule is a constant of the database, not a setting');
+select pg_temp.assert_true(private.face_match_review_only(),
+  'M8: the database still lists every face match as uncalibrated (the threshold version decides whether it counts: 90_auto_approval_test.sql)');
 
 -- ---------------------------------------------------------------------------------------------------------
 -- What staff may read

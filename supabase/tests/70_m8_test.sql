@@ -2,8 +2,11 @@
 -- (append-only, valid, numbered; only an admin adds one, through staff_create_threshold_version), the
 -- assessment of a case (at submit, when a late check lands, when a new version is created; deterministic;
 -- never for an open or decided case), staff decisions (access, reasons, notes, agreement with the
--- recommendation, the case closed and audited) and automatic decisions (off by default; test sessions
--- only; never an approval with a check missing). Run by scripts/test-db.sh after 60_m5_test.sql in the same
+-- recommendation, the case closed and audited) and automatic decisions (test sessions only; never an
+-- approval with a check missing; since the automatic-approval migration, never a reject). The migrations
+-- all run before the tests, so version 3 (automatic approval, 20261021000000_auto_approval.sql) is active
+-- when this file starts: it checks it, then version 4 restores the M8 defaults for the M8 tests (the
+-- automatic approval itself is tested in 90_auto_approval_test.sql). Run by scripts/test-db.sh after 60_m5_test.sql in the same
 -- database; the ids used here (8...) do not overlap with the earlier files' fixtures. Any failed assertion
 -- aborts.
 \set ON_ERROR_STOP on
@@ -68,7 +71,19 @@ select pg_temp.assert_true((select doc -> 'signals' from vectors) = to_jsonb(pri
 select pg_temp.assert_true(
   (select doc -> 'defaultConfig' from vectors) = (select tc.config from public.threshold_config tc where tc.version = 2),
   'vectors: version 2 is DEFAULT_THRESHOLD_CONFIG of risk.ts');
-select pg_temp.assert_eq((select count(*) from public.threshold_config), 2, 'thresholds: version 1 (M0) and version 2 (M8)');
+select pg_temp.assert_eq((select count(*) from public.threshold_config), 3,
+  'thresholds: version 1 (M0), version 2 (M8) and version 3 (automatic approval)');
+select pg_temp.assert_true(
+  (select doc -> 'autoApprovalConfig' from vectors) = (select tc.config from public.threshold_config tc where tc.version = 3),
+  'vectors: version 3 is AUTO_APPROVAL_CONFIG of risk.ts (version 2 with automatic approval and the face match counted)');
+select pg_temp.assert_true((select tc.created_by is null and tc.created_by_migration = '20261021000000_auto_approval'
+                                   and tc.note = 'PM decision 2026-10-20: automatic approval'
+                             from public.threshold_config tc where tc.version = 3),
+  'version 3 names the migration that made it and the PM decision');
+select pg_temp.assert_true((select ae.actor_type = 'system'
+                                   and ae.details = '{"version": 3, "baseVersion": 2, "changes": ["autoDecide", "faceMatchCountsForApproval"], "migration": "20261021000000_auto_approval"}'
+                             from public.audit_event ae where ae.action = 'threshold_config.create' and ae.target_id = '3'),
+  'version 3 is audited with what changed');
 
 do $$
 declare
@@ -166,6 +181,17 @@ insert into public.check_result (verification_id, check_name, check_version, out
 select pg_temp.assert_true((select risk_assessed_at is null and risk_recommendation is null from pg_temp.v('83000000-0000-0000-0000-000000000001')),
   'open case: checks land, but nothing is assessed before submit');
 
+-- Version 4: back to the M8 defaults (version 2's settings) for the M8 tests below.
+begin;
+set local role service_role;
+select pg_temp.assert_text(public.staff_create_threshold_version('81000000-0000-0000-0000-000000000001', 3,
+    (select tc.config from public.threshold_config tc where tc.version = 2), 'M8 tests: the M8 defaults') ->> 'result', 'created',
+  'admin: version 4 restores the M8 defaults (automatic approval off, the face match review-only)');
+commit;
+select pg_temp.assert_true((select tc.config = (select c.config from public.threshold_config c where c.version = 2) || '{"faceMatchCountsForApproval": false}'
+                             from public.threshold_config tc where tc.version = 4),
+  'version 4: stored normalised (faceMatchCountsForApproval written, false)');
+
 -- ---------------------------------------------------------------------------------------------------------
 -- Assessment at submit
 -- ---------------------------------------------------------------------------------------------------------
@@ -184,9 +210,9 @@ select pg_temp.assert_text((select risk_recommendation::text from pg_temp.v('830
   'A at submit: review (liveness and face match do not exist yet)');
 select pg_temp.assert_text((select risk_reasons ->> 'band' from pg_temp.v('83000000-0000-0000-0000-000000000001')), 'approve',
   'A at submit: the score alone falls in the approve band');
-select pg_temp.assert_true((select risk_score = 0 and threshold_config_version = 2 and risk_assessed_at is not null
+select pg_temp.assert_true((select risk_score = 0 and threshold_config_version = 4 and risk_assessed_at is not null
                              from pg_temp.v('83000000-0000-0000-0000-000000000001')),
-  'A at submit: score 0 with threshold version 2, recorded on the case');
+  'A at submit: score 0 with threshold version 4, recorded on the case');
 select pg_temp.assert_true((select risk_reasons -> 'missing' = '["liveness", "face_match"]' and risk_reasons -> 'reasons' = '["score_low", "missing_checks"]'
                              from pg_temp.v('83000000-0000-0000-0000-000000000001')),
   'A at submit: the missing checks are listed as the reason');
@@ -198,7 +224,7 @@ select pg_temp.assert_true((select private.risk_facts('83000000-0000-0000-0000-0
   'A: a liveness_capture check (M5) does not count as the liveness check');
 rollback;
 select pg_temp.assert_eq(pg_temp.audits('83000000-0000-0000-0000-000000000001', 'risk.assess'), 1, 'A at submit: audited once');
-select pg_temp.assert_true((select ae.details = jsonb_build_object('thresholdVersion', 2, 'score', 0, 'recommendation', 'review', 'band', 'approve', 'trigger', 'submit')
+select pg_temp.assert_true((select ae.details = jsonb_build_object('thresholdVersion', 4, 'score', 0, 'recommendation', 'review', 'band', 'approve', 'trigger', 'submit')
                              from public.audit_event ae where ae.target_id = '83000000-0000-0000-0000-000000000001' and ae.action = 'risk.assess'),
   'A at submit: the audit entry holds the version, score, recommendation, band and trigger only');
 
@@ -218,8 +244,9 @@ select pg_temp.assert_true((select risk_recommendation = 'review' and risk_reaso
                              from pg_temp.v('83000000-0000-0000-0000-000000000006')),
   'F: with every check present and clean, review: the face match is review-only (M7)');
 select pg_temp.assert_true((select risk_reasons ?& array['recommendation', 'band', 'score', 'firmScore', 'reasons', 'contributions',
-                                                          'hardFlags', 'missing', 'reviewOnly', 'unknownSignals', 'rejectReasonCode', 'approveMax', 'rejectMin']
-                                   and (select count(*) from jsonb_object_keys(risk_reasons)) = 13
+                                                          'hardFlags', 'missing', 'reviewOnly', 'uncalibratedCounted', 'autoApproval',
+                                                          'unknownSignals', 'rejectReasonCode', 'approveMax', 'rejectMin']
+                                   and (select count(*) from jsonb_object_keys(risk_reasons)) = 15
                              from pg_temp.v('83000000-0000-0000-0000-000000000005')),
   'stored assessment: exactly the keys of RiskAssessment (codes, weights, cut-offs; nothing read from a document)');
 
@@ -273,7 +300,7 @@ update public.check_result set outcome = 'pass' where verification_id = '8300000
 begin;
 set local role authenticated;
 set local request.jwt.claim.sub = '81000000-0000-0000-0000-000000000001';
-select pg_temp.assert_eq((select count(*) from public.threshold_config), 2, 'admin reads the versions');
+select pg_temp.assert_eq((select count(*) from public.threshold_config), 4, 'admin reads the versions');
 do $$ begin
   insert into public.threshold_config (version, config, note) values (3, pg_temp.active_config(), 'direct insert');
   raise exception 'FAIL: an admin wrote a threshold version directly';
@@ -299,7 +326,7 @@ rollback;
 begin;
 set local role authenticated;
 set local request.jwt.claim.sub = '81000000-0000-0000-0000-000000000003';
-select pg_temp.assert_eq((select count(*) from public.threshold_config), 2, 'reviewer reads the versions');
+select pg_temp.assert_eq((select count(*) from public.threshold_config), 4, 'reviewer reads the versions');
 do $$ begin
   delete from public.threshold_config;
   raise exception 'FAIL: a reviewer removed threshold versions';
@@ -337,20 +364,26 @@ end $$;
 set client_min_messages = notice;
 do $$ begin
   insert into public.threshold_config (version, config, note, created_by)
-  values (5, pg_temp.active_config(), 'a gap in the numbers', '81000000-0000-0000-0000-000000000001');
+  values (7, pg_temp.active_config(), 'a gap in the numbers', '81000000-0000-0000-0000-000000000001');
   raise exception 'FAIL: a version skipped a number';
 exception when invalid_parameter_value then raise notice 'ok: versions follow each other without gaps';
 end $$;
 do $$ begin
   insert into public.threshold_config (version, config, note, created_by)
-  values (3, pg_temp.active_config() - 'autoDecide', 'missing a key', '81000000-0000-0000-0000-000000000001');
+  values (5, pg_temp.active_config() - 'autoDecide', 'missing a key', '81000000-0000-0000-0000-000000000001');
   raise exception 'FAIL: an invalid configuration was stored';
 exception when invalid_parameter_value then raise notice 'ok: every stored version is valid';
 end $$;
 do $$ begin
-  insert into public.threshold_config (version, config, note) values (3, pg_temp.active_config() || '{"rejectMin": 0.8}', 'nobody made this');
+  insert into public.threshold_config (version, config, note) values (5, pg_temp.active_config() || '{"rejectMin": 0.8}', 'nobody made this');
   raise exception 'FAIL: a version without its author was stored';
 exception when check_violation then raise notice 'ok: a new version names who made it';
+end $$;
+do $$ begin
+  insert into public.threshold_config (version, config, note, created_by, created_by_migration)
+  values (5, pg_temp.active_config() || '{"rejectMin": 0.8}', 'two authors', '81000000-0000-0000-0000-000000000001', '20261021000000_auto_approval');
+  raise exception 'FAIL: a version with a staff author and a migration author was stored';
+exception when check_violation then raise notice 'ok: a version has one author, a staff member or a migration';
 end $$;
 
 begin;
@@ -368,16 +401,23 @@ end $$;
 select pg_temp.assert_text(public.staff_create_threshold_version('81000000-0000-0000-0000-000000000001', 1,
     pg_temp.active_config() || '{"rejectMin": 0.5}', 'Edited from an old page') ->> 'result', 'stale',
   'admin: a version edited from an old base is refused (stale)');
-select pg_temp.assert_true(public.staff_create_threshold_version('81000000-0000-0000-0000-000000000001', 2,
+select pg_temp.assert_true(public.staff_create_threshold_version('81000000-0000-0000-0000-000000000001', 4,
     pg_temp.active_config() || '{"rejectMin": 0.1}', 'Cut-offs crossed') = '{"result": "invalid", "errors": ["rejectMin:order"]}',
   'admin: an invalid configuration is refused with its errors');
-select pg_temp.assert_text(public.staff_create_threshold_version('81000000-0000-0000-0000-000000000001', 2,
+select pg_temp.assert_text(public.staff_create_threshold_version('81000000-0000-0000-0000-000000000001', 4,
     pg_temp.active_config() || '{"rejectMin": 0.5}', '  no ') ->> 'result', 'invalid_note', 'admin: a version needs a reason');
-select pg_temp.assert_text(public.staff_create_threshold_version('81000000-0000-0000-0000-000000000001', 2,
+select pg_temp.assert_text(public.staff_create_threshold_version('81000000-0000-0000-0000-000000000001', 4,
     jsonb_set(pg_temp.active_config(), '{hardFlags}', (select to_jsonb(array(select jsonb_array_elements_text(pg_temp.active_config() -> 'hardFlags') order by 1 desc))))
     , 'Same settings, another order') ->> 'result', 'unchanged', 'admin: the same settings in another order are no new version');
+select pg_temp.assert_text(public.staff_create_threshold_version('81000000-0000-0000-0000-000000000001', 4,
+    pg_temp.active_config() - 'faceMatchCountsForApproval', 'The setting left out') ->> 'result', 'unchanged',
+  'admin: faceMatchCountsForApproval left out means false: no new version');
+select pg_temp.assert_true(public.staff_create_threshold_version('81000000-0000-0000-0000-000000000001', 4,
+    pg_temp.active_config() || '{"faceMatchCountsForApproval": "yes"}', 'Not a boolean')
+    = '{"result": "invalid", "errors": ["faceMatchCountsForApproval:not_boolean"]}',
+  'admin: faceMatchCountsForApproval must be true or false');
 commit;
-select pg_temp.assert_eq((select count(*) from public.threshold_config), 2, 'thresholds: nothing was added by the refused attempts');
+select pg_temp.assert_eq((select count(*) from public.threshold_config), 4, 'thresholds: nothing was added by the refused attempts');
 
 -- ---------------------------------------------------------------------------------------------------------
 -- The PM's test: change a threshold and see the recommendation change, with no redeploy
@@ -387,32 +427,32 @@ set local role service_role;
 -- Every submitted, undecided case (the earlier files' ones too) gets the new version.
 create temp table submitted_before as select count(*) as n from public.verification where status = 'submitted';
 grant select on submitted_before to service_role;
-select pg_temp.assert_true(public.staff_create_threshold_version('81000000-0000-0000-0000-000000000001', 2,
+select pg_temp.assert_true(public.staff_create_threshold_version('81000000-0000-0000-0000-000000000001', 4,
     jsonb_set(pg_temp.active_config() || '{"rejectMin": 0.5}', '{signals,quality_poor,enabled}', 'false'),
     'Lower the reject cut-off for the M8 test')
-    = jsonb_build_object('result', 'created', 'version', 3, 'rescored', (select n from submitted_before)),
-  'admin: version 3 created; every submitted, undecided case was assessed again');
+    = jsonb_build_object('result', 'created', 'version', 5, 'rescored', (select n from submitted_before)),
+  'admin: version 5 created; every submitted, undecided case was assessed again');
 commit;
 select pg_temp.assert_true((select tc.created_by = '81000000-0000-0000-0000-000000000001' and tc.note = 'Lower the reject cut-off for the M8 test'
                                    and tc.config -> 'rejectMin' = '0.5'
-                             from public.threshold_config tc where tc.version = 3),
-  'version 3 names its author and reason');
+                             from public.threshold_config tc where tc.version = 5),
+  'version 5 names its author and reason');
 select pg_temp.assert_true((select ae.actor_id = '81000000-0000-0000-0000-000000000001'
-                                   and ae.details = '{"version": 3, "baseVersion": 2, "changes": ["rejectMin", "signals.quality_poor.enabled"]}'
-                             from public.audit_event ae where ae.action = 'threshold_config.create' and ae.target_id = '3'),
-  'version 3 is audited with what changed (never the note)');
-select pg_temp.assert_true((select risk_recommendation = 'reject' and threshold_config_version = 3
+                                   and ae.details = '{"version": 5, "baseVersion": 4, "changes": ["rejectMin", "signals.quality_poor.enabled"]}'
+                             from public.audit_event ae where ae.action = 'threshold_config.create' and ae.target_id = '5'),
+  'version 5 is audited with what changed (never the note)');
+select pg_temp.assert_true((select risk_recommendation = 'reject' and threshold_config_version = 5
                                    and risk_reasons ->> 'rejectReasonCode' = 'DOC_INVALID'
                              from pg_temp.v('83000000-0000-0000-0000-000000000001')),
-  'A with version 3: the same case is now recommended for reject');
+  'A with version 5: the same case is now recommended for reject');
 select pg_temp.assert_true((select ae.details ->> 'trigger' = 'thresholds' from public.audit_event ae
                              where ae.target_id = '83000000-0000-0000-0000-000000000001' and ae.action = 'risk.assess'
                              order by ae.id desc limit 1),
-  'A with version 3: audited as caused by the new thresholds');
-select pg_temp.assert_true((select risk_recommendation = 'review' and threshold_config_version = 3 from pg_temp.v('83000000-0000-0000-0000-000000000005')),
-  'E with version 3: a hard flag still means review');
-select pg_temp.assert_true((select risk_recommendation = 'review' and threshold_config_version = 3 from pg_temp.v('83000000-0000-0000-0000-000000000006')),
-  'F with version 3: still review (the face match is review-only)');
+  'A with version 5: audited as caused by the new thresholds');
+select pg_temp.assert_true((select risk_recommendation = 'review' and threshold_config_version = 5 from pg_temp.v('83000000-0000-0000-0000-000000000005')),
+  'E with version 5: a hard flag still means review');
+select pg_temp.assert_true((select risk_recommendation = 'review' and threshold_config_version = 5 from pg_temp.v('83000000-0000-0000-0000-000000000006')),
+  'F with version 5: still review (the face match is review-only)');
 select pg_temp.assert_true((select status = 'submitted' from pg_temp.v('83000000-0000-0000-0000-000000000001')),
   'automatic decisions are off: A waits for a person');
 
@@ -456,12 +496,12 @@ select pg_temp.assert_text(public.staff_decide('83000000-0000-0000-0000-00000000
     'approve', null, 'Who') ->> 'result', 'not_found', 'decide: an unknown case');
 select pg_temp.assert_true(public.staff_decide('83000000-0000-0000-0000-000000000001', '81000000-0000-0000-0000-000000000002', 'supervisor',
     'approve', null, '  Printed name misread by the OCR; checked on the photo.  ')
-    @> '{"result": "ok", "status": "approved", "recommendation": "reject", "agreesWithRecommendation": false, "thresholdVersion": 3}',
+    @> '{"result": "ok", "status": "approved", "recommendation": "reject", "agreesWithRecommendation": false, "thresholdVersion": 5}',
   'decide: the supervisor approves against the recommendation, with a note');
 commit;
 
 select pg_temp.assert_true((select d.actor_type = 'staff' and d.actor_id = '81000000-0000-0000-0000-000000000002' and d.outcome = 'approve'
-                                   and d.threshold_config_version = 3 and d.recommendation = 'reject' and d.risk_band = 'reject'
+                                   and d.threshold_config_version = 5 and d.recommendation = 'reject' and d.risk_band = 'reject'
                                    and d.risk_score = 0.5 and d.agrees_with_recommendation = false
                                    and d.note = 'Printed name misread by the OCR; checked on the photo.' and d.reason_code is null
                              from public.decision d where d.verification_id = '83000000-0000-0000-0000-000000000001'),
@@ -479,7 +519,7 @@ select pg_temp.assert_true((select ae.actor_id = '81000000-0000-0000-0000-000000
 -- A decided case is never re-assessed.
 insert into public.check_result (verification_id, check_name, check_version, outcome, details)
 values ('83000000-0000-0000-0000-000000000001', 'liveness', 'test', 'pass', '{}');
-select pg_temp.assert_true((select risk_recommendation = 'reject' and threshold_config_version = 3 from pg_temp.v('83000000-0000-0000-0000-000000000001')),
+select pg_temp.assert_true((select risk_recommendation = 'reject' and threshold_config_version = 5 from pg_temp.v('83000000-0000-0000-0000-000000000001')),
   'decided case: a late check does not change what the decision was shown');
 
 begin;
@@ -524,7 +564,7 @@ select pg_temp.assert_eq((select count(*) from public.verification where id::tex
 rollback;
 
 -- ---------------------------------------------------------------------------------------------------------
--- Automatic decisions: test sessions only, never an approval with a check missing
+-- Automatic decisions: approval only (never a reject), test sessions only, never with a check missing
 -- ---------------------------------------------------------------------------------------------------------
 -- G: a test passport with two firm signals; H: the same, real; I: a clean test passport (liveness missing).
 insert into public.applicant (id, api_client_id, external_user_id) values
@@ -551,21 +591,22 @@ do update set details = jsonb_build_object('reasons', (excluded.details -> 'reas
 
 begin;
 set local role service_role;
-select pg_temp.assert_text(public.staff_create_threshold_version('81000000-0000-0000-0000-000000000001', 3,
+select pg_temp.assert_text(public.staff_create_threshold_version('81000000-0000-0000-0000-000000000001', 5,
     pg_temp.active_config() || '{"autoDecide": true}', 'Try automatic decisions on test sessions') ->> 'result', 'created',
-  'admin: version 4 turns automatic decisions on');
+  'admin: version 6 turns automatic decisions on');
 select pg_temp.assert_text(public.flow_submit(id, array['document_front']), 'ok', 'submit: ' || id)
   from public.verification
  where id in ('83000000-0000-0000-0000-000000000007', '83000000-0000-0000-0000-000000000008', '83000000-0000-0000-0000-000000000009');
 commit;
 
-select pg_temp.assert_true((select status = 'rejected' from pg_temp.v('83000000-0000-0000-0000-000000000007')),
-  'auto: a test session recommended for reject is rejected');
-select pg_temp.assert_true((select d.actor_type = 'system' and d.actor_id is null and d.reason_code = 'DOC_INVALID' and d.threshold_config_version = 4
-                                   and d.agrees_with_recommendation = true
-                             from public.decision d where d.verification_id = '83000000-0000-0000-0000-000000000007'),
-  'auto: the system decision names its rider reason and threshold version');
-select pg_temp.assert_eq(pg_temp.audits('83000000-0000-0000-0000-000000000007', 'decision.create'), 1, 'auto: audited');
+select pg_temp.assert_true((select status = 'submitted' and risk_recommendation = 'reject' from pg_temp.v('83000000-0000-0000-0000-000000000007')),
+  'auto: a test session recommended for reject is never rejected automatically: it waits for a person');
+select pg_temp.assert_eq((select count(*) from public.decision where verification_id = '83000000-0000-0000-0000-000000000007'), 0,
+  'auto: no system decision on a reject recommendation');
+select pg_temp.assert_true((select risk_reasons -> 'autoApproval' ->> 'eligible' = 'false'
+                                   and risk_reasons -> 'autoApproval' -> 'blockers' @> '["not_recommended", "mrz_print_mismatch", "firm_signal"]'
+                             from pg_temp.v('83000000-0000-0000-0000-000000000007')),
+  'auto: G lists why it is not approved (not recommended, firm signals, printed text)');
 select pg_temp.assert_true((select status = 'submitted' and risk_recommendation = 'reject' from pg_temp.v('83000000-0000-0000-0000-000000000008')),
   'auto: a real session is never decided automatically');
 select pg_temp.assert_true((select status = 'submitted' and risk_reasons ->> 'band' = 'approve' from pg_temp.v('83000000-0000-0000-0000-000000000009')),
@@ -573,11 +614,11 @@ select pg_temp.assert_true((select status = 'submitted' and risk_reasons ->> 'ba
 
 begin;
 set local role service_role;
-select pg_temp.assert_text(public.staff_create_threshold_version('81000000-0000-0000-0000-000000000001', 4,
+select pg_temp.assert_text(public.staff_create_threshold_version('81000000-0000-0000-0000-000000000001', 6,
     (select tc.config from public.threshold_config tc where tc.version = 2), 'Back to the M8 defaults') ->> 'result', 'created',
-  'admin: version 5 restores the defaults (automatic decisions off)');
+  'admin: version 7 restores the defaults (automatic decisions off)');
 commit;
-select pg_temp.assert_true((select status = 'submitted' and threshold_config_version = 5 and risk_recommendation = 'reject'
+select pg_temp.assert_true((select status = 'submitted' and threshold_config_version = 7 and risk_recommendation = 'reject'
                              from pg_temp.v('83000000-0000-0000-0000-000000000008')),
-  'H with version 5: assessed again (still reject: two firm signals reach 0.9), still waiting for a person');
+  'H with version 7: assessed again (still reject: two firm signals reach 0.9), still waiting for a person');
 select pg_temp.assert_eq((select count(*) from public.audit_event where action = 'risk.assess_failed'), 0, 'no assessment failed');

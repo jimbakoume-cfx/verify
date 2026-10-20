@@ -92,11 +92,12 @@ export type RequiredCheck = (typeof REQUIRED_CHECKS)[number];
 export const PLACEHOLDER_CHECK_NAMES = { liveness: "liveness", faceMatch: "face_match" } as const;
 
 /**
- * Checks whose result can never help approve a case (M7, PM 2026-10-19): a case that has one is never
- * recommended for approval, so never approved automatically, whatever its score. The face match stays
- * here until its threshold is calibrated on Cameroonian impostor pairs (NIST shows a ~14x higher
- * false-match rate for West Africans at a fixed threshold). A hard rule of the database
- * (private.face_match_review_only), not a threshold setting: no admin can switch it off.
+ * Checks whose threshold is not calibrated (M7): the face match, until it is set on Cameroonian
+ * impostor pairs (NIST shows a ~14x higher false-match rate for West Africans at a fixed threshold).
+ * The database lists a case's face match under RiskFacts.reviewOnly (private.face_match_review_only).
+ * Such a check never helps approve a case (reason review_only_check), unless the active threshold
+ * version says otherwise: since the PM's decision of 2026-10-20 (automatic approval), the setting
+ * faceMatchCountsForApproval lets a passed face match count. Admins switch it off from the dashboard.
  */
 export const REVIEW_ONLY_CHECKS = ["face_match"] as const;
 
@@ -124,6 +125,50 @@ export const RISK_REASONS = [
   "review_only_check",
 ] as const;
 export type RiskReason = (typeof RISK_REASONS)[number];
+
+/**
+ * Why the system may not approve a case on its own (automatic approval, PM 2026-10-20). Every one that
+ * holds is listed, in this order; the case is approved automatically only when none does. A case that is
+ * not approved automatically is never rejected automatically either: it waits for a person.
+ * - auto_decide_off: automatic approval is switched off in the active version (autoDecide);
+ * - real_session: not a test session (the face match runs on test sessions only, licence);
+ * - not_recommended: the rules do not recommend approval (a hard flag, an unknown signal, a document
+ *   always reviewed, a check missing or review-only, a score above the approve cut-off...);
+ * - document_not_firm: the document check is not firm (RiskFacts.documentFirm), e.g. a document
+ *   without code lines, or code lines with a wrong check digit;
+ * - document_expired, under_18, mrz_print_mismatch: present, whatever their weight;
+ * - hard_flag: a hard flag of the version is present;
+ * - firm_signal: any firm signal is present, whatever its weight (even switched off);
+ * - unknown_signal: a signal the rules do not know;
+ * - quality_not_ok: the server's photo check is missing or did not find every photo ok;
+ * - liveness_not_passed, face_match_not_passed: missing, or ran and did not pass;
+ * - face_match_not_counted: the version does not let the uncalibrated face match count;
+ * - score_above_cutoff: the score is above the approve cut-off.
+ */
+export const AUTO_APPROVAL_BLOCKERS = [
+  "auto_decide_off",
+  "real_session",
+  "not_recommended",
+  "document_not_firm",
+  "document_expired",
+  "under_18",
+  "mrz_print_mismatch",
+  "hard_flag",
+  "firm_signal",
+  "unknown_signal",
+  "quality_not_ok",
+  "liveness_not_passed",
+  "face_match_not_passed",
+  "face_match_not_counted",
+  "score_above_cutoff",
+] as const;
+export type AutoApprovalBlocker = (typeof AUTO_APPROVAL_BLOCKERS)[number];
+
+export interface AutoApproval {
+  /** True only when no blocker holds: the system records an approval (actor system). */
+  eligible: boolean;
+  blockers: AutoApprovalBlocker[];
+}
 
 /** The rider-facing reason code (reason_code table) of a reject, from its first firm signal. */
 export const SIGNAL_REJECT_CODES: Partial<Record<RiskSignal, string>> = {
@@ -166,10 +211,17 @@ export interface ThresholdConfig {
   /** Declared documents always decided by a person. Always holds MANDATORY_REVIEW_DOCUMENTS. */
   alwaysReviewDocuments: DeclaredDocument[];
   /**
-   * Automatic decisions. Off by default; even on, only for test sessions, and never an approval while a
-   * required check (liveness, face match) is missing.
+   * Automatic approval (PM, 2026-10-20). Off by default. Never a reject: the system only ever approves,
+   * and only a test session whose every condition holds (AUTO_APPROVAL_BLOCKERS); anything else waits
+   * for a person.
    */
   autoDecide: boolean;
+  /**
+   * The face match (uncalibrated) may help approve a case: its pass no longer makes the case review-only.
+   * Optional in a stored version (missing means false: versions made before 2026-10-20 lack it);
+   * normaliseThresholdConfig always writes it.
+   */
+  faceMatchCountsForApproval?: boolean;
 }
 
 export const THRESHOLD_CONFIG_KEYS = [
@@ -181,6 +233,9 @@ export const THRESHOLD_CONFIG_KEYS = [
   "alwaysReviewDocuments",
   "autoDecide",
 ] as const satisfies readonly (keyof ThresholdConfig)[];
+
+/** Keys a configuration may leave out (versions stored before they existed); each has a default. */
+export const THRESHOLD_CONFIG_OPTIONAL_KEYS = ["faceMatchCountsForApproval"] as const satisfies readonly (keyof ThresholdConfig)[];
 
 /** Version 2, the first M8 version (the migration seeds exactly this). */
 export const DEFAULT_THRESHOLD_CONFIG: ThresholdConfig = {
@@ -211,6 +266,17 @@ export const DEFAULT_THRESHOLD_CONFIG: ThresholdConfig = {
   hardFlags: ["document_expired", "under_18", "image_reused", "unsupported_document", "manual_review_document"],
   alwaysReviewDocuments: ["cni_legacy", "residence_permit", "driving_licence", "voter_card"],
   autoDecide: false,
+};
+
+/**
+ * The version the automatic-approval migration (20261021000000_auto_approval.sql) adds on top of the
+ * active one, from version 2's settings: automatic approval on, and the face match counted (PM
+ * decision 2026-10-20). An admin switches either off by saving a new version.
+ */
+export const AUTO_APPROVAL_CONFIG: ThresholdConfig = {
+  ...DEFAULT_THRESHOLD_CONFIG,
+  autoDecide: true,
+  faceMatchCountsForApproval: true,
 };
 
 /** "path:code", e.g. "signals.date_logic.weight:out_of_range". Sorted, each once. */
@@ -252,9 +318,17 @@ function checkScore(value: unknown, path: string, errors: Set<string>): void {
   else if (Math.abs(value * SCALE - Math.round(value * SCALE)) > 1e-9) errors.add(`${path}:too_precise`);
 }
 
-function checkExactKeys(value: Json, keys: readonly string[], path: string, errors: Set<string>): void {
+function checkExactKeys(
+  value: Json,
+  keys: readonly string[],
+  path: string,
+  errors: Set<string>,
+  optional: readonly string[] = [],
+): void {
   const prefix = path ? `${path}.` : "";
-  for (const key of Object.keys(value)) if (!keys.includes(key)) errors.add(`${prefix}${key}:unknown_key`);
+  for (const key of Object.keys(value)) {
+    if (!keys.includes(key) && !optional.includes(key)) errors.add(`${prefix}${key}:unknown_key`);
+  }
   for (const key of keys) if (!Object.hasOwn(value, key)) errors.add(`${prefix}${key}:missing_key`);
 }
 
@@ -285,7 +359,7 @@ function checkList<T extends string>(
 export function thresholdConfigErrors(value: unknown): ConfigError[] {
   const errors = new Set<string>();
   if (!isObject(value)) return [":not_object"];
-  checkExactKeys(value, THRESHOLD_CONFIG_KEYS, "", errors);
+  checkExactKeys(value, THRESHOLD_CONFIG_KEYS, "", errors, THRESHOLD_CONFIG_OPTIONAL_KEYS);
   if (Object.hasOwn(value, "schema") && value.schema !== THRESHOLD_CONFIG_SCHEMA) errors.add("schema:schema");
 
   if (Object.hasOwn(value, "signals")) {
@@ -319,6 +393,9 @@ export function thresholdConfigErrors(value: unknown): ConfigError[] {
     checkList(value.alwaysReviewDocuments, "alwaysReviewDocuments", DECLARED_DOCUMENTS, MANDATORY_REVIEW_DOCUMENTS, errors);
   }
   if (Object.hasOwn(value, "autoDecide") && typeof value.autoDecide !== "boolean") errors.add("autoDecide:not_boolean");
+  if (Object.hasOwn(value, "faceMatchCountsForApproval") && typeof value.faceMatchCountsForApproval !== "boolean") {
+    errors.add("faceMatchCountsForApproval:not_boolean");
+  }
   return [...errors].sort();
 }
 
@@ -341,7 +418,13 @@ export function normaliseThresholdConfig(config: ThresholdConfig): ThresholdConf
     hardFlags: RISK_SIGNALS.filter((code) => config.hardFlags.includes(code)),
     alwaysReviewDocuments: DECLARED_DOCUMENTS.filter((doc) => config.alwaysReviewDocuments.includes(doc)),
     autoDecide: config.autoDecide,
+    faceMatchCountsForApproval: config.faceMatchCountsForApproval === true,
   };
+}
+
+/** Whether a configuration lets the (uncalibrated) face match help approve; missing means no. */
+export function faceMatchCounts(config: ThresholdConfig): boolean {
+  return config.faceMatchCountsForApproval === true;
 }
 
 /** One difference between two versions, for the dashboard and the audit log. */
@@ -351,7 +434,7 @@ export type ConfigChange =
   | { kind: "hardFlag"; signal: RiskSignal; to: boolean }
   | { kind: "approveMax" | "rejectMin"; from: number; to: number }
   | { kind: "alwaysReview"; document: DeclaredDocument; to: boolean }
-  | { kind: "autoDecide"; from: boolean; to: boolean };
+  | { kind: "autoDecide" | "faceMatchCountsForApproval"; from: boolean; to: boolean };
 
 /** What changes from `from` to `to`, in a fixed order. */
 export function diffThresholdConfig(from: ThresholdConfig, to: ThresholdConfig): ConfigChange[] {
@@ -361,6 +444,9 @@ export function diffThresholdConfig(from: ThresholdConfig, to: ThresholdConfig):
   }
   if (toUnits(from.rejectMin) !== toUnits(to.rejectMin)) changes.push({ kind: "rejectMin", from: from.rejectMin, to: to.rejectMin });
   if (from.autoDecide !== to.autoDecide) changes.push({ kind: "autoDecide", from: from.autoDecide, to: to.autoDecide });
+  if (faceMatchCounts(from) !== faceMatchCounts(to)) {
+    changes.push({ kind: "faceMatchCountsForApproval", from: faceMatchCounts(from), to: faceMatchCounts(to) });
+  }
   for (const signal of RISK_SIGNALS) {
     const a = from.signals[signal];
     const b = to.signals[signal];
@@ -390,6 +476,15 @@ export interface RiskFacts {
   missing: string[];
   /** M7: checks present whose result may never approve (REVIEW_ONLY_CHECKS). Missing means none. */
   reviewOnly?: string[];
+  /**
+   * Automatic approval: the document check is firm. The declared document has code lines the server
+   * read with every check digit right (its mrz_server check passed on the newest photo of that side),
+   * the code lines classified it as the declared document, and the dates were checked from them
+   * (consistency basis "mrz"). Always false for a document without code lines. Missing means false.
+   */
+  documentFirm?: boolean;
+  /** Automatic approval: a test session (verification.is_test). Missing means false. */
+  testSession?: boolean;
 }
 
 export interface RiskContribution {
@@ -419,6 +514,13 @@ export interface RiskAssessment {
   missing: string[];
   /** Review-only checks present (M7), in REQUIRED_CHECKS order (then any other, sorted). */
   reviewOnly: string[];
+  /**
+   * Uncalibrated checks present that this version lets count anyway (faceMatchCountsForApproval):
+   * listed so that staff always see that an uncalibrated score helped.
+   */
+  uncalibratedCounted: string[];
+  /** Whether the system may approve this case on its own, and every reason it may not. */
+  autoApproval: AutoApproval;
   unknownSignals: string[];
   /** With a reject recommendation: the rider-facing reason code it would use. */
   rejectReasonCode: string | null;
@@ -442,8 +544,10 @@ function ordered(values: readonly string[], order: readonly string[]): string[] 
  *   recommendation:
  *     review   when a hard flag or an unknown signal is present, or the document is always reviewed;
  *     reject   when firmScore >= rejectMin;
- *     approve  when score <= approveMax, no required check is missing and no review-only check is present;
+ *     approve  when score <= approveMax, no required check is missing and no review-only check is present
+ *              (the face match is not review-only when the version sets faceMatchCountsForApproval);
  *     review   otherwise.
+ *   autoApproval: eligible when no AUTO_APPROVAL_BLOCKERS holds. Never a reject.
  */
 export function evaluateRisk(facts: RiskFacts, config: ThresholdConfig): RiskAssessment {
   const present = new Set(facts.signals);
@@ -456,7 +560,10 @@ export function evaluateRisk(facts: RiskFacts, config: ThresholdConfig): RiskAss
   }));
   const unknownSignals = [...present].filter((code) => !(RISK_SIGNALS as readonly string[]).includes(code)).sort();
   const missing = ordered(facts.missing, REQUIRED_CHECKS);
-  const reviewOnly = ordered(facts.reviewOnly ?? [], REQUIRED_CHECKS);
+  const uncalibrated = ordered(facts.reviewOnly ?? [], REQUIRED_CHECKS);
+  const counts = faceMatchCounts(config);
+  const uncalibratedCounted = uncalibrated.filter((check) => counts && check === PLACEHOLDER_CHECK_NAMES.faceMatch);
+  const reviewOnly = uncalibrated.filter((check) => !uncalibratedCounted.includes(check));
   const hardFlags = contributions.filter((c) => c.hard).map((c) => c.signal);
 
   const sum = (list: RiskContribution[]) => Math.min(SCALE, list.reduce((total, c) => total + (c.counted ? toUnits(c.weight) : 0), 0));
@@ -485,6 +592,26 @@ export function evaluateRisk(facts: RiskFacts, config: ThresholdConfig): RiskAss
   else if (holds.score_low && !holds.missing_checks && !holds.review_only_check) recommendation = "approve";
 
   const band: DecisionOutcome = scoreUnits <= approveUnits ? "approve" : scoreUnits >= rejectUnits ? "reject" : "review";
+
+  const blocked: Record<AutoApprovalBlocker, boolean> = {
+    auto_decide_off: !config.autoDecide,
+    real_session: facts.testSession !== true,
+    not_recommended: recommendation !== "approve",
+    document_not_firm: facts.documentFirm !== true,
+    document_expired: present.has("document_expired"),
+    under_18: present.has("under_18"),
+    mrz_print_mismatch: present.has("mrz_print_mismatch"),
+    hard_flag: hardFlags.length > 0,
+    firm_signal: FIRM_SIGNALS.some((code) => present.has(code)),
+    unknown_signal: unknownSignals.length > 0,
+    quality_not_ok: present.has("quality_poor") || missing.includes("server_checks"),
+    liveness_not_passed: present.has("liveness_flag") || missing.includes("liveness"),
+    face_match_not_passed: present.has("face_match_flag") || missing.includes("face_match"),
+    face_match_not_counted: !counts,
+    score_above_cutoff: scoreUnits > approveUnits,
+  };
+  const blockers = AUTO_APPROVAL_BLOCKERS.filter((blocker) => blocked[blocker]);
+
   const firstFirm = contributions.find((c) => c.firm && c.counted && toUnits(c.weight) > 0);
   return {
     recommendation,
@@ -496,6 +623,8 @@ export function evaluateRisk(facts: RiskFacts, config: ThresholdConfig): RiskAss
     hardFlags,
     missing,
     reviewOnly,
+    uncalibratedCounted,
+    autoApproval: { eligible: blockers.length === 0, blockers },
     unknownSignals,
     rejectReasonCode: recommendation === "reject"
       ? (firstFirm && SIGNAL_REJECT_CODES[firstFirm.signal]) ?? FALLBACK_REJECT_CODE

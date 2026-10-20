@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import vectors from "../../tests/risk_vectors.json" with { type: "json" };
 import { DECLARED_DOCUMENTS, POLICY_REASONS } from "./contract.ts";
 import {
+  AUTO_APPROVAL_BLOCKERS,
+  AUTO_APPROVAL_CONFIG,
   DEFAULT_THRESHOLD_CONFIG,
   diffThresholdConfig,
   evaluateRisk,
@@ -28,6 +30,7 @@ describe("the shared vectors (also run by the database: supabase/tests/70_m8_tes
   it("list the signals and the default configuration of this code", () => {
     expect(vectors.signals).toEqual([...RISK_SIGNALS]);
     expect(vectors.defaultConfig).toEqual(DEFAULT_THRESHOLD_CONFIG);
+    expect(vectors.autoApprovalConfig).toEqual(AUTO_APPROVAL_CONFIG);
   });
 
   it.each(vectors.assessments.map((v) => [v.name, v] as const))("assessment: %s", (_name, vector) => {
@@ -116,7 +119,7 @@ describe("normaliseThresholdConfig and diffThresholdConfig", () => {
     const shuffled = clone(DEFAULT_THRESHOLD_CONFIG);
     shuffled.hardFlags.reverse();
     shuffled.alwaysReviewDocuments.reverse();
-    expect(normaliseThresholdConfig(shuffled)).toEqual(DEFAULT_THRESHOLD_CONFIG);
+    expect(normaliseThresholdConfig(shuffled)).toEqual({ ...DEFAULT_THRESHOLD_CONFIG, faceMatchCountsForApproval: false });
     expect(diffThresholdConfig(DEFAULT_THRESHOLD_CONFIG, shuffled)).toEqual([]);
   });
 
@@ -127,9 +130,11 @@ describe("normaliseThresholdConfig and diffThresholdConfig", () => {
     next.signals.date_logic = { weight: 0.25, enabled: false };
     next.hardFlags = next.hardFlags.filter((code) => code !== "image_reused");
     next.alwaysReviewDocuments.push("passport");
+    next.faceMatchCountsForApproval = true;
     expect(diffThresholdConfig(DEFAULT_THRESHOLD_CONFIG, next)).toEqual([
       { kind: "rejectMin", from: 0.9, to: 0.5 },
       { kind: "autoDecide", from: false, to: true },
+      { kind: "faceMatchCountsForApproval", from: false, to: true },
       { kind: "hardFlag", signal: "image_reused", to: false },
       { kind: "weight", signal: "date_logic", from: 0.4, to: 0.25 },
       { kind: "enabled", signal: "date_logic", from: true, to: false },
@@ -141,5 +146,80 @@ describe("normaliseThresholdConfig and diffThresholdConfig", () => {
     const all = clone(DEFAULT_THRESHOLD_CONFIG);
     all.alwaysReviewDocuments = [...DECLARED_DOCUMENTS];
     expect(isThresholdConfig(all)).toBe(true);
+  });
+});
+
+describe("automatic approval (PM decision 2026-10-20)", () => {
+  const clean: RiskFacts = {
+    declaredDocument: "passport",
+    signals: [],
+    missing: [],
+    reviewOnly: ["face_match"],
+    documentFirm: true,
+    testSession: true,
+  };
+
+  it("is the migration's version: version 2 with automatic approval on and the face match counted", () => {
+    expect(thresholdConfigErrors(AUTO_APPROVAL_CONFIG)).toEqual([]);
+    expect(diffThresholdConfig(DEFAULT_THRESHOLD_CONFIG, AUTO_APPROVAL_CONFIG)).toEqual([
+      { kind: "autoDecide", from: false, to: true },
+      { kind: "faceMatchCountsForApproval", from: false, to: true },
+    ]);
+  });
+
+  it("approves a clean, firm test case with liveness and face match passed, and lists the uncalibrated check", () => {
+    const result = evaluateRisk(clean, AUTO_APPROVAL_CONFIG);
+    expect(result.recommendation).toBe("approve");
+    expect(result.autoApproval).toEqual({ eligible: true, blockers: [] });
+    expect(result.reviewOnly).toEqual([]);
+    expect(result.uncalibratedCounted).toEqual(["face_match"]);
+  });
+
+  it("is switched off by either setting, without a redeploy", () => {
+    expect(evaluateRisk(clean, { ...AUTO_APPROVAL_CONFIG, autoDecide: false }).autoApproval.blockers).toEqual(["auto_decide_off"]);
+    const noFace = evaluateRisk(clean, { ...AUTO_APPROVAL_CONFIG, faceMatchCountsForApproval: false });
+    expect(noFace.recommendation).toBe("review");
+    expect(noFace.reasons).toContain("review_only_check");
+    expect(noFace.autoApproval.eligible).toBe(false);
+  });
+
+  it("never approves when any one condition is missing, whatever the weights", () => {
+    const generous = structuredClone(AUTO_APPROVAL_CONFIG);
+    for (const code of RISK_SIGNALS) generous.signals[code] = { weight: 0, enabled: false };
+    generous.hardFlags = [...MANDATORY_HARD_FLAGS];
+    generous.approveMax = 0.99;
+    generous.rejectMin = 1;
+    const cases: [RiskFacts, string][] = [
+      [{ ...clean, testSession: false }, "real_session"],
+      [{ ...clean, documentFirm: false }, "document_not_firm"],
+      [{ ...clean, signals: ["document_expired"] }, "document_expired"],
+      [{ ...clean, signals: ["under_18"] }, "under_18"],
+      [{ ...clean, signals: ["mrz_print_mismatch"] }, "mrz_print_mismatch"],
+      ...FIRM_SIGNALS.map((code): [RiskFacts, string] => [{ ...clean, signals: [code] }, "firm_signal"]),
+      [{ ...clean, signals: ["quality_poor"] }, "quality_not_ok"],
+      [{ ...clean, missing: ["server_checks"] }, "quality_not_ok"],
+      [{ ...clean, signals: ["liveness_flag"] }, "liveness_not_passed"],
+      [{ ...clean, missing: ["liveness"] }, "liveness_not_passed"],
+      [{ ...clean, signals: ["face_match_flag"] }, "face_match_not_passed"],
+      [{ ...clean, missing: ["face_match"], reviewOnly: [] }, "face_match_not_passed"],
+      [{ ...clean, signals: ["something_new"] }, "unknown_signal"],
+    ];
+    for (const [facts, blocker] of cases) {
+      const result = evaluateRisk(facts, generous);
+      expect(result.autoApproval.eligible, blocker).toBe(false);
+      expect(result.autoApproval.blockers, blocker).toContain(blocker);
+    }
+  });
+
+  it("never rejects on its own: a reject recommendation is never eligible", () => {
+    const result = evaluateRisk({ ...clean, signals: ["mrz_invalid_server", "mrz_print_mismatch"] }, AUTO_APPROVAL_CONFIG);
+    expect(result.recommendation).toBe("reject");
+    expect(result.autoApproval.eligible).toBe(false);
+  });
+
+  it("lists its blockers in a fixed order, each once", () => {
+    const result = evaluateRisk({ declaredDocument: null, signals: ["document_expired", "under_18"], missing: ["server_checks", "liveness", "face_match"] }, DEFAULT_THRESHOLD_CONFIG);
+    expect(result.autoApproval.blockers).toEqual(AUTO_APPROVAL_BLOCKERS.filter((b) => result.autoApproval.blockers.includes(b)));
+    expect(new Set(result.autoApproval.blockers).size).toBe(result.autoApproval.blockers.length);
   });
 });
