@@ -341,6 +341,9 @@ Details: `docs/M8_SPEC.md`.
 6. **The rider's result screen** asks the server for at most 75 s, every 2.5 s: verified (with "Continue", to the session's return address or an end screen), review, or waiting. A time-out shows the review message. Nothing personal is returned.
 7. **Before any real rider:** calibrate the face match on Cameroonian impostor pairs, move to a licensed model (`M7_SPEC.md`), move to Vercel Pro with its DPA, and decide again whether automatic approval stays. The ride app must treat a later staff reject (M10 webhook) as final.
 
+### Scope for now (2026-10-20)
+The platform is for **testing first**. M0–M8 and automatic approval (test sessions only) are what we test now. M9–M14 (ops dashboard v1, integration API, fraud signals, calibration, deletion and hardening, pilot) and other complete features come later, when the PM asks for them.
+
 ---
 
 ## Verification
