@@ -13,6 +13,9 @@ characters with valid check digits. Variants:
     blurred  the same card, heavily out of focus
     smudged  the card in focus, but its code lines smudged (they cannot be read)
     none     the table only, no card
+    face     M5: a drawn cartoon face (no real person) in front of a plain wall, where the rider
+             app's face-check oval falls, cycling through poses: straight, head turned left and
+             right, eyes closed, looking up, smiling (each held 0.5 s). No card.
 
 The card is placed where the rider app's guide falls in the video: the guide is measured in CSS
 pixels on the capture screen (--viewport, --guide), and the <video> fills that screen with
@@ -399,7 +402,103 @@ def box_blur(plane: Plane, radius: int, passes: int = 3) -> None:
     plane.rows = [bytearray(r) for r in rows]
 
 
-def write_y4m(path: str, frames: int, fps: int, size: tuple[int, int], planes: tuple[Plane, Plane, Plane], rng: random.Random) -> None:
+# The face variant (M5). A wall a little brighter than the table, a mid-dark skin tone and dark hair:
+# the rider app's brightness check sees a lit face with features, not too dark and not backlit.
+WALL_LUMA = 128
+SKIN_LUMA = 116
+SKIN_CHROMA = (110, 150)
+HAIR_LUMA = 34
+SHIRT_LUMA = 70
+SHIRT_CHROMA = (150, 120)
+EYE_WHITE_LUMA = 210
+PUPIL_LUMA = 24
+MOUTH_LUMA = 52
+
+# The poses the face cycles through, 0.5 s each (8 per 4-second loop): yaw and pitch move the
+# features (-1..1), eyes closed for a blink, a wide mouth for a smile.
+POSES = [
+    {"yaw": 0.0, "pitch": 0.0, "closed": False, "smile": False},
+    {"yaw": -0.8, "pitch": 0.0, "closed": False, "smile": False},
+    {"yaw": 0.0, "pitch": 0.0, "closed": False, "smile": False},
+    {"yaw": 0.8, "pitch": 0.0, "closed": False, "smile": False},
+    {"yaw": 0.0, "pitch": 0.0, "closed": True, "smile": False},
+    {"yaw": 0.0, "pitch": -0.8, "closed": False, "smile": False},
+    {"yaw": 0.0, "pitch": 0.0, "closed": False, "smile": True},
+    {"yaw": 0.0, "pitch": 0.0, "closed": True, "smile": True},
+]
+
+
+def oval_in_view(view: tuple[int, int]) -> tuple[float, float, float, float]:
+    """The rider app's face-check oval in CSS pixels (ovalRect in apps/rider/src/liveness/frames.ts)."""
+    vw, vh = view
+    width = min(vw * 0.72, vh * 0.42)
+    height = width * 4 / 3
+    return ((vw - width) / 2, vh * 0.46 - height / 2, width, height)
+
+
+def fill_ellipse(plane: Plane, cx: float, cy: float, rx: float, ry: float, value: int, lower_only: bool = False) -> None:
+    """A filled ellipse (or only its lower half), row by row."""
+    for y in range(max(0, math.floor(cy - ry)), min(plane.height, math.ceil(cy + ry) + 1)):
+        t = (y + 0.5 - cy) / ry
+        if abs(t) > 1 or (lower_only and t < 0):
+            continue
+        half = rx * math.sqrt(1 - t * t)
+        plane.fill(cx - half, y, cx + half, y + 1, value)
+
+
+def fill_ellipse_yuv(planes: tuple[Plane, Plane, Plane], cx: float, cy: float, rx: float, ry: float, luma: int,
+                     chroma: tuple[int, int] | None = None, lower_only: bool = False) -> None:
+    y_plane, u_plane, v_plane = planes
+    fill_ellipse(y_plane, cx, cy, rx, ry, luma, lower_only)
+    if chroma:
+        fill_ellipse(u_plane, cx / 2, cy / 2, rx / 2, ry / 2, chroma[0], lower_only)
+        fill_ellipse(v_plane, cx / 2, cy / 2, rx / 2, ry / 2, chroma[1], lower_only)
+
+
+def copy_planes(planes: tuple[Plane, Plane, Plane]) -> tuple[Plane, Plane, Plane]:
+    out = []
+    for p in planes:
+        q = Plane.__new__(Plane)
+        q.width, q.height = p.width, p.height
+        q.rows = [bytearray(r) for r in p.rows]
+        out.append(q)
+    return out[0], out[1], out[2]
+
+
+def draw_face(planes: tuple[Plane, Plane, Plane], face: tuple[float, float, float, float], pose: dict) -> None:
+    """A simple drawn face filling `face` (x, y, w, h: the oval's box, in video pixels)."""
+    fx, fy, fw, fh = face
+    cx, cy = fx + fw / 2, fy + fh / 2
+    rx, ry = 0.40 * fw, 0.44 * fh
+    # Shoulders and neck first, then the head over them.
+    fill_ellipse_yuv(planes, cx, fy + fh * 1.15, fw * 0.95, fh * 0.32, SHIRT_LUMA, SHIRT_CHROMA)
+    fill_ellipse_yuv(planes, cx, cy + ry * 0.95, rx * 0.42, ry * 0.4, SKIN_LUMA - 10, SKIN_CHROMA)
+    fill_ellipse_yuv(planes, cx, cy - ry * 0.12, rx * 1.06, ry * 0.98, HAIR_LUMA)
+    fill_ellipse_yuv(planes, cx, cy + ry * 0.05, rx, ry * 0.92, SKIN_LUMA, SKIN_CHROMA)
+    # Features move with the pose: a turn shifts them sideways, looking up shifts them up.
+    ox, oy = pose["yaw"] * 0.28 * rx, pose["pitch"] * 0.22 * ry
+    ex, ey = 0.38 * rx, cy - 0.12 * ry + oy
+    for side in (-1, 1):
+        x = cx + ox + side * ex
+        if pose["closed"]:
+            fill_ellipse_yuv(planes, x, ey, 0.17 * rx, 0.025 * ry, PUPIL_LUMA)
+        else:
+            fill_ellipse_yuv(planes, x, ey, 0.17 * rx, 0.075 * ry, EYE_WHITE_LUMA, (128, 128))
+            fill_ellipse_yuv(planes, x + ox * 0.15, ey, 0.07 * rx, 0.07 * ry, PUPIL_LUMA)
+        # Eyebrows.
+        fill_ellipse_yuv(planes, x, ey - 0.16 * ry, 0.2 * rx, 0.025 * ry, HAIR_LUMA)
+    fill_ellipse_yuv(planes, cx + ox * 1.2, cy + 0.15 * ry + oy, 0.1 * rx, 0.06 * ry, SKIN_LUMA - 30)
+    mx, my = cx + ox, cy + 0.45 * ry + oy
+    if pose["smile"]:
+        fill_ellipse_yuv(planes, mx, my - 0.03 * ry, 0.42 * rx, 0.14 * ry, MOUTH_LUMA, lower_only=True)
+        fill_ellipse_yuv(planes, mx, my - 0.03 * ry, 0.36 * rx, 0.05 * ry, EYE_WHITE_LUMA, lower_only=True)
+    else:
+        fill_ellipse_yuv(planes, mx, my, 0.26 * rx, 0.04 * ry, MOUTH_LUMA)
+
+
+def write_y4m(path: str, frames: int, fps: int, size: tuple[int, int], planes: tuple[Plane, Plane, Plane], rng: random.Random,
+              poses: list[tuple[Plane, Plane, Plane]] | None = None) -> None:
+    """Writes the frames; with `poses`, frame i shows pose i * len(poses) // frames (each held as long)."""
     w, h = size
     y_plane, u_plane, v_plane = planes
     phases = [rng.random() * 6.28 for _ in range(6)]
@@ -416,6 +515,8 @@ def write_y4m(path: str, frames: int, fps: int, size: tuple[int, int], planes: t
             if lut is None:
                 lut = luts[gain] = bytes(clamp8(16 + (v - 16) * (1 + gain / 1000) + 0.5) for v in range(256))
             x0, y0 = MARGIN + dx, MARGIN + dy
+            if poses:
+                y_plane, u_plane, v_plane = poses[i * len(poses) // frames]
             f.write(b"FRAME\n")
             f.write(b"".join(bytes(row[x0 : x0 + w]).translate(lut) for row in y_plane.rows[y0 : y0 + h]))
             cx0, cy0 = (MARGIN + dx) // 2, (MARGIN + dy) // 2  # chroma is half resolution
@@ -426,7 +527,7 @@ def write_y4m(path: str, frames: int, fps: int, size: tuple[int, int], planes: t
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("output", help="the .y4m file to write")
-    parser.add_argument("--variant", choices=["sharp", "blurred", "smudged", "none"], default="sharp")
+    parser.add_argument("--variant", choices=["sharp", "blurred", "smudged", "none", "face"], default="sharp")
     parser.add_argument("--document", choices=sorted(DOCUMENTS), default="id1", help="card shape and content")
     parser.add_argument("--size", default="1280x720", help="video size WxH (even numbers)")
     parser.add_argument("--fps", type=int, default=30)
@@ -457,6 +558,24 @@ def main(argv: list[str]) -> int:
     u_plane = Plane(sw // 2, sh // 2, BG_CHROMA[0])
     v_plane = Plane(sw // 2, sh // 2, BG_CHROMA[1])
     draw_table(y_plane, rng)
+
+    if args.variant == "face":
+        # A wall: the table's texture, lifted to WALL_LUMA, grey. Then one picture per pose.
+        lift = bytes(clamp8(v + WALL_LUMA - BG_LUMA) for v in range(256))
+        y_plane.rows = [bytearray(bytes(r).translate(lift)) for r in y_plane.rows]
+        for plane in (u_plane, v_plane):
+            plane.rows = [bytearray([128]) * plane.width for _ in range(plane.height)]
+        ox, oy, ow, oh = cover_guide_to_source(oval_in_view(view), view, (w, h))
+        face = (MARGIN + ox, MARGIN + oy, ow, oh)
+        poses = []
+        for pose in POSES:
+            planes = copy_planes((y_plane, u_plane, v_plane))
+            draw_face(planes, face, pose)
+            poses.append(planes)
+        frames = max(1, round(args.fps * args.seconds))
+        write_y4m(args.output, frames, args.fps, (w, h), poses[0], rng, poses)
+        print(f"{args.output}: face {w}x{h} {frames} frames; face box x={ox:.1f} y={oy:.1f} w={ow:.1f} h={oh:.1f} (video pixels)")
+        return 0
 
     gx, gy, gw, gh = cover_guide_to_source(guide, view, (w, h))
     cw, ch = gw * args.fill, gh * args.fill

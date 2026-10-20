@@ -6,7 +6,11 @@ import {
   type ConsentRequest,
   type DocumentTypeRequest,
   type FlowChecks,
+  type FlowResult,
   type FlowSession,
+  type LivenessCaptureRequest,
+  type LivenessCaptureResponse,
+  type LivenessChallengeResponse,
   type MrzReportRequest,
   type MrzReportResponse,
   type UploadUrlRequest,
@@ -24,7 +28,13 @@ export interface FlowApi {
   reportMrz(body: MrzReportRequest): Promise<MrzReportResponse>;
   /** The server's check of each photo sent (M3). `signal` abandons the request (time is up). */
   getChecks(signal?: AbortSignal): Promise<FlowChecks>;
+  /** M5: a new face-check challenge, with its upload slots. */
+  livenessChallenge(): Promise<LivenessChallengeResponse>;
+  /** M5: the report of a face check's frames, once they are uploaded. */
+  recordLiveness(body: LivenessCaptureRequest): Promise<LivenessCaptureResponse>;
   submit(): Promise<FlowSession>;
+  /** After the submit: verified, pending or review (automatic approval). `signal` abandons the request. */
+  getResult(signal?: AbortSignal): Promise<FlowResult>;
 }
 
 export interface FlowApiOptions {
@@ -104,6 +114,9 @@ export function createFlowApi(options: FlowApiOptions): FlowApi {
     completeCapture: (body) => call<CaptureCompleteResponse>("POST", "/captures", body),
     reportMrz: (body) => call<MrzReportResponse>("POST", "/mrz", body),
     getChecks: (signal) => call<FlowChecks>("GET", "/checks", undefined, signal),
+    livenessChallenge: () => call<LivenessChallengeResponse>("POST", "/liveness/challenge", {}),
+    recordLiveness: (body) => call<LivenessCaptureResponse>("POST", "/liveness/captures", body),
     submit: () => call<FlowSession>("POST", "/submit", {}),
+    getResult: (signal) => call<FlowResult>("GET", "/result", undefined, signal),
   };
 }

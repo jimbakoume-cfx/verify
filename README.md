@@ -3,7 +3,7 @@
 In-house identity verification (KYC) for Confiance riders. It is a standalone web platform that the Confiance ride-hailing app connects to through an API. Nothing is sent to outside KYC vendors.
 
 - **Plan (approved):** [`docs/PLAN.md`](docs/PLAN.md)
-- **Milestone specs:** [`docs/M1_SPEC.md`](docs/M1_SPEC.md) (ID capture), [`docs/M2_SPEC.md`](docs/M2_SPEC.md) (MRZ reading), [`docs/M3_SPEC.md`](docs/M3_SPEC.md) (the AI worker's server checks)
+- **Milestone specs:** [`docs/M1_SPEC.md`](docs/M1_SPEC.md) (ID capture), [`docs/M2_SPEC.md`](docs/M2_SPEC.md) (MRZ reading), [`docs/M3_SPEC.md`](docs/M3_SPEC.md) (the AI worker's server checks), [`docs/M4_SPEC.md`](docs/M4_SPEC.md) (consistency), [`docs/M5_SPEC.md`](docs/M5_SPEC.md) (face check capture), [`docs/M6_SPEC.md`](docs/M6_SPEC.md) (liveness evaluation), [`docs/M7_SPEC.md`](docs/M7_SPEC.md) (face match), [`docs/M8_SPEC.md`](docs/M8_SPEC.md) (risk and decisions)
 - **Licence register:** [`docs/LICENSES.md`](docs/LICENSES.md)
 - **Threat model:** [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md)
 
@@ -12,13 +12,15 @@ In-house identity verification (KYC) for Confiance riders. It is a standalone we
 | Folder | What it is |
 |---|---|
 | `apps/rider` | The rider's verification flow (mobile web page, FR/EN), hosted on Vercel: https://confiance-verify.vercel.app. Since M2 it also reads the code lines (MRZ) on the phone, with a reading engine and model served from the site itself under `/ocr/` (`public/ocr/`, `src/mrz/`). Since M3 it waits for the server's check of the photos ("Checking your photos…") and retakes a photo the server cannot use. Since M4 it says when the document has expired, and test sessions read the code lines with our own model (`/ocr/mrz-2/`). |
-| `apps/dashboard` | The internal ops dashboard for the KYC team, hosted on Vercel: https://confiance-verify-ops.vercel.app. Since M3 the case page shows the server's checks and the data read by the server; since M4 the consistency of the document's data, with the hard flags in red. |
+| `apps/dashboard` | The internal ops dashboard for the KYC team, hosted on Vercel: https://confiance-verify-ops.vercel.app. Since M3 the case page shows the server's checks and the data read by the server; since M4 the consistency of the document's data, with the hard flags in red; since M8 the risk score and recommendation, staff decisions, and the admins' thresholds page (`docs/M8_SPEC.md`); since M6/M7 the server's face checks (liveness per action, the flat-plane signal, the face match with its uncalibrated threshold, and the ID portrait beside the best frame through the audited viewer). |
 | `packages/capture` | The camera quality engine: blur, glare, brightness and framing checks, card detection, auto-capture, compression. Since M2 it also finds the code lines on the photo and prepares them for reading (`src/mrz/`). Pure TypeScript, runs in the rider's browser. |
 | `packages/shared` | Code shared by both apps: languages, branding, Supabase connection, and the HTTP contract and MRZ parser re-exported from `supabase/functions/_shared/` |
-| `supabase/functions` | Edge Functions: `flow` (the rider's session API), `admin` (staff enrollment, test sessions, audited photo links, audited "data read" views) and, since M3, `worker` (the AI worker's signed API: claim a job, fetch its photo, send the result; all decisions are made here). `_shared/mrz.ts` and `_shared/mrzCorrect.ts` are our MRZ parser and look-alike correction, used by the phone, the server and the dashboard alike. |
+| `supabase/functions` | Edge Functions: `flow` (the rider's session API), `admin` (staff enrollment, test sessions, audited photo links, audited "data read" views) since M3, `worker` (the AI worker's signed API: claim a job, fetch its photo, send the result; all decisions are made here) and, since M6/M7, `face` (the face worker's signed API, the same protocol: liveness and face match are decided here). `_shared/mrz.ts` and `_shared/mrzCorrect.ts` are our MRZ parser and look-alike correction, used by the phone, the server and the dashboard alike. |
 | `supabase/migrations` | Database structure and security rules, applied to Supabase |
 | `supabase/tests` | Automatic tests proving the security rules work |
 | `worker` | **The AI worker (M3):** Python 3.12, one Vercel function (`api/process.py`, project `confiance-verify-worker`, Paris region). Re-checks photo quality, re-reads the code lines, gathers evidence of the document type and reads a few printed fields, with RapidOCR. See [`worker/README.md`](worker/README.md). |
+| `worker-face` | **The face worker (M6/M7):** a second Vercel Python function (`api/process.py`, project `confiance-verify-face`, Paris region). MediaPipe Face Landmarker's models on LiteRT measure the face check (head pose, blink, smile, the flat-plane and same-face tests, provisional screen cues); AuraFace (test sessions only) compares the best frame with the ID portrait. Models are fetched at build time, pinned by SHA-256. See [`worker-face/README.md`](worker-face/README.md). |
+| `training/antispoof` | Data-collection notes, a manifest builder and a training stub for our own screen and print detectors (M6); nothing trained yet. |
 | `training/mrz` | **Our own MRZ reading model (M3):** the reproducible training recipe, its pinned inputs and its acceptance gates, and since M4 the two runs' gate reports (`results/`). Runs on a training machine only. See [`training/mrz/README.md`](training/mrz/README.md). |
 | `e2e` | Browser tests (Playwright) with a fake camera; `e2e/fixtures/mrz` holds the MRZ test images, `e2e/fixtures/specimens` the worker's fictitious specimen documents (M3) |
 | `scripts` | Licence check, database test runner, the fake-camera video, MRZ test-image and specimen-document generators, and the fonts used only to draw those images (OCR-B, and Inter since M3) |
@@ -32,8 +34,11 @@ In-house identity verification (KYC) for Confiance riders. It is a standalone we
 | M1: ID capture | Done |
 | M2: MRZ reading | Done |
 | M3: AI worker (the server re-checks the photos, re-reads the code lines from the image, recognises the document, reads printed text; our own MRZ model's training) | Done |
-| **M4**: consistency checks and first risk flags (expired document, under 18, printed data vs code lines, date logic); our own MRZ model on test sessions | In review |
-| M5: active liveness capture | Next |
+| M4: consistency checks and first risk flags (expired document, under 18, printed data vs code lines, date logic); our own MRZ model on test sessions | Done |
+| **M5**: active liveness capture (face check after the document photos: a random challenge, 13 small frames, recorded and shown on the dashboard) | In review (`docs/M5_SPEC.md`) |
+| **M6**: server-side liveness evaluation (the challenge's actions re-checked from face landmarks, the flat-plane check, the same face throughout, provisional screen and print cues) on a second worker | Built, not deployed (`docs/M6_SPEC.md`) |
+| **M7**: face match between the best frame and the ID portrait (AuraFace, test sessions only, uncalibrated, always review-only) | Built, not deployed (`docs/M7_SPEC.md`) |
+| **M8**: risk score, editable thresholds and staff decisions (every case still goes to a person; a face match never helps approve) | In review (`docs/M8_SPEC.md`) |
 
 ## Before you test (once)
 1. An administrator creates your invite (see the comment at the top of `supabase/migrations/20261014000000_m1_capture.sql`) and gives you the one-time code. Use the role **supervisor**: admins cannot open ID photos or the data read from them, by design.
@@ -105,7 +110,7 @@ npm run dev:dashboard
 npm test                 # unit tests, including real MRZ reading on the test images (about 5 s)
 npm run typecheck
 npm run licenses         # commercial-licence check
-npx deno check supabase/functions/flow/index.ts supabase/functions/admin/index.ts supabase/functions/worker/index.ts supabase/functions/*/*.test.ts
+npx deno check supabase/functions/flow/index.ts supabase/functions/admin/index.ts supabase/functions/worker/index.ts supabase/functions/face/index.ts supabase/functions/*/*.test.ts
 npx deno lint supabase/functions                     # Edge Functions (Deno is a dev dependency)
 DATABASE_URL=postgres://postgres:pw@localhost:5432/postgres scripts/test-db.sh   # schema + security-rule tests (disposable Postgres only; PostgreSQL 16 or later)
 ```
@@ -119,6 +124,19 @@ uv run pytest                # everything, including the real OCR on the specime
 uv run pytest -m "not ocr"   # without the OCR models (seconds)
 uv lock --check
 ```
+
+The face worker (Python 3.12, uv; the models are not in git):
+
+```bash
+cd worker-face
+uv sync
+python3 scripts/fetch_models.py   # downloads the two models (about 265 MB) into models/, checks their SHA-256
+uv run pytest                     # everything; the tests marked "models" are skipped without the models
+uv run pytest -m "not models"     # without the models, as in CI (seconds)
+uv lock --check
+```
+
+The face tests use drawn faces only (`tests/synthface.py`): never commit a photograph of a real person.
 
 The worker's specimen photos in `e2e/fixtures/specimens` are committed. To change them, run `uv run python ../scripts/make-specimens.py` from `worker/` and commit the result. The MRZ model's training is described in `training/mrz/README.md`; it runs for hours on a training machine, never in CI.
 
@@ -135,7 +153,7 @@ To publish: build the app with `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABL
 
 The rider build also writes the reading engine's files into `dist/ocr/7.0.0/`, next to the model in `dist/ocr/mrz-1/`. These paths are cached by phones for a year, so a new engine or model version must get a new folder name (see `apps/rider/src/mrz/types.ts`).
 
-Apply a milestone's database migration before publishing its dashboard: since M2 the case page reads `check_result.capture_id`, since M3 `capture.superseded_by` and the server checks, and since M4 the `consistency` check. For M3, deploy the three Edge Functions straight after the migration, in the same sitting: its trigger marks a replaced photo erased, but only the M3 `flow` function removes the file (order and checks: `docs/M3_SPEC.md`, "Deploy notes").
+Apply a milestone's database migration before publishing its dashboard: since M2 the case page reads `check_result.capture_id`, since M3 `capture.superseded_by` and the server checks, since M4 the `consistency` check, since M5 `capture.liveness_challenge_id` and the `liveness_capture` check, since M8 the risk columns of `verification` and `decision`, and since M6/M7 `face_job` and the `liveness` and `face_match` checks. For M3, deploy the three Edge Functions straight after the migration, in the same sitting: its trigger marks a replaced photo erased, but only the M3 `flow` function removes the file (order and checks: `docs/M3_SPEC.md`, "Deploy notes").
 
 The sites themselves hold no data: riders need a session link from staff, and the dashboard needs a staff sign-in.
 
@@ -147,10 +165,18 @@ The sites themselves hold no data: riders need a session link from staff, and th
 
 Vercel's firewall allows only `POST /api/process` and rate-limits it (per IP address, at least 30 requests a minute, so that our own rings never meet the limit). Deploy steps, and the SQL to add or revoke a key, turn on real sessions or change the daily cap: `docs/M3_SPEC.md` ("Deploy notes", "Operating the worker"). **Real sessions stay off** (`worker_settings.enabled_for_real_sessions = false`) until Vercel Pro and its DPA are in place.
 
-### Edge Function settings (Supabase secrets)
-All three functions (`flow`, `admin`, `worker`) are deployed with `verify_jwt = false` (`supabase/config.toml`): they check the rider's session token, the staff member's sign-in or the worker's signature themselves. Supabase provides `SUPABASE_URL` and the service key.
+**The face worker** (M6/M7) is a fourth Vercel project, `confiance-verify-face`, root folder `worker-face/`, region Paris (`cdg1`), no Git deployments, 2048 MB of memory. Its build command (`python3 scripts/fetch_models.py`) downloads the two models from pinned URLs and checks their SHA-256; the function is about 479 MB, under Vercel's 500 MB. Production-only variables:
+- `SUPABASE_FACE_URL` (`https://<project-ref>.supabase.co/functions/v1/face`);
+- `SUPABASE_PUBLISHABLE_KEY` (public);
+- `FACE_WORKER_KEY_ID` = `f1`;
+- `FACE_WORKER_SIGNING_KEY`: **secret**, marked sensitive. Its public half goes into `worker_key` with scope `face`.
 
-The hosted **test** environment needs no secrets: when `ALLOWED_ORIGINS`, `RIDER_APP_URL` or `WORKER_RING_URL` is unset, the functions fall back to the public test URLs in `supabase/functions/_shared/environment.ts`. **Production must set them explicitly:**
+The same firewall rules as the AI worker. Exact deploy steps, the key's generation and the SQL to operate it: `docs/M6_SPEC.md` ("Deploy notes"). **Real sessions stay off** for liveness (`worker_settings.face_enabled_for_real_sessions = false`); the face match never runs on a real session.
+
+### Edge Function settings (Supabase secrets)
+All four functions (`flow`, `admin`, `worker`, `face`) are deployed with `verify_jwt = false` (`supabase/config.toml`): they check the rider's session token, the staff member's sign-in or the worker's signature themselves. Supabase provides `SUPABASE_URL` and the service key.
+
+The hosted **test** environment needs no secrets: when `ALLOWED_ORIGINS`, `RIDER_APP_URL`, `WORKER_RING_URL` or `FACE_RING_URL` is unset, the functions fall back to the public test URLs in `supabase/functions/_shared/environment.ts`. **Production must set them explicitly:**
 
 | Secret | Value | Used by |
 |---|---|---|
@@ -158,8 +184,9 @@ The hosted **test** environment needs no secrets: when `ALLOWED_ORIGINS`, `RIDER
 | `RIDER_APP_URL` | `https://confiance-verify.vercel.app` | `admin`: base of the rider link (`<RIDER_APP_URL>/#s=<token>`) |
 | `TEST_SESSION_TTL_MINUTES` | optional, default `30` | `admin`: lifetime of a test session |
 | `WORKER_RING_URL` | `https://confiance-verify-worker.vercel.app/api/process` (HTTPS only) | `flow` (M3): the AI worker's doorbell, rung after each photo. Without it, photos wait for the database's sweep (up to a minute). The sweep's own copy of the address is in Vault (`worker_ring_url`), written by the M3 migration. |
+| `FACE_RING_URL` | `https://confiance-verify-face.vercel.app/api/process` (HTTPS only) | `flow` (M6/M7): the face worker's doorbell, rung after a face check is recorded. The sweep's copy is in Vault (`face_ring_url`). |
 
-The `worker` function needs no secret of its own: the worker's public keys are in the database (`worker_key`), and the private key never leaves Vercel.
+The `worker` and `face` functions need no secret of their own: the workers' public keys are in the database (`worker_key`), and the private keys never leave Vercel.
 
 When a required secret is missing, the function refuses the requests that need it and logs a warning at startup.
 

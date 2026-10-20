@@ -1,18 +1,19 @@
-// Final screens: photos received, or a link that can no longer be used.
+// Final screens: photos received (or, after "Continue" on "Your ID is verified", all set), or a link that
+// can no longer be used.
 import { useTranslation } from "react-i18next";
 import type { SessionErrorReason } from "../flow/errors";
 import { CheckIcon, Page, ScreenTitle } from "../ui";
 
-export function DoneScreen() {
+export function DoneScreen({ verified = false }: { verified?: boolean }) {
   const { t } = useTranslation();
   return (
     <Page>
       <div className="end-icon ok" aria-hidden="true">
         <CheckIcon />
       </div>
-      <ScreenTitle>{t("done.title")}</ScreenTitle>
+      <ScreenTitle>{t(verified ? "done.verifiedTitle" : "done.title")}</ScreenTitle>
       <section className="card">
-        <p>{t("done.next")}</p>
+        {!verified && <p>{t("done.next")}</p>}
         <p className="muted">{t("done.close")}</p>
       </section>
     </Page>

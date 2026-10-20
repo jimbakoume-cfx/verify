@@ -8,7 +8,9 @@ export function env(name: string): string | undefined {
   return Deno.env.get(name) ?? undefined;
 }
 
-export function loadConfig(options: { needsRiderAppUrl?: boolean; needsWorkerRingUrl?: boolean } = {}): FunctionConfig {
+export function loadConfig(
+  options: { needsRiderAppUrl?: boolean; needsWorkerRingUrl?: boolean; needsFaceRingUrl?: boolean } = {},
+): FunctionConfig {
   const config = readConfig(withDefaults(env, TEST_ENVIRONMENT_DEFAULTS));
   for (const problem of configProblems(config, options)) {
     console.warn(JSON.stringify({ level: "warn", event: "config", problem }));

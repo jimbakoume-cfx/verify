@@ -34,7 +34,7 @@
     "placeholderBadge": "Texte provisoire",
     "placeholderNote": "Ce texte sert uniquement aux tests. Le texte définitif sera rédigé par notre juriste.",
     "whatTitle": "Ce que nous collectons",
-    "what": "Des photos de votre pièce d'identité (recto, et verso si nécessaire), et les informations lues dans ses lignes de code (nom, numéro, dates). Plus tard, un court contrôle de votre visage devant la caméra.",
+    "what": "Des photos de votre pièce d'identité (recto, et verso si besoin), et les informations lues dans ses lignes de code (nom, numéro, dates). Puis une courte vérification du visage : environ 13 images fixes prises par la caméra avant de votre téléphone pendant que vous faites quelques mouvements, pour confirmer qu'une vraie personne est présente et, plus tard, pour comparer votre visage avec la photo de votre pièce.",
     "whyTitle": "Pourquoi",
     "why": "Pour confirmer que vous êtes bien la personne que vous dites être, pour la sécurité des passagers et des chauffeurs.",
     "howTitle": "Comment elles sont protégées",
@@ -45,7 +45,9 @@
     "rights": "Vous pouvez demander à voir ou à supprimer vos données en contactant le service client de Confiance.",
     "checkbox": "J'ai lu ces informations et j'accepte que Confiance vérifie mon identité avec ces photos.",
     "accept": "Continuer",
-    "decline": "Je refuse"
+    "decline": "Je refuse",
+    "keepFaces": "Facultatif : j'accepte que Confiance conserve les images de mon visage pour améliorer et régler ses vérifications. Elles sont supprimées si je le demande.",
+    "keepFacesOptional": "(Vous pouvez laisser cette case vide : votre vérification se déroule de la même façon.)"
   },
   "declined": {
     "title": "Vous avez refusé",
@@ -177,10 +179,42 @@
       "continue": "Continuer quand même"
     }
   },
+  "liveness": {
+    "title": "Vérification du visage",
+    "subtitle": "Caméra avant",
+    "tip": "Tenez le téléphone à hauteur des yeux, le visage dans l'ovale.",
+    "start": "Commencer la vérification",
+    "preparing": "Préparation…",
+    "lookStraight": "Regardez droit vers la caméra",
+    "actions": {
+      "turn_left": "Tournez lentement la tête vers la gauche",
+      "turn_right": "Tournez lentement la tête vers la droite",
+      "look_up": "Levez lentement les yeux vers le haut",
+      "blink": "Clignez des yeux",
+      "smile": "Souriez"
+    },
+    "stepOf": "Étape {{step}} sur {{total}}",
+    "code": "Code {{code}}",
+    "holdPhone": "Gardez le visage dans l'ovale",
+    "hints": {
+      "checking": "Placez votre visage dans l'ovale",
+      "ready": "Prêt : appuyez sur Commencer",
+      "too_dark": "Trop sombre : tournez-vous vers une lumière ou une fenêtre",
+      "too_bright": "Trop lumineux : évitez le soleil direct",
+      "backlit": "La lumière est derrière vous : tournez-vous vers elle",
+      "no_face": "Placez votre visage dans l'ovale"
+    },
+    "sending": "Envoi de votre vérification du visage…",
+    "sent": "Vérification du visage reçue",
+    "failedTitle": "La vérification du visage n'a pas abouti",
+    "startAgain": "Recommencer la vérification",
+    "noCamera": "Nous n'avons pas trouvé de caméra avant sur cet appareil. Utilisez un téléphone avec une caméra avant."
+  },
   "done": {
     "title": "Photos reçues",
-    "next": "Prochaine étape : le contrôle du visage (arrive en M5).",
-    "close": "Vous pouvez maintenant revenir à l'application Confiance."
+    "next": "Nous avons reçu les photos de votre pièce et votre vérification du visage. Confiance va les vérifier.",
+    "close": "Vous pouvez maintenant revenir à l'application Confiance.",
+    "verifiedTitle": "C'est tout bon"
   },
   "sessionError": {
     "invalidTitle": "Lien non valide",
@@ -219,12 +253,23 @@
     "audit_failed": "L'action n'a pas pu être enregistrée. Réessayez.",
     "invalid_invite": "L'adresse e-mail ou le code d'invitation n'est pas valide.",
     "weak_password": "Le mot de passe ne respecte pas les règles.",
+    "already_decided": "Cette vérification a déjà été décidée.",
+    "not_submitted": "Cette vérification n'a pas encore été envoyée.",
+    "note_required": "Une note est requise pour cette décision de l'équipe.",
+    "invalid_reason": "Le motif donné n'est pas valide.",
+    "stale_version": "Les réglages ont changé entre-temps. Veuillez réessayer.",
     "server_error": "Le serveur a rencontré un problème. Réessayez.",
     "network": "Pas de connexion au serveur. Vérifiez vos données mobiles, puis réessayez.",
     "timeout": "Le serveur met trop de temps à répondre. Vérifiez votre connexion, puis réessayez.",
     "not_configured": "Cette version de test n'est reliée à aucun serveur.",
     "unexpected": "Une erreur s'est produite. Réessayez.",
-    "storage_failed": "La photo n'a pas pu être envoyée. Réessayez."
+    "storage_failed": "La photo n'a pas pu être envoyée. Réessayez.",
+    "liveness_required": "La vérification du visage manque. Merci de la refaire.",
+    "too_many_challenges": "Trop de vérifications du visage ont été commencées pour cette vérification. Retournez dans l'application Confiance pour recommencer.",
+    "challenge_expired": "Cette vérification du visage a pris trop de temps. Merci de la recommencer.",
+    "challenge_used": "Cette vérification du visage a déjà été envoyée. Merci de la recommencer.",
+    "invalid_liveness": "Les images de la vérification du visage n'ont pas pu être utilisées. Merci de la recommencer.",
+    "interrupted": "La vérification du visage a été interrompue. Recommencez-la en gardant cette page ouverte."
   },
   "debug": {
     "title": "Débogage",
@@ -284,11 +329,23 @@
       },
       "lines": "Lignes corrigées",
       "raw": "Texte brut de l'OCR"
-    }
+    },
+    "contrast": "contraste",
+    "backlight": "contre-jour"
   },
   "fatal": {
     "title": "Un problème est survenu",
     "text": "Rechargez la page pour continuer. Votre lien reste valable.",
     "reload": "Recharger"
+  },
+  "result": {
+    "pendingTitle": "Vérification de votre pièce d'identité…",
+    "pendingBody": "Cela prend en général moins d'une minute.",
+    "keepOpen": "Gardez cette page ouverte.",
+    "verifiedTitle": "Votre pièce d'identité est vérifiée ✓",
+    "verifiedBody": "Merci. Vous pouvez continuer.",
+    "continue": "Continuer",
+    "reviewTitle": "Nous vérifions quelques détails…",
+    "reviewBody": "Nous vérifions quelques détails, nous vous tiendrons informé."
   }
 }

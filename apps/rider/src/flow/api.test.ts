@@ -38,6 +38,17 @@ describe("createFlowApi", () => {
       attempts: 2,
       engine: "tesseract.js-7.0.0/mrz-1",
     });
+    await api.livenessChallenge();
+    const report = {
+      challengeId: "c0ffee00-0000-4000-8000-000000000002",
+      code: "123456",
+      frames: [],
+      stepStartsMs: [0, 1500, 4500, 7500],
+      startedWithWarning: false,
+      videoWidth: 480,
+      videoHeight: 640,
+    };
+    await api.recordLiveness(report);
     await api.submit();
     const calls = fetchMock.mock.calls.map(([url, init]) => [String(url).slice(BASE.length), init?.method, init?.body]);
     expect(calls).toEqual([
@@ -55,6 +66,8 @@ describe("createFlowApi", () => {
           engine: "tesseract.js-7.0.0/mrz-1",
         }),
       ],
+      ["/liveness/challenge", "POST", "{}"],
+      ["/liveness/captures", "POST", JSON.stringify(report)],
       ["/submit", "POST", "{}"],
     ]);
     expect((fetchMock.mock.calls[0][1]?.headers as Record<string, string>)["content-type"]).toBe("application/json");
@@ -79,6 +92,15 @@ describe("createFlowApi", () => {
       10,
     );
     await expect(hanging.getSession()).rejects.toMatchObject({ code: "timeout" });
+  });
+
+  it("asks for the result after the submit (automatic approval)", async () => {
+    const result = { state: "verified", returnUrl: "https://ride.example/back" };
+    const fetchMock = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => json(200, result));
+    expect(await apiWith(fetchMock as typeof fetch).getResult()).toEqual(result);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect([String(url).slice(BASE.length), init?.method, init?.body]).toEqual(["/result", "GET", undefined]);
+    expect(init?.cache).toBe("no-store");
   });
 
   it("asks for the server's checks, and stops when the caller gives up", async () => {

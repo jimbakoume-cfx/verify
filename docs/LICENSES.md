@@ -4,7 +4,7 @@
 
 **Automatic checks:**
 - **npm:** CI runs `npm run licenses` (`scripts/check-licenses.mjs`). It fails the build if *any* npm package, direct or indirect, has a licence outside the allowlist.
-- **Python (AI worker, M3):** the worker's packages are pinned with hashes in `worker/uv.lock`. `pip-licenses` reads their declared licences, but it cannot see the native libraries bundled *inside* a wheel, nor code linked statically into one, and several wheels declare only "BSD" or "MIT" while they carry LGPL or GCC-runtime parts. Those parts are therefore listed by hand below, wheel by wheel, and reviewed whenever a version changes. The CI Python job (M3) runs the worker's tests, `uv lock --check` and this licence check.
+- **Python (AI worker, M3):** the worker's packages are pinned with hashes in `worker/uv.lock`. `pip-licenses` reads their declared licences, but it cannot see the native libraries bundled *inside* a wheel, nor code linked statically into one, and several wheels declare only "BSD" or "MIT" while they carry LGPL or GCC-runtime parts. Those parts are therefore listed by hand below, wheel by wheel, and reviewed whenever a version changes. The CI Python job (M3) runs the worker's tests, `uv lock --check` and this licence check. Since M6, the face worker (`worker-face/`) has its own lockfile and table (`scripts/python-licenses-face.toml`), checked the same way by its own CI job.
 - **Everything else:** models, fonts and other files we copy into the repository are checked by hand and recorded below with a checksum.
 
 **Allowed:** MIT, ISC, 0BSD, BSD-2/3-Clause, Apache-2.0, Unlicense, CC0-1.0, BlueOak-1.0.0, Python-2.0 / PSF-2.0, Zlib. Since M3, also MIT-0, MIT-CMU (Pillow's historical PIL licence) and BSL-1.0 (the Boost licence, used by the Clipper code inside pyclipper); all permissive. MPL-2.0 is also allowed: it is "file-level copyleft", meaning we would only have to publish changes made to those files.
@@ -17,7 +17,7 @@
 
 **Forbidden:** GPL, AGPL, SSPL, BUSL, any "non-commercial" / "research-only" licence (e.g. CC BY-NC), and any unknown licence.
 
-## In use now (M0–M4)
+## In use now (M0–M8)
 
 | Component | Version | Licence | Where it runs | Source |
 |---|---|---|---|---|
@@ -55,6 +55,8 @@
 The capture quality engine (`packages/capture`: blur, glare, framing and document detection, and since M2 finding and preparing the code lines for reading) is our own code. It is built on textbook image maths (luma, Laplacian variance, Sobel gradients, Otsu and local-mean thresholds) and uses no third-party image library; the worker's `quality.py` is our own port of it. The MRZ parser and check digits (`supabase/functions/_shared/mrz.ts`) and the look-alike correction (`supabase/functions/_shared/mrzCorrect.ts`, moved there from the rider app in M3 so that the phone and the server share it) are also our own, written from the ICAO 9303 standard. The worker's signing, field reading and classification code are ours too.
 
 The full list of every indirect npm package and its licence is in `package-lock.json`, and is checked on every CI run. M3 adds no npm package; M4 adds no npm or Python package (only our own model file, below).
+
+**M5 (the face check) adds no package and no model.** The phone's checks before the capture (brightness, contrast and backlight inside the oval, `packages/capture/src/selfie.ts`) are our own code; the frames are encoded by the browser's canvas and hashed with WebCrypto. MediaPipe was checked and left out on the phone (see "Planned"). The browser tests' fake front camera is a face we draw ourselves (`scripts/make-fake-camera-video.py --variant=face`: ellipses on a textured wall, generated at test time, never stored in the repository): no photograph, no real person, nothing licensed.
 
 ## AI worker (M3): Python packages, native parts and models
 
@@ -229,6 +231,48 @@ The generic English Tesseract model was tried and is not used: it misread about 
 | **Build tools only:** GNU Make, bash | 4.2+; as installed | GPL-3.0+ | Run tesstrain's Makefile |
 | Doubango `mrz.traineddata` | as above | BSD-3-Clause | The gates' baseline only; never a training input |
 
+## Face worker (M6/M7): Python packages, native parts and models
+The face worker (`worker-face/`, a second Vercel Python function, `M6_SPEC.md`) has its own environment, pinned with hashes in `worker-face/uv.lock` (`exclude-newer` 2026-10-05, the two-week rule). CI runs `scripts/check-python-licenses.py --table scripts/python-licenses-face.toml` on it: every package's declared licence, every native file inside the wheels and both model files must match the reviewed table, or the build fails. The texts that ship without one of their own are in `worker-face/NOTICE` (a test keeps it complete).
+
+### Python packages (runtime)
+| Package | Version | Licence | Note |
+|---|---|---|---|
+| **ai-edge-litert** (LiteRT, formerly TensorFlow Lite, Google) | 2.2.0 | Apache-2.0 | Runs MediaPipe's three face models on the CPU. **Used instead of the `mediapipe` package** (Apache-2.0 too, but its 112 MB native library would push the function over Vercel's 500 MB). Its declared dependencies (tqdm, protobuf, ml-dtypes, backports-strenum, flatbuffers, typing-extensions) are left out by an override: the interpreter imports none of them. The wheel has no licence file: text in `NOTICE`. |
+| **onnxruntime** (Microsoft) | 1.30.0 | MIT | Runs AuraFace. Third-party parts compiled in: its own `ThirdPartyNotices.txt` (Eigen MPL-2.0, protobuf, re2, abseil, flatbuffers…), all permissive or file-level copyleft. |
+| numpy | 2.5.3 | BSD-3-Clause and others (as the AI worker) | bundles OpenBLAS (BSD-3), libgfortran (GPL-3+ with the GCC exception) and libquadmath (LGPL-2.1+), the documented exceptions |
+| pillow | 12.3.0 | MIT-CMU | JPEG decoding only; its bundled libraries as in the AI worker |
+| cryptography, cffi, pycparser | 50.0.2, 2.1.1, 3.0 | Apache-2.0 OR BSD-3-Clause, MIT-0, BSD-3-Clause | Ed25519 signatures |
+| packaging | 26.3 | Apache-2.0 OR BSD-2-Clause | dependency of onnxruntime |
+
+Development only (never on Vercel): pytest, pluggy, iniconfig, Pygments, pip-licenses, prettytable, wcwidth (MIT or BSD).
+
+### Native parts inside the wheels
+- **LiteRT** (`ai_edge_litert/`): the interpreter's bindings and shared runtime, Apache-2.0, with compiled-in Eigen (MPL-2.0), XNNPACK, cpuinfo, pthreadpool (BSD), ruy, gemmlowp, abseil, flatbuffers (Apache-2.0), FP16, farmhash (MIT), fft2d (permissive) and protobuf (BSD-3). The wheel also carries parts the worker never loads: converter and analyzer bindings, a WebGPU accelerator (Dawn, BSD-3), generative-AI ops, command-line tools and NPU plugins (`vendors/`: Google's own Apache-2.0 dispatchers for Google Tensor, Intel, MediaTek, Qualcomm and Samsung NPUs, which load the vendor's SDK only when one is installed; none is in the wheel). Listed in the table file, row by row.
+- **ONNX Runtime**: `libonnxruntime.so`, its provider bridge and pybind11 binding (MIT, BSD-3).
+- **NumPy, Pillow, cryptography:** as for the AI worker (the same versions), with the same exceptions (libgfortran with the GCC exception, libquadmath LGPL-2.1+, dynamic and unmodified).
+
+### Models (fetched at build time; never in git)
+`worker-face/scripts/fetch_models.py` downloads each file from its pinned URL during Vercel's build and refuses it unless its size and SHA-256 match (`verify_face/model_manifest.py`); the worker checks the SHA-256 again when it loads.
+
+| Model | Licence | Source (pinned) | SHA-256 | Status |
+|---|---|---|---|---|
+| **MediaPipe Face Landmarker v1** (`face_landmarker.task`, float16: BlazeFace short-range, Face Mesh V2, Blendshapes V2, the canonical face geometry) | Apache-2.0 (code and model cards) | `storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task`, 3,758,596 bytes | `64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff` | **Green** (`docs/research/FACE_MODELS.md`): Google's own data, model cards with a fairness evaluation across skin tones. All sessions (liveness). The model cards say "out of scope: any form of surveillance or identity recognition"; liveness geometry is neither, **but the face match uses its landmarks to align faces for recognition**: lawyer item 3 below. `verify_face/data/canonical_face.json` and the test mesh are extracted from this file. |
+| **AuraFace v1, `glintr100.onnx` only** (fal.ai, ResNet-100, 512-number embeddings) | Apache-2.0 (as labelled) | `huggingface.co/fal/AuraFace-v1/resolve/af6d057c9b0ec4071d4c49c80e3539258798b609/glintr100.onnx`, 260,694,151 bytes | `a7933ea5330113b01c9b60351d8f4c33003f145d8470ac5f0e52ee2effe25c60` | **Amber. Test sessions only** (PM, 2026-10-19), enforced in the database and in the worker. Differs from InsightFace antelopev2's `glintr100.onnx` (`4ab1d643…534cdf`), so retrained as claimed. |
+
+**Never shipped:** the four other files of `fal/AuraFace-v1` (`scrfd_10g_bnkps.onnx`, `2d106det.onnx`, `1k3d68.onnx`, `genderage.onnx`) are byte for byte InsightFace's **non-commercial** antelopev2 files, relabelled Apache-2.0 in that repository. They are never fetched; their hashes and InsightFace's own `glintr100.onnx` are in `FORBIDDEN_SHA256`, refused by the fetch script and the loader whatever the file is called.
+
+### Our own parts
+The face pipeline is ours: MediaPipe's detection and landmark pre- and post-processing re-written from its published graphs (`verify_face/landmarks.py`), head pose, the flat-plane and same-face tests, the passive cues, the alignment and the decisions. The test faces are drawn by our code from MediaPipe's canonical mesh (`tests/synthface.py`): **no photograph of a real person is in the repository.** `training/antispoof/` (a manifest and a training stub) uses only the standard library.
+
+### For the lawyer (M6/M7)
+1. **AuraFace's training data is undisclosed** ("a commercial dataset comprising face images from various sources"). Ask fal.ai in writing for the dataset's name, its licence and the consent basis of the people in it, and for a warranty. Until then, test sessions only.
+2. **AuraFace's repository relabels InsightFace's non-commercial files as Apache-2.0.** We ship only the retrained file (verified by hash), but this lowers our trust in the repository's licence claims as a whole. Does an Apache-2.0 label on weights protect us from claims arising from the training data, or from the people photographed (GDPR-style biometric rules, BIPA-type claims, Cameroon's Law 2024-017 on personal data)?
+3. **MediaPipe's model cards** exclude "identity recognition" from the intended uses. Our liveness use is geometry; the face match uses the landmarks only to align the two faces before AuraFace compares them. Is that within the Apache-2.0 licence regardless (the card is guidance, not a licence term), as we believe?
+4. **Biometric data of riders:** comparing a selfie with the ID portrait processes biometric data. Consent wording (placeholder-v2 mentions it), a DPIA, the legal basis, retention of the frames, and the transfer to Vercel (US company, Paris region).
+5. **Training consent:** the "keep my face images" box (M5) is the only basis for training our own detectors or model; its wording, purpose limitation, retention and deletion on request.
+
+**Decision recorded (PM, 2026-10-19): before the pilot, the face match moves off AuraFace** to one of: (a) a paid commercial licence (InsightFace `buffalo_l` or similar, measured by NIST), (b) an on-premise vendor SDK with good West-Africa numbers in NIST FRTE (no image leaves our hosting), or (c) our own model, trained on a commercially licensed set and fine-tuned on consented riders. Quotes for (a) and (b) to be requested; training consent for (c) is in the volunteer form's draft. The model name is recorded with each result (`model_id`), so the switch needs no data migration.
+
 ## Planned (to be verified and recorded when added)
 
 | Component | Milestone | Expected licence | Status / caveat |
@@ -236,10 +280,10 @@ The generic English Tesseract model was tried and is not used: it misread about 
 | Our own MRZ reading model for **every** session (replaces Doubango's) | After G4 | Apache-2.0 (run 2, derived from `eng`) | Shipped for test sessions since M4 (see "MRZ reading"); the lawyer's review of `eng`'s provenance is pending. |
 | Slim OpenCV build (from source, no FFmpeg, IPP, ITT or OpenBLAS) | Before the pilot (M14) | Apache-2.0 | Removes every exception listed for the OpenCV wheel |
 | omegaconf 2.4.0 (drops antlr4), rapidocr 3.10.0 (headless OpenCV by default) | When at least two weeks old (after 2026-10-23 and 2026-10-22) | BSD-3-Clause, Apache-2.0 | Never install `rapidocr[rtl]`: it pulls python-bidi (LGPL) |
-| OpenCV YuNet face detector | M5 | MIT | — |
-| MediaPipe Face Landmarker | M5 | Apache-2.0 | — |
-| MiniVision Silent-Face-Anti-Spoofing | M6 | Apache-2.0 | — |
-| OpenCV SFace / dlib ResNet face recognition | M7 | Apache-2.0 / public domain (CC0) | **The lawyer must review the provenance of the training data.** Benchmark on Cameroonian faces before use. |
+| **MediaPipe** on the phone, `@mediapipe/tasks-vision` (npm) | Only if it becomes cheap enough (on the server since M6: see "Face worker") | Apache-2.0 (code); **Apache-2.0 on the model card** (BlazeFace short-range card, checked 2026-10-19: "LICENSED UNDER Apache License, Version 2.0") | **The only face detector allowed** (PM, 2026-10-19; green in `docs/research/FACE_MODELS.md`). Checked for M5 and **not used on the phone**: `@mediapipe/tasks-vision` 1.1.1 carries a 13.5 MB WebAssembly engine (3.9 MB compressed), plus the 230 KB model, too heavy for every rider's first visit on low-end Android over slow networks. Model card caveats for the lawyer: "out of scope: any form of surveillance or identity recognition", "not intended for human life-critical decisions", "primary intended application is entertainment and assistive technologies". Our use (face presence and liveness geometry) is neither recognition nor surveillance, but the lawyer should confirm. |
+| MiniVision Silent-Face-Anti-Spoofing | Allowed by the PM (2026-10-19) as a low-weight signal, test sessions only; **not shipped in M6** | Apache-2.0 (code and weights) | PyTorch only (a 2020 model to export to ONNX); its training data is undisclosed (possibly CelebA-Spoof, non-commercial). To reconsider with our first consented attack captures. |
+| Our own screen and print detectors | After consented attack captures exist (`training/antispoof/`) | Ours | Trained only on cases whose consent ticked `keep_face_images` and on volunteers' own attacks |
+| The face match model for the pilot (paid licence, vendor SDK or our own) | Before the pilot (M14) | To be decided | PM decision 2026-10-19; see "Face worker", "For the lawyer" |
 | scikit-learn | Phase 2 | BSD-3-Clause | — |
 
 ## Rejected on purpose
@@ -247,7 +291,11 @@ The generic English Tesseract model was tried and is not used: it misread about 
 | Component | Licence | Why rejected |
 |---|---|---|
 | Ultralytics YOLO (v5/v8/v11…) | AGPL-3.0 | Copyleft would force us to publish our service code, or buy an enterprise licence |
-| InsightFace / ArcFace pretrained models (buffalo_l etc.) | Non-commercial | Not allowed for commercial use |
+| InsightFace / ArcFace pretrained models (buffalo_l, antelopev2 etc.), including the four antelopev2 files inside `fal/AuraFace-v1` | Non-commercial | Not allowed for commercial use (a paid licence is one of the pilot options); their hashes are refused by the face worker |
+| OpenCV YuNet face detector | MIT on the weights | Trained on WIDER FACE (CC BY-NC-ND 4.0) with SCRFD labels; PM: not to be used (2026-10-19) |
+| SCRFD face detector | Non-commercial (InsightFace) | PM: not to be used; MediaPipe detects and aligns |
+| OpenCV SFace, dlib ResNet face recognition | Apache-2.0, CC0 on the weights | Trained on non-commercial or web-scraped sets (`docs/research/FACE_MODELS.md`); AuraFace chosen for test sessions instead |
+| `mediapipe` (PyPI package) on the face worker | Apache-2.0 | Allowed, but too large for Vercel beside AuraFace (112 MB library); we run the same models on LiteRT |
 | `mrz` (Python) | GPL-3.0 | We write our own ICAO 9303 MRZ parser instead |
 | `fastmrz` (Python), `readmrz` | AGPL-3.0; depends on `mrz` | Same reason |
 | **Tesseract on the server** (Debian/Ubuntu packages, or the `tesserocr` wheel) | Apache-2.0, but they bring **libjbig (GPL-2+)**; `tesserocr` also requires cysignals (LGPL-3.0+) | The server reads the code lines with RapidOCR instead |

@@ -109,11 +109,20 @@ describe("readConfig", () => {
       RIDER_APP_URL: "https://rider.example",
       TEST_SESSION_TTL_MINUTES: "15",
       WORKER_RING_URL: "https://worker.example/api/process",
+      FACE_RING_URL: "https://face.example/api/process",
     } as Record<string, string>)[name]);
     expect([...config.allowedOrigins]).toEqual(["https://a.example"]);
     expect(config.riderAppUrl).toBe("https://rider.example");
     expect(config.testSessionTtlMinutes).toBe(15);
     expect(config.workerRingUrl).toBe("https://worker.example/api/process");
+    expect(config.faceRingUrl).toBe("https://face.example/api/process");
+  });
+
+  it("refuses a face ring URL that is not plain HTTPS (M6/M7)", () => {
+    const read = (value: string) => readConfig((name) => (name === "FACE_RING_URL" ? value : undefined)).faceRingUrl;
+    expect(read("http://face.example/api/process")).toBeNull();
+    expect(read("https://user:pw@face.example/api/process")).toBeNull();
+    expect(read("https://face.example/api/process?key=1")).toBeNull();
   });
 });
 
@@ -123,6 +132,7 @@ describe("configProblems", () => {
     riderAppUrl: "https://r.example",
     testSessionTtlMinutes: 30,
     workerRingUrl: "https://w.example/api/process",
+    faceRingUrl: "https://f.example/api/process",
   };
 
   it("reports settings that make the functions refuse work", () => {
@@ -135,6 +145,11 @@ describe("configProblems", () => {
   it("reports a missing worker ring URL only where the worker is rung", () => {
     expect(configProblems({ ...good, workerRingUrl: null })).toEqual([]);
     expect(configProblems({ ...good, workerRingUrl: null }, { needsWorkerRingUrl: true })).toHaveLength(1);
+  });
+
+  it("reports a missing face ring URL only where the face worker is rung", () => {
+    expect(configProblems({ ...good, faceRingUrl: null })).toEqual([]);
+    expect(configProblems({ ...good, faceRingUrl: null }, { needsFaceRingUrl: true })).toHaveLength(1);
   });
 });
 
@@ -154,6 +169,7 @@ describe("withDefaults", () => {
       "https://confiance-verify.vercel.app",
     ]);
     expect(config.workerRingUrl).toBe("https://confiance-verify-worker.vercel.app/api/process");
-    expect(configProblems(config, { needsRiderAppUrl: true, needsWorkerRingUrl: true })).toEqual([]);
+    expect(config.faceRingUrl).toBe("https://confiance-verify-face.vercel.app/api/process");
+    expect(configProblems(config, { needsRiderAppUrl: true, needsWorkerRingUrl: true, needsFaceRingUrl: true })).toEqual([]);
   });
 });

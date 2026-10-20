@@ -14,10 +14,13 @@ import type {
   TestSessionResponse,
   WorkerFields,
 } from "@verify/shared";
+import { AUTO_APPROVAL_CONFIG, DEFAULT_THRESHOLD_CONFIG, evaluateRisk, type RiskFacts, type ThresholdConfig } from "@verify/shared";
 import { StaffPages } from "../App";
 import { type DashboardServices, ServicesContext } from "../api/services";
 import type { OpenDocumentData } from "../components/DocumentDataViewer";
 import type { OpenPhoto } from "../components/PhotoViewer";
+import type { LivenessCheckRecord } from "../lib/liveness";
+import type { FaceChecks } from "../lib/faceChecks";
 import type {
   CaptureRecord,
   CheckRecord,
@@ -27,7 +30,10 @@ import type {
   StaffProfile,
   VerificationListItem,
 } from "../lib/records";
+import type { CaseRisk, DecisionRecord, ReasonCodeRecord, ThresholdVersionRecord } from "../lib/risk";
+import { formFromConfig } from "../lib/thresholdForm";
 import { CaseView } from "../screens/CaseView";
+import { ThresholdEditor, ThresholdsPage } from "../screens/Thresholds";
 import { EnrollScreen } from "../screens/Enroll";
 import { LoadingScreen, NoAccessScreen, NotConfiguredScreen } from "../screens/Message";
 import { SignInScreen } from "../screens/SignIn";
@@ -58,8 +64,52 @@ const MISMATCH_CASE_ID = "8f4b2e61-9c3d-4a17-a5e8-0d6b1f7c4e99";
 // M4: an expired passport (a hard flag), and one whose print disagrees with its code lines.
 const EXPIRED_CASE_ID = "4d2a7c90-5b1e-4f36-9a8c-2e6f0b9d3c11";
 const PRINT_MISMATCH_CASE_ID = "1b6e3f82-7d4a-4c59-8e21-5a9c0d7f2e33";
+// M8: a passport a supervisor approved against a reject recommendation.
+const DECIDED_CASE_ID = "6f2c8a14-3e9b-4d07-b5a1-9c4e2f7d0b55";
+// Automatic approval: a clean, firm test passport approved by the system with the version below (4).
+const AUTO_CASE_ID = "8d3e1f52-7a4c-4b19-9e60-2c5b8a7f3d14";
 
-const VERIFICATIONS: VerificationListItem[] = [
+// M8: each submitted case assessed by the real rules (risk.ts) with version 3 of the thresholds below.
+const PREVIEW_CONFIG: ThresholdConfig = { ...DEFAULT_THRESHOLD_CONFIG, rejectMin: 0.8 };
+const LIVENESS_MISSING = ["liveness", "face_match"];
+const RISK_FACTS: Record<string, RiskFacts> = {
+  [CASE_ID]: { declaredDocument: "cni_biometric", signals: [], missing: LIVENESS_MISSING },
+  [PASSPORT_CASE_ID]: { declaredDocument: "passport", signals: ["mrz_disagreement", "quality_poor"], missing: LIVENESS_MISSING },
+  [UNREADABLE_CASE_ID]: { declaredDocument: "cni_biometric", signals: ["mrz_unreadable_server", "mrz_phone_flag"], missing: LIVENESS_MISSING },
+  [NOT_RECEIVED_CASE_ID]: { declaredDocument: "residence_permit", signals: ["manual_review_document", "phone_report_missing"], missing: LIVENESS_MISSING },
+  [UNCHECKED_CASE_ID]: { declaredDocument: "cni_legacy", signals: [], missing: ["server_checks", ...LIVENESS_MISSING] },
+  [MISMATCH_CASE_ID]: { declaredDocument: "cni_biometric", signals: ["type_mismatch", "mrz_invalid_server"], missing: LIVENESS_MISSING },
+  [EXPIRED_CASE_ID]: { declaredDocument: "passport", signals: ["document_expired"], missing: LIVENESS_MISSING },
+  [PRINT_MISMATCH_CASE_ID]: { declaredDocument: "passport", signals: ["mrz_print_mismatch", "under_18", "number_format"], missing: LIVENESS_MISSING },
+  [DECIDED_CASE_ID]: { declaredDocument: "passport", signals: ["mrz_print_mismatch", "date_logic"], missing: LIVENESS_MISSING },
+  [AUTO_CASE_ID]: { declaredDocument: "passport", signals: [], missing: [], reviewOnly: ["face_match"], documentFirm: true, testSession: true },
+};
+const NOT_ASSESSED: CaseRisk = {
+  score: null,
+  recommendation: null,
+  assessment: null,
+  thresholdVersion: null,
+  assessedAt: null,
+  decidedAt: null,
+  autoApprovedAt: null,
+};
+function previewRisk(id: string, status: VerificationListItem["status"]): CaseRisk {
+  const facts = RISK_FACTS[id];
+  if (!facts || status === "created" || status === "in_progress") return NOT_ASSESSED;
+  const auto = id === AUTO_CASE_ID;
+  const assessment = evaluateRisk(facts, auto ? AUTO_APPROVAL_CONFIG : PREVIEW_CONFIG);
+  return {
+    score: assessment.score,
+    recommendation: assessment.recommendation,
+    assessment,
+    thresholdVersion: auto ? 4 : 3,
+    assessedAt: minutes(-3),
+    decidedAt: status === "approved" || status === "rejected" ? minutes(-2) : null,
+    autoApprovedAt: auto ? minutes(-2) : null,
+  };
+}
+
+const BASE_VERIFICATIONS: Omit<VerificationListItem, "risk">[] = [
   {
     id: CASE_ID,
     status: "submitted",
@@ -170,7 +220,28 @@ const VERIFICATIONS: VerificationListItem[] = [
     sessionExpiresAt: minutes(-70),
     captureCount: 1,
   },
+  {
+    id: DECIDED_CASE_ID,
+    status: "approved",
+    declaredDocument: "passport",
+    isTest: true,
+    createdAt: minutes(-140),
+    submittedAt: minutes(-131),
+    sessionExpiresAt: minutes(-110),
+    captureCount: 1,
+  },
+  {
+    id: AUTO_CASE_ID,
+    status: "approved",
+    declaredDocument: "passport",
+    isTest: true,
+    createdAt: minutes(-12),
+    submittedAt: minutes(-4),
+    sessionExpiresAt: minutes(18),
+    captureCount: 1,
+  },
 ];
+const VERIFICATIONS: VerificationListItem[] = BASE_VERIFICATIONS.map((v) => ({ ...v, risk: previewRisk(v.id, v.status) }));
 
 const CAPTURES: CaptureRecord[] = [
   {
@@ -183,6 +254,8 @@ const CAPTURES: CaptureRecord[] = [
     sha256: "9f2c4e1a7b3d5f60812a4c6e8b0d2f4a6c8e0b2d4f6a8c0e2b4d6f8a0c2e4b6d",
     deleted: false,
     supersededBy: null,
+    livenessChallengeId: null,
+    liveness: null,
     quality: {
       source: "auto",
       sharpness: 412.6,
@@ -205,6 +278,8 @@ const CAPTURES: CaptureRecord[] = [
     sha256: "1b3d5f7a9c0e2b4d6f8a0c2e4b6d8f0a2c4e6b8d0f2a4c6e8b0d2f4a6c8e0b2d",
     deleted: false,
     supersededBy: null,
+    livenessChallengeId: null,
+    liveness: null,
     quality: {
       source: "manual",
       sharpness: 168.9,
@@ -218,6 +293,96 @@ const CAPTURES: CaptureRecord[] = [
     },
   },
 ];
+
+// M5: a face check of 13 frames (1 before the actions, then 4 per action), as the rider app sends it.
+const CHALLENGE_ID = "f5555555-5555-4555-8555-555555555555";
+const LIVENESS_FRAMES: CaptureRecord[] = Array.from({ length: 13 }, (_, i) => {
+  const step = i === 0 ? 0 : Math.ceil(i / 4);
+  const atMs = i === 0 ? 900 : 1500 + (step - 1) * 3000 + (((i - 1) % 4) + 1) * 600;
+  return {
+    ...CAPTURES[0],
+    id: `f6666666-6666-4666-8666-${String(i).padStart(12, "0")}`,
+    kind: "liveness_frame",
+    byteSize: 31_000 + i * 211,
+    width: 360,
+    height: 480,
+    createdAt: minutes(-3),
+    sha256: `${String(i).padStart(2, "0")}${"ab".repeat(31)}`,
+    livenessChallengeId: CHALLENGE_ID,
+    liveness: { index: i, step, atMs },
+  };
+});
+
+const LIVENESS_CHECK: LivenessCheckRecord = {
+  id: "f7777777-7777-4777-8777-777777777777",
+  captureId: null,
+  checkVersion: "liveness-capture-v1",
+  outcome: "pass",
+  createdAt: minutes(-3),
+  details: {
+    evaluated: false,
+    challengeId: CHALLENGE_ID,
+    actions: ["blink", "turn_left", "smile"],
+    code: "482913",
+    frames: 13,
+    framesPerStep: [1, 4, 4, 4],
+    durationMs: 9_910,
+    serverElapsedMs: 21_400,
+    maxGapMs: 1_210,
+    startedWithWarning: false,
+    problems: [],
+  },
+};
+
+// M6/M7: the face worker's evaluation of that face check (one action not seen) and its face match.
+const FACE_CHECKS: FaceChecks = {
+  liveness: {
+    id: "f8888888-8888-4888-8888-888888888888",
+    captureId: null,
+    checkVersion: "liveness-eval-v1",
+    outcome: "fail",
+    createdAt: minutes(-2),
+    details: {
+      evaluated: true,
+      provisional: true,
+      challengeId: CHALLENGE_ID,
+      engine: "face-1/mediapipe-fl-v1/auraface-v1",
+      actions: [
+        { action: "blink", result: "pass", framesWithFace: 4, peak: 0.82 },
+        { action: "turn_left", result: "pass", framesWithFace: 4, peak: 23.4 },
+        { action: "smile", result: "fail", framesWithFace: 4, peak: 0.21 },
+      ],
+      frames: 13,
+      framesWithFace: 13,
+      flatPlane: "depth",
+      flatPlaneScore: 0.061,
+      problems: ["action_not_done", "moire"],
+      timing: { ms: 412, cold: false },
+    },
+  },
+  faceMatch: {
+    id: "f9999999-9999-4999-8999-999999999999",
+    captureId: null,
+    checkVersion: "face-match-v1",
+    outcome: "pass",
+    createdAt: minutes(-2),
+    details: {
+      model: "auraface-v1/glintr100",
+      engine: "face-1/mediapipe-fl-v1/auraface-v1",
+      similarity: 0.512,
+      threshold: 0.35,
+      lowThreshold: 0.15,
+      calibrated: false,
+      reviewOnly: true,
+      problems: [],
+      portrait: { captureId: CAPTURES[0].id, box: [0.07, 0.24, 0.17, 0.33] },
+      selfie: { captureId: LIVENESS_FRAMES[0].id, box: [0.25, 0.2, 0.5, 0.42] },
+      timing: { ms: 1180, cold: true },
+    },
+  },
+  jobs: { liveness: "done", face_match: "done" },
+};
+const NO_FACE_CHECKS: FaceChecks = { liveness: null, faceMatch: null, jobs: { liveness: "none", face_match: "none" } };
 
 const PASSPORT_CAPTURES: CaptureRecord[] = [
   {
@@ -632,6 +797,84 @@ const testSession = (): TestSessionResponse => ({
   expiresAt: minutes(29.5),
 });
 
+const REASON_CODES: ReasonCodeRecord[] = [
+  { code: "DOC_EXPIRED", riderFr: "Votre pièce d'identité est expirée.", riderEn: "Your ID has expired.", active: true },
+  { code: "DOC_INVALID", riderFr: "Les informations de votre pièce d'identité n'ont pas pu être validées.", riderEn: "The information on your ID could not be validated.", active: true },
+  { code: "DOC_NOT_ORIGINAL", riderFr: "Photographiez directement le document original.", riderEn: "Photograph the original document directly.", active: true },
+  { code: "OTHER", riderFr: "Votre vérification n'a pas pu aboutir.", riderEn: "Your verification could not be completed.", active: true },
+];
+
+const DECISIONS: Record<string, DecisionRecord[]> = {
+  [AUTO_CASE_ID]: [
+    {
+      id: "a1b2c3d4-0000-4000-8000-000000000002",
+      actorType: "system",
+      actorId: null,
+      outcome: "approve",
+      reasonCode: null,
+      note: null,
+      thresholdVersion: 4,
+      recommendation: "approve",
+      band: "approve",
+      riskScore: 0,
+      agreesWithRecommendation: true,
+      createdAt: minutes(-2),
+    },
+  ],
+  [DECIDED_CASE_ID]: [
+    {
+      id: "a1b2c3d4-0000-4000-8000-000000000001",
+      actorType: "staff",
+      actorId: PROFILES.supervisor.userId,
+      outcome: "approve",
+      reasonCode: null,
+      note: "The OCR misread the printed name and the issue date; both match the photo.",
+      thresholdVersion: 3,
+      recommendation: "reject",
+      band: "reject",
+      riskScore: 0.9,
+      agreesWithRecommendation: false,
+      createdAt: minutes(-2),
+    },
+  ],
+};
+
+const V2: ThresholdVersionRecord = {
+  version: 2,
+  config: DEFAULT_THRESHOLD_CONFIG,
+  note: "M8: transparent weighted rules and hard flags (Phase 1). Automatic decisions off: every case is decided by a person.",
+  createdBy: null,
+  createdByMigration: null,
+  createdAt: minutes(-60 * 24 * 3),
+};
+const THRESHOLD_VERSIONS: ThresholdVersionRecord[] = [
+  {
+    version: 4,
+    config: { ...PREVIEW_CONFIG, autoDecide: true, faceMatchCountsForApproval: true },
+    note: "PM decision 2026-10-20: automatic approval",
+    createdBy: null,
+    createdByMigration: "20261021000000_auto_approval",
+    createdAt: minutes(-20),
+  },
+  {
+    version: 3,
+    config: PREVIEW_CONFIG,
+    note: "Lower the reject cut-off for the M8 phone test.",
+    createdBy: PROFILES.admin.userId,
+    createdByMigration: null,
+    createdAt: minutes(-30),
+  },
+  V2,
+  {
+    version: 1,
+    config: null,
+    note: "Phase 1 (assisted): every verification goes to human review.",
+    createdBy: null,
+    createdByMigration: null,
+    createdAt: minutes(-60 * 24 * 6),
+  },
+];
+
 function fakeServices(): DashboardServices {
   const view = (): CaptureViewResponse => ({ url: SPECIMEN_URL, expiresIn: 60 });
   const documentData = (id: string): DocumentDataResponse => ({ items: DOCUMENT_DATA[id] ?? [], expiresIn: 60 });
@@ -639,14 +882,29 @@ function fakeServices(): DashboardServices {
     recentVerifications: async () => VERIFICATIONS,
     verification: async (id) => VERIFICATIONS.find((v) => v.id === id) ?? null,
     captures: async (id) => {
-      if ([PASSPORT_CASE_ID, PENDING_CASE_ID, EXPIRED_CASE_ID, PRINT_MISMATCH_CASE_ID].includes(id)) return PASSPORT_CAPTURES;
+      if ([PASSPORT_CASE_ID, PENDING_CASE_ID, EXPIRED_CASE_ID, PRINT_MISMATCH_CASE_ID, DECIDED_CASE_ID, AUTO_CASE_ID].includes(id)) return PASSPORT_CAPTURES;
+      if (id === CASE_ID) return [...CAPTURES, ...LIVENESS_FRAMES];
       return id === UNREADABLE_CASE_ID ? RETAKEN_CAPTURES : CAPTURES;
     },
     mrzChecks: async (id) => MRZ_CHECKS[id] ?? [],
     serverChecks: async (id) => SERVER_CHECKS[id] ?? NO_SERVER_CHECKS,
+    livenessCheck: async (id) => (id === CASE_ID ? LIVENESS_CHECK : null),
+    faceChecks: async (id) => (id === CASE_ID ? FACE_CHECKS : NO_FACE_CHECKS),
     createTestSession: async () => testSession(),
     viewCapture: async () => view(),
     documentData: async (id) => documentData(id),
+    decisions: async (id) => DECISIONS[id] ?? [],
+    reasonCodes: async () => REASON_CODES,
+    decide: async (request) => ({
+      decisionId: "a1b2c3d4-0000-4000-8000-000000000002",
+      status: request.outcome === "approve" ? "approved" : "rejected",
+      recommendation: "review",
+      agreesWithRecommendation: null,
+      thresholdVersion: 3,
+    }),
+    thresholdVersions: async () => THRESHOLD_VERSIONS,
+    staffNames: async () => new Map(Object.values(PROFILES).map((p) => [p.userId, p.fullName])),
+    createThresholdVersion: async () => ({ version: 4, rescored: 7 }),
   };
 }
 
@@ -678,6 +936,11 @@ const SCREENS = [
   "case-mismatch-print",
   "case-reviewer",
   "case-admin",
+  "case-reject",
+  "case-decided",
+  "case-auto-approved",
+  "thresholds",
+  "thresholds-edit",
 ] as const;
 
 export function Preview({ screen }: { screen: string }) {
@@ -774,6 +1037,25 @@ export function Preview({ screen }: { screen: string }) {
       return staff(PROFILES.reviewer, <CaseView id={PASSPORT_CASE_ID} profile={PROFILES.reviewer} />);
     case "case-admin":
       return staff(PROFILES.admin, <CaseView id={CASE_ID} profile={PROFILES.admin} />);
+    case "case-reject":
+      return staff(PROFILES.supervisor, supervisorCase(MISMATCH_CASE_ID));
+    case "case-decided":
+      return staff(PROFILES.supervisor, supervisorCase(DECIDED_CASE_ID));
+    case "case-auto-approved":
+      return staff(PROFILES.supervisor, supervisorCase(AUTO_CASE_ID));
+    case "thresholds":
+      return staff(PROFILES.admin, <ThresholdsPage profile={PROFILES.admin} />);
+    case "thresholds-edit": {
+      const form = formFromConfig(PREVIEW_CONFIG);
+      const edited = {
+        ...form,
+        rejectMin: "0,5",
+        weights: { ...form.weights, quality_poor: "0.05" },
+        enabled: { ...form.enabled, number_format: false },
+        note: "Lower the reject cut-off for the PM test",
+      };
+      return staff(PROFILES.admin, <ThresholdEditor active={THRESHOLD_VERSIONS[0]} initialForm={edited} onSave={() => never().then(noop)} />);
+    }
     default:
       return (
         <main className="page">

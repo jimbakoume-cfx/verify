@@ -48,3 +48,4 @@ Start here in a new session. Read `docs/PLAN.md` first (the brief, the architect
   - the consent wording.
 - **Specimen photos** from consenting volunteers, to tune the provisional checks (list in `M3_SPEC.md`).
 - **Q3 (retention period) and Q9 (region and plan)** in `PLAN.md`.
+- **M5–M8 and automatic approval are deployed (2026-10-20), PR jimbakoume-cfx/verify#6:** face worker `confiance-verify-face` (key `f1`, firewall set), threshold version 3 active with automatic approval for test sessions only. The face match uses AuraFace and must move to a paid licence, a vendor SDK or our own model before the pilot; its threshold must be tuned on consenting Cameroonian volunteers; lawyer items in `docs/LICENSES.md`. Turn on leaked-password protection in Supabase Auth.

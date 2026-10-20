@@ -89,15 +89,28 @@ function pause(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
+export interface PollOptions<A, T> {
+  /** One request. Its signal aborts it when the time is up or the wait is stopped. */
+  get: (signal: AbortSignal) => Promise<A>;
+  /** Whether an answer has the expected shape; anything else ends the wait ("timeout"). */
+  isAnswer: (value: unknown) => value is A;
+  /** What an answer means: a value ends the wait with it; null asks again. */
+  decide: (answer: A) => T | null;
+  waitMs: number;
+  pollMs: number;
+  /** Stops the wait: it then resolves null. */
+  signal?: AbortSignal;
+}
+
 /**
- * Asks for the checks until `decide` settles them or the time runs out. A network or server error
- * (the server busy for a moment) is asked again while there is time; any other error, or an answer
- * that makes no sense, ends the wait at once. A request still running when the time is up is
- * abandoned. Never rejects; resolves null when stopped through `signal`.
+ * Asks until `decide` settles an answer or the time runs out: at once, then every `pollMs`, for at most
+ * `waitMs`. A network or server error (the server busy for a moment, a slow mobile network) is asked
+ * again while there is time; any other error, or an answer that makes no sense, ends the wait at once.
+ * A request still running when the time is up is abandoned. Never rejects; resolves null when stopped
+ * through `signal`. Shared by the checks (M3) and the result screen (automatic approval).
  */
-export async function waitForChecks<T>(options: ChecksWaitOptions<T>): Promise<ChecksWait<T> | null> {
-  const waitMs = options.timing?.waitMs ?? CHECKS_TIMING.waitMs;
-  const pollMs = options.timing?.pollMs ?? CHECKS_TIMING.pollMs;
+export async function pollUntil<A, T>(options: PollOptions<A, T>): Promise<ChecksWait<T> | null> {
+  const { waitMs, pollMs } = options;
   const stopped = options.signal ?? new AbortController().signal;
   const deadline = Date.now() + waitMs;
   const timeout: ChecksWait<T> = { type: "timeout" };
@@ -113,7 +126,7 @@ export async function waitForChecks<T>(options: ChecksWaitOptions<T>): Promise<C
     stopped.addEventListener("abort", abandon);
     let answer: unknown = null;
     try {
-      answer = await options.getChecks(request.signal);
+      answer = await options.get(request.signal);
     } catch (err) {
       if (!stopped.aborted && !isTransient(toFlowError(err))) return timeout;
     } finally {
@@ -123,7 +136,7 @@ export async function waitForChecks<T>(options: ChecksWaitOptions<T>): Promise<C
     if (stopped.aborted) return null;
 
     if (answer !== null) {
-      if (!isFlowChecks(answer)) return timeout;
+      if (!options.isAnswer(answer)) return timeout;
       const decision = options.decide(answer);
       if (decision !== null) return { type: "decided", decision };
     }
@@ -132,4 +145,19 @@ export async function waitForChecks<T>(options: ChecksWaitOptions<T>): Promise<C
     if (rest <= 0) return timeout;
     await pause(Math.min(pollMs, rest), stopped);
   }
+}
+
+/**
+ * Asks for the checks until `decide` settles them or the time runs out (pollUntil, with
+ * CHECKS_WAIT_MS and CHECKS_POLL_MS unless `timing` says otherwise).
+ */
+export function waitForChecks<T>(options: ChecksWaitOptions<T>): Promise<ChecksWait<T> | null> {
+  return pollUntil({
+    get: options.getChecks,
+    isAnswer: isFlowChecks,
+    decide: options.decide,
+    waitMs: options.timing?.waitMs ?? CHECKS_TIMING.waitMs,
+    pollMs: options.timing?.pollMs ?? CHECKS_TIMING.pollMs,
+    signal: options.signal,
+  });
 }

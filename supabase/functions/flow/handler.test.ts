@@ -7,6 +7,10 @@ import {
   type ClientQuality,
   CONSENT_VERSION,
   type FlowSession,
+  KEEP_FACE_IMAGES_VERSION,
+  LIVENESS_ACTIONS,
+  LIVENESS_LIMITS,
+  type LivenessChallengeResponse,
   MRZ_REPORT_LIMITS,
   type MrzCheckDetails,
   REQUIRED_SIDES,
@@ -20,17 +24,24 @@ import {
   assessMrzReport,
   type CaptureFollowUp,
   type CaptureStorage,
+  type ChallengeIssue,
+  checkFrame,
   checkImage,
   createFlowHandler,
   type FlowDeps,
   type FlowRepo,
   type FlowVerification,
+  type LivenessRecord,
+  type LivenessRecordResult,
   type MrzRecord,
   type MrzRecordResult,
   type NewCapture,
+  type RequiredKind,
   type StoredCapture,
+  type StoredChallenge,
   type SubmitResult,
 } from "./handler.ts";
+import { livenessFramePath } from "./liveness.ts";
 import type { RingReason } from "./ring.ts";
 
 // ---------------------------------------------------------------------------
@@ -49,6 +60,8 @@ interface CaptureRecord extends NewCapture {
   createdAt: string;
   deletedAt: string | null;
   supersededBy: string | null;
+  /** M5: set on the face check's frames (kind liveness_frame). */
+  livenessChallengeId?: string;
 }
 
 interface JobRecord {
@@ -59,7 +72,14 @@ interface JobRecord {
 
 class MemoryFlowRepo implements FlowRepo {
   verifications = new Map<string, VerificationRecord>();
-  consents: { verificationId: string; consentVersion: string; language: string; userAgent: string | null }[] = [];
+  consents: {
+    verificationId: string;
+    consentVersion: string;
+    language: string;
+    userAgent: string | null;
+    keepFaceImages?: boolean;
+    keepFaceImagesVersion?: string;
+  }[] = [];
   captures: CaptureRecord[] = [];
   audits: AuditEntry[] = [];
   reviewTasks: { verificationId: string; status: string }[] = [];
@@ -102,7 +122,7 @@ class MemoryFlowRepo implements FlowRepo {
     return this.consents.some((c) => c.verificationId === verificationId);
   }
 
-  async insertConsent(c: { verificationId: string; consentVersion: string; language: "fr" | "en"; userAgent: string | null }) {
+  async insertConsent(c: Parameters<FlowRepo["insertConsent"]>[0]) {
     this.maybeFail("insertConsent", c.verificationId);
     this.consents.push({ ...c });
   }
@@ -173,7 +193,7 @@ class MemoryFlowRepo implements FlowRepo {
     return id;
   }
 
-  async submit(id: string, requiredSides: readonly CaptureSide[]): Promise<SubmitResult> {
+  async submit(id: string, requiredSides: readonly RequiredKind[]): Promise<SubmitResult> {
     if (this.submitOverride) return this.submitOverride;
     const v = this.get(id);
     if (v.status !== "created" && v.status !== "in_progress") return "already_submitted";
@@ -254,6 +274,21 @@ class MemoryFlowRepo implements FlowRepo {
     });
   }
 
+  facePending = false;
+  async faceJobsPending(_verificationId: string) {
+    return this.facePending;
+  }
+
+  /** Automatic approval: flow_result's answer per case; by default from the status, as the SQL function. */
+  results = new Map<string, unknown>();
+  async flowResult(verificationId: string) {
+    this.maybeFail("flowResult", verificationId);
+    if (this.results.has(verificationId)) return this.results.get(verificationId);
+    const v = this.verifications.get(verificationId);
+    if (!v) return null;
+    return { state: v.status === "approved" ? "verified" : "review", returnUrl: null };
+  }
+
   async workerEnabledForRealSessions() {
     return this.workerEnabled;
   }
@@ -269,6 +304,115 @@ class MemoryFlowRepo implements FlowRepo {
   finishJob(captureId: string, verdict: string) {
     this.jobs.get(captureId)!.status = "done";
     this.qualityVerdicts.set(captureId, verdict);
+  }
+
+  // M5: the face check, mirroring flow_issue_liveness_challenge and flow_record_liveness.
+  challenges: (StoredChallenge & { verificationId: string })[] = [];
+  livenessRecords: LivenessRecord[] = [];
+  /** Simulates a change between the handler's checks and the RPC (a race). */
+  recordLivenessOverride: LivenessRecordResult | null = null;
+
+  async issueLivenessChallenge(issue: Parameters<FlowRepo["issueLivenessChallenge"]>[0]): Promise<ChallengeIssue> {
+    this.maybeFail("issueLivenessChallenge", issue.code);
+    const v = this.get(issue.verificationId);
+    if (v.status !== "created" && v.status !== "in_progress") return { result: "closed" };
+    const mine = this.challenges.filter((c) => c.verificationId === issue.verificationId);
+    if (mine.length >= issue.max) return { result: "too_many" };
+    this.clock += 1000;
+    const createdAt = new Date(this.clock).toISOString();
+    for (const c of mine) if (c.usedAt === null && c.supersededAt === null) c.supersededAt = createdAt;
+    const id = crypto.randomUUID();
+    const expiresAt = new Date(NOW.getTime() + issue.ttlSeconds * 1000).toISOString();
+    this.challenges.push({
+      id,
+      verificationId: issue.verificationId,
+      actions: [...issue.actions],
+      code: issue.code,
+      createdAt: NOW.toISOString(),
+      expiresAt,
+      supersededAt: null,
+      usedAt: null,
+    });
+    this.audits.push({
+      actorType: "rider",
+      actorId: issue.verificationId,
+      action: "liveness.challenge",
+      targetType: "liveness_challenge",
+      targetId: id,
+      details: { challengeNo: mine.length + 1, actions: issue.actions },
+    });
+    return { result: "ok", challengeId: id, expiresAt };
+  }
+
+  async getLivenessChallenge(verificationId: string, challengeId: string): Promise<StoredChallenge | null> {
+    const c = this.challenges.find((x) => x.id === challengeId && x.verificationId === verificationId);
+    if (!c) return null;
+    const { verificationId: _, ...stored } = c;
+    return { ...stored, actions: [...stored.actions] };
+  }
+
+  async livenessFramePaths(challengeId: string) {
+    return this.captures.filter((c) => c.livenessChallengeId === challengeId && !c.deletedAt).map((c) => c.storagePath);
+  }
+
+  async shasUsedElsewhere(sha256s: readonly string[], verificationId: string) {
+    return this.captures.some((c) => sha256s.includes(c.sha256) && c.verificationId !== verificationId);
+  }
+
+  async recordLiveness(record: LivenessRecord): Promise<LivenessRecordResult> {
+    // The detail carries the code on purpose: the logs must not repeat it.
+    this.maybeFail("recordLiveness", record.code);
+    if (this.recordLivenessOverride) return this.recordLivenessOverride;
+    const v = this.get(record.verificationId);
+    if (v.status !== "created" && v.status !== "in_progress") return { result: "closed" };
+    const c = this.challenges.find((x) => x.id === record.challengeId && x.verificationId === record.verificationId);
+    if (!c) return { result: "not_found" };
+    if (c.usedAt) return { result: "used" };
+    if (c.supersededAt || Date.parse(c.expiresAt) <= NOW.getTime()) return { result: "expired" };
+    if (c.code !== record.code) return { result: "code_mismatch" };
+    this.clock += 1000;
+    const createdAt = new Date(this.clock).toISOString();
+    const ids = record.frames.map((frame) => {
+      const id = crypto.randomUUID();
+      this.captures.push({
+        id,
+        verificationId: record.verificationId,
+        kind: "liveness_frame" as CaptureSide,
+        storagePath: frame.path,
+        sha256: frame.sha256,
+        byteSize: frame.byteSize,
+        width: frame.width,
+        height: frame.height,
+        quality: { liveness: { index: frame.index, step: frame.step, atMs: frame.atMs }, server: { validated: true } },
+        createdAt,
+        deletedAt: null,
+        supersededBy: null,
+        livenessChallengeId: c.id,
+      });
+      return id;
+    });
+    const replaced = this.captures.filter((x) =>
+      x.verificationId === record.verificationId && x.livenessChallengeId && x.livenessChallengeId !== c.id && !x.deletedAt
+    );
+    for (const older of replaced) {
+      older.deletedAt = createdAt;
+      older.supersededBy = ids[0];
+    }
+    c.usedAt = createdAt;
+    this.livenessRecords.push(structuredClone(record));
+    this.audits.push({
+      actorType: "rider",
+      actorId: record.verificationId,
+      action: "liveness.capture",
+      targetType: "liveness_challenge",
+      targetId: c.id,
+      details: { frames: record.frames.length, outcome: record.outcome, replaced: replaced.length, problems: record.details.problems },
+    });
+    return { result: "ok", supersededPaths: replaced.map((x) => x.storagePath) };
+  }
+
+  async hasLiveness(verificationId: string) {
+    return this.captures.some((c) => c.verificationId === verificationId && c.livenessChallengeId && !c.deletedAt);
   }
 }
 
@@ -348,6 +492,7 @@ function setup(overrides: Partial<FlowDeps> = {}) {
   const repo = new MemoryFlowRepo();
   const storage = new MemoryStorage();
   const ring = new MemoryRing();
+  const faceRing = new MemoryRing();
   const cases = new MemoryCases();
   const log = { error: vi.fn() };
   let clock = NOW;
@@ -356,6 +501,7 @@ function setup(overrides: Partial<FlowDeps> = {}) {
     storage,
     allowedOrigins: new Set([ALLOWED_ORIGIN]),
     ring: ring.ring,
+    faceRing: faceRing.ring,
     cases,
     now: () => clock,
     log,
@@ -409,10 +555,49 @@ function setup(overrides: Partial<FlowDeps> = {}) {
     return call("/captures", token, { body: { path, kind, quality: QUALITY } });
   }
 
+  /** M5: POST /liveness/challenge, expected to succeed. */
+  async function challenge(token: string): Promise<LivenessChallengeResponse> {
+    const res = await call("/liveness/challenge", token, { body: {} });
+    expect(res.status).toBe(200);
+    return await res.json() as LivenessChallengeResponse;
+  }
+
+  /**
+   * M5: uploads `count` frames into the challenge's slots, as the app does (a distinct JPEG each), and
+   * returns the POST /liveness/captures body for them, 20 s after the challenge was issued.
+   */
+  async function frames(c: LivenessChallengeResponse, count = 13, image = (i: number) => frameJpeg(i)) {
+    const reports = [];
+    for (let i = 0; i < count; i++) {
+      const bytes = image(i);
+      storage.objects.set(c.uploads[i].path, bytes);
+      reports.push({ index: i, path: c.uploads[i].path, sha256: await sha256Hex(bytes), ...frameTiming(i) });
+    }
+    clock = new Date(NOW.getTime() + 20_000);
+    return {
+      challengeId: c.challengeId,
+      code: c.code,
+      frames: reports,
+      stepStartsMs: [...STEP_STARTS],
+      startedWithWarning: false,
+      videoWidth: 480,
+      videoHeight: 640,
+    };
+  }
+
+  /** M5: a whole face check, recorded. */
+  async function passLiveness(token: string) {
+    const body = await frames(await challenge(token));
+    const res = await call("/liveness/captures", token, { body });
+    expect(res.status).toBe(200);
+    return body;
+  }
+
   return {
     repo,
     storage,
     ring,
+    faceRing,
     cases,
     log,
     handler,
@@ -421,8 +606,24 @@ function setup(overrides: Partial<FlowDeps> = {}) {
     call,
     upload,
     complete,
+    challenge,
+    frames,
+    passLiveness,
     setClock: (d: Date) => (clock = d),
   };
+}
+
+/** M5: the app's schedule: 1 frame before the first action, then 4 during each 3-second action. */
+const STEP_STARTS = [0, 1500, 4500, 7500];
+function frameTiming(index: number): { atMs: number; step: number } {
+  if (index === 0) return { atMs: 900, step: 0 };
+  if (index > 12) return { atMs: 10_000 + (index - 12) * 100, step: 3 };
+  const step = Math.floor((index - 1) / 4) + 1;
+  return { atMs: STEP_STARTS[step] + (((index - 1) % 4) + 1) * 600, step };
+}
+/** A distinct frame per index: 360x480, about 30 KB. */
+function frameJpeg(index: number): Uint8Array<ArrayBuffer> {
+  return buildJpeg({ width: 360, height: 480, padTo: 30_000 + index });
 }
 
 async function expectError(res: Response, status: number, code: string) {
@@ -446,6 +647,8 @@ describe("session lookup", () => {
     ["/upload-url", { body: { kind: "document_front" } }],
     ["/captures", { body: {} }],
     ["/mrz", { body: {} }],
+    ["/liveness/challenge", { body: {} }],
+    ["/liveness/captures", { body: {} }],
     ["/submit", {}],
   ];
 
@@ -603,7 +806,14 @@ describe("POST /consent", () => {
     const session: FlowSession = await res.json();
     expect(session).toMatchObject({ status: "in_progress", consentGiven: true });
     expect(repo.consents).toHaveLength(1);
-    expect(repo.consents[0]).toMatchObject({ verificationId: id, consentVersion: CONSENT_VERSION, language: "en" });
+    expect(repo.consents[0]).toMatchObject({
+      verificationId: id,
+      consentVersion: CONSENT_VERSION,
+      language: "en",
+      // M5: the optional box is false when the app does not send it.
+      keepFaceImages: false,
+      keepFaceImagesVersion: KEEP_FACE_IMAGES_VERSION,
+    });
     expect(repo.consents[0].userAgent).toHaveLength(512);
     expect(repo.audits).toEqual([{
       actorType: "rider",
@@ -611,9 +821,29 @@ describe("POST /consent", () => {
       action: "consent.accept",
       targetType: "verification",
       targetId: id,
-      details: { consentVersion: CONSENT_VERSION, language: "en" },
+      details: { consentVersion: CONSENT_VERSION, language: "en", keepFaceImages: false, keepFaceImagesVersion: KEEP_FACE_IMAGES_VERSION },
     }]);
   });
+
+  it("M5: records the optional 'keep my face images' answer with its wording's version", async () => {
+    const { call, seed, repo } = setup();
+    const { token } = await seed();
+    const res = await call("/consent", token, { body: { consentVersion: CONSENT_VERSION, language: "fr", keepFaceImages: true } });
+    expect(res.status).toBe(200);
+    expect(repo.consents[0]).toMatchObject({ keepFaceImages: true, keepFaceImagesVersion: KEEP_FACE_IMAGES_VERSION });
+    expect(repo.audits[0].details).toMatchObject({ keepFaceImages: true });
+  });
+
+  it.each([["a string", "yes"], ["a number", 1], ["null", null]])(
+    "M5: refuses keepFaceImages as %s -> 400",
+    async (_label, value) => {
+      const { call, seed, repo } = setup();
+      const { token } = await seed();
+      const body = { consentVersion: CONSENT_VERSION, language: "fr", keepFaceImages: value };
+      await expectError(await call("/consent", token, { body }), 400, "bad_request");
+      expect(repo.consents).toHaveLength(0);
+    },
+  );
 
   it("stores a null user agent when the header is absent", async () => {
     const { call, seed, repo } = setup();
@@ -987,8 +1217,9 @@ describe("POST /submit", () => {
   });
 
   it("requires every side -> 409 missing_sides", async () => {
-    const { call, ready, complete, repo } = setup();
+    const { call, ready, complete, repo, passLiveness } = setup();
     const { id, token } = await ready();
+    await passLiveness(token);
     await expectError(await call("/submit", token), 409, "missing_sides");
     expect((await complete(token, "document_front")).status).toBe(200);
     await expectError(await call("/submit", token), 409, "missing_sides");
@@ -996,19 +1227,41 @@ describe("POST /submit", () => {
     expect(repo.reviewTasks).toHaveLength(0);
   });
 
-  it("does not count a deleted capture", async () => {
+  it("M5: requires the face check -> 409 liveness_required", async () => {
     const { call, ready, complete, repo } = setup();
+    const { id, token } = await ready();
+    await complete(token, "document_front");
+    await complete(token, "document_back");
+    const submit = vi.spyOn(repo, "submit");
+    await expectError(await call("/submit", token), 409, "liveness_required");
+    expect(submit).not.toHaveBeenCalled();
+    expect(repo.verifications.get(id)!.status).toBe("in_progress");
+  });
+
+  it("M5: erased frames do not count", async () => {
+    const { call, ready, complete, repo, passLiveness } = setup();
     const { token } = await ready({ declaredDocument: "passport" });
     await complete(token, "document_front");
+    await passLiveness(token);
+    for (const c of repo.captures) if (c.livenessChallengeId) c.deletedAt = NOW.toISOString();
+    await expectError(await call("/submit", token), 409, "liveness_required");
+  });
+
+  it("does not count a deleted capture", async () => {
+    const { call, ready, complete, repo, passLiveness } = setup();
+    const { token } = await ready({ declaredDocument: "passport" });
+    await complete(token, "document_front");
+    await passLiveness(token);
     repo.captures[0].deletedAt = NOW.toISOString();
     await expectError(await call("/submit", token), 409, "missing_sides");
   });
 
   it("submits, opens a review task, audits and returns the session", async () => {
-    const { call, ready, complete, repo } = setup();
+    const { call, ready, complete, repo, passLiveness } = setup();
     const { id, token } = await ready();
     await complete(token, "document_front");
     await complete(token, "document_back");
+    await passLiveness(token);
     const res = await call("/submit", token);
     expect(res.status).toBe(200);
     const session: FlowSession = await res.json();
@@ -1020,18 +1273,20 @@ describe("POST /submit", () => {
     await expectError(await call("/submit", token), 409, "already_submitted");
   });
 
-  it("passes the document's required sides to the database", async () => {
-    const { call, ready, complete, repo } = setup();
+  it("passes the document's required sides and, since M5, the face check's frames to the database", async () => {
+    const { call, ready, complete, repo, passLiveness } = setup();
     const { token } = await ready({ declaredDocument: "passport" });
     await complete(token, "document_front");
+    await passLiveness(token);
     const spy = vi.spyOn(repo, "submit");
     expect((await call("/submit", token)).status).toBe(200);
-    expect(spy).toHaveBeenCalledWith(expect.any(String), REQUIRED_SIDES.passport);
+    expect(spy).toHaveBeenCalledWith(expect.any(String), [...REQUIRED_SIDES.passport, "liveness_frame"]);
   });
 
   it("maps a concurrent submit reported by the database to 409 already_submitted", async () => {
-    const { call, ready, repo } = setup();
+    const { call, ready, repo, passLiveness } = setup();
     const { token } = await ready();
+    await passLiveness(token);
     repo.submitOverride = "already_submitted";
     await expectError(await call("/submit", token), 409, "already_submitted");
   });
@@ -1811,11 +2066,371 @@ describe("GET /checks", () => {
 });
 
 // ---------------------------------------------------------------------------
+// The face check (M5)
+// ---------------------------------------------------------------------------
+describe("POST /liveness/challenge", () => {
+  it("issues 3 different actions and a 6-digit code, with a signed upload per frame slot in the session's folder", async () => {
+    const { ready, challenge, repo, storage } = setup();
+    const { id, token } = await ready();
+    const c = await challenge(token);
+    expect(c.actions).toHaveLength(LIVENESS_LIMITS.actionsPerChallenge);
+    expect(new Set(c.actions).size).toBe(3);
+    for (const action of c.actions) expect(LIVENESS_ACTIONS).toContain(action);
+    expect(c.code).toMatch(/^[0-9]{6}$/);
+    expect(c.bucket).toBe("id-captures");
+    expect(c.uploads).toHaveLength(LIVENESS_LIMITS.maxFrames);
+    c.uploads.forEach((u, i) => {
+      expect(u.path).toBe(livenessFramePath(id, c.challengeId, i));
+      expect(u.path).toMatch(new RegExp(`^${id}/liveness-${c.challengeId}-\\d{2}\\.jpg$`));
+    });
+    expect(storage.signed).toEqual(c.uploads.map((u) => u.path));
+    expect(Date.parse(c.expiresAt) - NOW.getTime()).toBe(LIVENESS_LIMITS.challengeTtlSeconds * 1000);
+    const stored = repo.challenges[0];
+    expect(stored).toMatchObject({ id: c.challengeId, verificationId: id, actions: c.actions, code: c.code });
+    const audit = repo.audits.find((a) => a.action === "liveness.challenge")!;
+    expect(JSON.stringify(audit)).not.toContain(c.code);
+  });
+
+  it("draws with the injected randomness (a new challenge each time)", async () => {
+    const values = [4, 0, 2, 9, 8, 7, 6, 5, 4];
+    let n = 0;
+    const { ready, challenge } = setup({ randomInt: (max) => values[n++ % values.length] % max });
+    const { token } = await ready();
+    const c = await challenge(token);
+    // Pool [turn_left, turn_right, look_up, blink, smile]: picks 0+4, 1+0, 2+2 of the pool as it is shuffled.
+    expect(c.actions).toEqual(["smile", "turn_right", "turn_left"]);
+    expect(c.code).toBe("987654");
+  });
+
+  it("each new challenge replaces the unused one before it, up to the session's limit", async () => {
+    const { ready, challenge, call, repo } = setup();
+    const { token } = await ready();
+    const first = await challenge(token);
+    const second = await challenge(token);
+    expect(second.challengeId).not.toBe(first.challengeId);
+    expect(repo.challenges[0].supersededAt).not.toBeNull();
+    for (let i = 2; i < LIVENESS_LIMITS.maxChallengesPerSession; i++) await challenge(token);
+    await expectError(await call("/liveness/challenge", token, { body: {} }), 429, "too_many_challenges");
+  });
+
+  it("requires consent and a declared document", async () => {
+    const { call, seed } = setup();
+    const { token } = await seed();
+    await expectError(await call("/liveness/challenge", token, { body: {} }), 403, "consent_required");
+    const { token: other } = await seed({ status: "in_progress" }, { consent: true });
+    await expectError(await call("/liveness/challenge", other, { body: {} }), 409, "document_type_required");
+  });
+
+  it("accepts an empty body, and refuses a submitted session", async () => {
+    const { call, ready, repo } = setup();
+    const { id, token } = await ready();
+    expect((await call("/liveness/challenge", token)).status).toBe(200);
+    repo.verifications.get(id)!.status = "submitted";
+    await expectError(await call("/liveness/challenge", token, { body: {} }), 409, "already_submitted");
+  });
+});
+
+describe("POST /liveness/captures", () => {
+  it("M6/M7: rings the face worker when the recorded face check left a face job waiting", async () => {
+    const { ready, passLiveness, repo, faceRing, ring } = setup();
+    const { token } = await ready();
+    repo.facePending = true;
+    await passLiveness(token);
+    expect(faceRing.rings).toEqual(["face_check"]);
+    // The AI worker's doorbell is not the face worker's.
+    expect(ring.rings).not.toContain("face_check");
+  });
+
+  it("M6/M7: no face ring when no face job may run (a real session while the face switch is off)", async () => {
+    const { ready, passLiveness, repo, faceRing } = setup();
+    const { token } = await ready({ isTest: false });
+    repo.facePending = false;
+    await passLiveness(token);
+    expect(faceRing.rings).toEqual([]);
+  });
+
+  it("M6/M7: a failed check for face jobs is logged, never the rider's problem", async () => {
+    const { ready, passLiveness, repo, faceRing, log } = setup();
+    const { token } = await ready();
+    vi.spyOn(repo, "faceJobsPending").mockRejectedValue(new Error("db down"));
+    await passLiveness(token);
+    expect(faceRing.rings).toEqual([]);
+    expect(log.error).toHaveBeenCalledWith("flow.face_ring_check_failed", expect.any(Error));
+  });
+
+  it("records the frames, their check and the challenge as used; the response says nothing more", async () => {
+    const { ready, challenge, frames, call, repo } = setup();
+    const { id, token } = await ready();
+    const c = await challenge(token);
+    const body = await frames(c);
+    const res = await call("/liveness/captures", token, { body });
+    expect(res.status).toBe(200);
+    expect(await readJson(res)).toEqual({ recorded: true });
+
+    const record = repo.livenessRecords[0];
+    expect(record).toMatchObject({ verificationId: id, challengeId: c.challengeId, code: c.code, outcome: "pass", version: "liveness-capture-v1" });
+    expect(record.frames).toHaveLength(13);
+    expect(record.frames[3]).toEqual({ ...body.frames[3], byteSize: 30_003, width: 360, height: 480 });
+    expect(record.details).toEqual({
+      evaluated: false,
+      challengeId: c.challengeId,
+      actions: c.actions,
+      code: c.code,
+      frames: 13,
+      framesPerStep: [1, 4, 4, 4],
+      durationMs: 9_900,
+      serverElapsedMs: 20_000,
+      maxGapMs: 1_200,
+      startedWithWarning: false,
+      problems: [],
+    });
+    expect(repo.challenges[0].usedAt).not.toBeNull();
+    expect(repo.captures.filter((x) => x.kind === ("liveness_frame" as CaptureSide))).toHaveLength(13);
+  });
+
+  it("flags implausible timings and reused frames, never refusing them", async () => {
+    const { ready, challenge, frames, call, repo, setClock } = setup();
+    const { token } = await ready();
+    // The same frame file was sent in another verification.
+    repo.captures.push({
+      id: crypto.randomUUID(),
+      verificationId: crypto.randomUUID(),
+      kind: "document_front",
+      storagePath: "other.jpg",
+      sha256: await sha256Hex(frameJpeg(5)),
+      byteSize: 1,
+      width: 1,
+      height: 1,
+      quality: {},
+      createdAt: NOW.toISOString(),
+      deletedAt: null,
+      supersededBy: null,
+    });
+    const body = await frames(await challenge(token));
+    setClock(new Date(NOW.getTime() + 3_000)); // the frames claim 9.9 s, but only 3 s have passed
+    expect((await call("/liveness/captures", token, { body })).status).toBe(200);
+    expect(repo.livenessRecords[0].outcome).toBe("flag");
+    expect(repo.livenessRecords[0].details.problems).toEqual(["longer_than_challenge", "frames_reused"]);
+  });
+
+  it("a newer face check replaces the older frames, whose files are removed", async () => {
+    const { ready, challenge, frames, call, repo, storage } = setup();
+    const { token } = await ready();
+    const first = await frames(await challenge(token));
+    expect((await call("/liveness/captures", token, { body: first })).status).toBe(200);
+    const second = await frames(await challenge(token), 9, (i) => frameJpeg(100 + i));
+    second.frames = second.frames.map((f, i) => ({ ...f, step: i === 0 ? 0 : Math.min(3, Math.ceil(i / 3)), atMs: 900 + i * 1_000 }));
+    second.stepStartsMs = [0, 1_500, 4_500, 7_500];
+    expect((await call("/liveness/captures", token, { body: second })).status).toBe(200);
+    expect(storage.removed).toEqual(first.frames.map((f) => f.path).sort());
+    expect(repo.captures.filter((x) => x.livenessChallengeId && !x.deletedAt)).toHaveLength(9);
+    expect(repo.audits.at(-1)).toMatchObject({ action: "liveness.capture", details: { frames: 9, replaced: 13 } });
+  });
+
+  it("a retried request after a lost answer is answered again; other frames for a used challenge are refused", async () => {
+    const { ready, challenge, frames, call, repo } = setup();
+    const { token } = await ready();
+    const c = await challenge(token);
+    const body = await frames(c);
+    expect((await call("/liveness/captures", token, { body })).status).toBe(200);
+    expect((await call("/liveness/captures", token, { body })).status).toBe(200);
+    expect(repo.livenessRecords).toHaveLength(1);
+    await expectError(await call("/liveness/captures", token, { body: { ...body, frames: body.frames.slice(0, 12) } }), 409, "challenge_used");
+    // The same answer when the race is lost inside the database.
+    const next = await frames(await challenge(token));
+    repo.recordLivenessOverride = { result: "used" };
+    await expectError(await call("/liveness/captures", token, { body: next }), 409, "challenge_used");
+  });
+
+  it("refuses a replaced or expired challenge (410), a wrong code (422) and another session's challenge (404)", async () => {
+    const { ready, challenge, frames, call, setClock } = setup();
+    const { token } = await ready();
+    const first = await challenge(token);
+    const body = await frames(first);
+    await challenge(token);
+    await expectError(await call("/liveness/captures", token, { body }), 410, "challenge_expired");
+
+    const { token: late } = await ready();
+    const lateBody = await frames(await challenge(late));
+    setClock(new Date(NOW.getTime() + (LIVENESS_LIMITS.challengeTtlSeconds + 1) * 1000));
+    await expectError(await call("/liveness/captures", late, { body: lateBody }), 410, "challenge_expired");
+
+    setClock(NOW);
+    const { token: wrong } = await ready();
+    const wrongBody = await frames(await challenge(wrong));
+    const code = wrongBody.code === "000000" ? "111111" : "000000";
+    await expectError(await call("/liveness/captures", wrong, { body: { ...wrongBody, code } }), 422, "invalid_liveness");
+
+    const { token: stranger } = await ready();
+    await expectError(await call("/liveness/captures", stranger, { body: wrongBody }), 400, "bad_request"); // not its folder
+  });
+
+  it("refuses another session's challenge even with paths in its own folder", async () => {
+    const { ready, challenge, frames, call, repo } = setup();
+    const { token } = await ready();
+    const theirs = await frames(await challenge(token));
+    const { id, token: mine } = await ready();
+    const body = {
+      ...theirs,
+      frames: theirs.frames.map((f) => ({ ...f, path: livenessFramePath(id, theirs.challengeId, f.index) })),
+    };
+    await expectError(await call("/liveness/captures", mine, { body }), 404, "not_found");
+    expect(repo.livenessRecords).toHaveLength(0);
+  });
+
+  it("refuses a malformed body (400) before anything is read", async () => {
+    const { ready, challenge, frames, call, repo } = setup();
+    const { token } = await ready();
+    const body = await frames(await challenge(token));
+    const bad: [string, unknown][] = [
+      ["an unknown field", { ...body, face: "x" }],
+      ["a bad challenge id", { ...body, challengeId: "nope" }],
+      ["a 5-digit code", { ...body, code: "12345" }],
+      ["7 frames", { ...body, frames: body.frames.slice(0, 7) }],
+      ["frames out of index order", { ...body, frames: [body.frames[1], body.frames[0], ...body.frames.slice(2)] }],
+      ["a frame with an unknown field", { ...body, frames: [{ ...body.frames[0], blob: "x" }, ...body.frames.slice(1)] }],
+      ["an upper-case hash", { ...body, frames: [{ ...body.frames[0], sha256: body.frames[0].sha256.toUpperCase() }, ...body.frames.slice(1)] }],
+      ["a step beyond the actions", { ...body, frames: [...body.frames.slice(0, 12), { ...body.frames[12], step: 4 }] }],
+      ["a negative time", { ...body, frames: [{ ...body.frames[0], atMs: -1 }, ...body.frames.slice(1)] }],
+      ["three step starts", { ...body, stepStartsMs: [0, 1500, 4500] }],
+      ["step starts not from 0", { ...body, stepStartsMs: [5, 1500, 4500, 7500] }],
+      ["a missing flag", { ...body, startedWithWarning: undefined }],
+      ["another frame's path", { ...body, frames: [{ ...body.frames[0], path: body.frames[1].path }, ...body.frames.slice(1)] }],
+      ["a document photo's path", { ...body, frames: [{ ...body.frames[0], path: "x/document_front-y.jpg" }, ...body.frames.slice(1)] }],
+    ];
+    for (const [label, payload] of bad) {
+      await expectError(await call("/liveness/captures", token, { body: payload }), 400, "bad_request").catch((err) => {
+        throw new Error(`${label}: ${err}`);
+      });
+    }
+    expect(repo.livenessRecords).toHaveLength(0);
+  });
+
+  it("checks every file: missing (404), and refused files (422) are all erased", async () => {
+    const cases: [string, (i: number) => Uint8Array<ArrayBuffer>, string][] = [
+      ["a tiny file", (i) => (i === 4 ? buildJpeg({ width: 360, height: 480, padTo: 500 }) : frameJpeg(i)), "image_too_small"],
+      ["a file too large", (i) => (i === 4 ? buildJpeg({ width: 360, height: 480, padTo: 100_001 }) : frameJpeg(i)), "image_too_large"],
+      ["not a JPEG", (i) => (i === 4 ? new Uint8Array(30_000) : frameJpeg(i)), "invalid_image"],
+      ["a frame too small", (i) => (i === 4 ? buildJpeg({ width: 120, height: 160, padTo: 30_000 }) : frameJpeg(i)), "image_resolution_too_low"],
+      ["a frame too big", (i) => (i === 4 ? buildJpeg({ width: 1280, height: 960, padTo: 30_000 }) : frameJpeg(i)), "image_too_large"],
+      ["too many bytes together", (i) => buildJpeg({ width: 360, height: 480, padTo: 50_000 + i }), "image_too_large"],
+    ];
+    for (const [label, image, code] of cases) {
+      const { ready, challenge, frames, call, storage, repo } = setup();
+      const { token } = await ready();
+      const body = await frames(await challenge(token), 13, image);
+      await expectError(await call("/liveness/captures", token, { body }), 422, code).catch((err) => {
+        throw new Error(`${label}: ${err}`);
+      });
+      expect(storage.removed.sort(), label).toEqual(body.frames.map((f) => f.path).sort());
+      expect(repo.livenessRecords, label).toHaveLength(0);
+      expect(repo.challenges[0].usedAt, label).toBeNull();
+    }
+
+    const { ready, challenge, frames, call, storage } = setup();
+    const { token } = await ready();
+    const body = await frames(await challenge(token));
+    // The phone's hash of a frame does not match the file: refused and erased.
+    const tampered = { ...body, frames: [{ ...body.frames[0], sha256: "0".repeat(64) }, ...body.frames.slice(1)] };
+    await expectError(await call("/liveness/captures", token, { body: tampered }), 422, "invalid_liveness");
+    expect(storage.removed).toHaveLength(13);
+
+    const { ready: ready2, challenge: challenge2, frames: frames2, call: call2, storage: storage2 } = setup();
+    const { token: token2 } = await ready2();
+    const missing = await frames2(await challenge2(token2));
+    storage2.objects.delete(missing.frames[7].path);
+    await expectError(await call2("/liveness/captures", token2, { body: missing }), 404, "upload_missing");
+    expect(storage2.removed).toEqual([]);
+  });
+
+  it("never logs the code, and an internal error is a plain 500", async () => {
+    const { ready, challenge, frames, call, repo, log } = setup();
+    const { token } = await ready();
+    const body = await frames(await challenge(token));
+    repo.failOn = "recordLiveness";
+    await expectError(await call("/liveness/captures", token, { body }), 500, "server_error");
+    expect(JSON.stringify(log.error.mock.calls)).not.toContain(body.code);
+  });
+});
+
+describe("GET /result (automatic approval)", () => {
+  const get = (h: ReturnType<typeof setup>, token: string | null) => h.call("/result", token, { method: "GET" });
+
+  it("needs a session that was submitted", async () => {
+    const h = setup();
+    await expectError(await get(h, null), 401, "invalid_session");
+    const open = await h.ready();
+    await expectError(await get(h, open.token), 409, "not_submitted");
+    const created = await h.seed();
+    await expectError(await get(h, created.token), 409, "not_submitted");
+  });
+
+  it("answers after the submit, whatever the case's status, with no-store", async () => {
+    const h = setup();
+    const submitted = await h.ready({ status: "submitted" });
+    const res = await get(h, submitted.token);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(await readJson(res)).toEqual({ state: "review", returnUrl: null });
+    const approved = await h.ready({ status: "approved" });
+    expect(await readJson(await get(h, approved.token))).toEqual({ state: "verified", returnUrl: null });
+  });
+
+  it("passes on pending, verified with an https return address, and review", async () => {
+    const h = setup();
+    const { id, token } = await h.ready({ status: "submitted" });
+    h.repo.results.set(id, { state: "pending", returnUrl: null });
+    expect(await readJson(await get(h, token))).toEqual({ state: "pending", returnUrl: null });
+    h.repo.results.set(id, { state: "verified", returnUrl: "https://ride.example/verified?ride=42" });
+    expect(await readJson(await get(h, token))).toEqual({ state: "verified", returnUrl: "https://ride.example/verified?ride=42" });
+    h.repo.results.set(id, { state: "verified", returnUrl: "http://ride.example/plain" });
+    expect(await readJson(await get(h, token))).toEqual({ state: "verified", returnUrl: null });
+  });
+
+  it("never tells the rider more than the three states (a reject, a score, a reason)", async () => {
+    const h = setup();
+    const { id, token } = await h.ready({ status: "rejected" });
+    h.repo.results.set(id, { state: "rejected", returnUrl: "https://ride.example/", reason: "DOC_INVALID", score: 1 });
+    expect(await readJson(await get(h, token))).toEqual({ state: "review", returnUrl: null });
+  });
+
+  it("an expired link is still refused (410)", async () => {
+    const h = setup();
+    const { token } = await h.ready({ status: "approved" });
+    h.setClock(new Date(IN_30_MIN));
+    await expectError(await get(h, token), 410, "session_expired");
+  });
+
+  it("is a GET only, and fails closed when the database fails", async () => {
+    const h = setup();
+    const { token } = await h.ready({ status: "submitted" });
+    expect((await h.call("/result", token, { method: "POST", body: {} })).status).toBe(405);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    h.repo.failOn = "flowResult";
+    await expectError(await get(h, token), 500, "server_error");
+  });
+});
+
+describe("checkFrame", () => {
+  it.each([
+    [buildJpeg({ width: 360, height: 480, padTo: 30_000 }), { ok: true, width: 360, height: 480 }],
+    [buildJpeg({ width: 640, height: 480, padTo: 2_000 }), { ok: true, width: 640, height: 480 }],
+    [buildJpeg({ width: 180, height: 240, padTo: 30_000 }), { ok: true, width: 180, height: 240 }],
+    [buildJpeg({ width: 170, height: 239, padTo: 30_000 }), { ok: false, code: "image_resolution_too_low" }],
+    [buildJpeg({ width: 641, height: 480, padTo: 30_000 }), { ok: false, code: "image_too_large" }],
+    [buildJpeg({ width: 360, height: 480, padTo: 1_999 }), { ok: false, code: "image_too_small" }],
+    [buildJpeg({ width: 360, height: 480, padTo: 100_001 }), { ok: false, code: "image_too_large" }],
+  ])("%#", (bytes, expected) => {
+    expect(checkFrame(bytes)).toEqual(expected);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // End to end through the handler
 // ---------------------------------------------------------------------------
 describe("rider flow", () => {
   it("goes from a new session to submitted", async () => {
-    const { call, seed, upload } = setup();
+    const { call, seed, upload, passLiveness } = setup();
     const { token } = await seed();
     expect((await call("/consent", token, { body: { consentVersion: CONSENT_VERSION, language: "fr" } })).status).toBe(200);
     expect((await call("/document-type", token, { body: { declaredDocument: "voter_card" } })).status).toBe(200);
@@ -1823,6 +2438,7 @@ describe("rider flow", () => {
       const path = await upload(token, kind, buildJpeg({ width: 1600, height: 1009, padTo: kind === "document_front" ? 40_000 : 41_000 }));
       expect((await call("/captures", token, { body: { path, kind, quality: QUALITY } })).status).toBe(200);
     }
+    await passLiveness(token);
     const submitted: FlowSession = await (await call("/submit", token)).json();
     expect(submitted.status).toBe("submitted");
     const later: FlowSession = await (await call("/session", token)).json();
@@ -1849,7 +2465,20 @@ describe("rider flow", () => {
 
   it("answers preflight requests for every route", async () => {
     const { handler } = setup();
-    for (const path of ["/session", "/consent", "/document-type", "/upload-url", "/captures", "/mrz", "/checks", "/submit"]) {
+    for (
+      const path of [
+        "/session",
+        "/consent",
+        "/document-type",
+        "/upload-url",
+        "/captures",
+        "/mrz",
+        "/checks",
+        "/liveness/challenge",
+        "/liveness/captures",
+        "/submit",
+      ]
+    ) {
       const res = await handler(makeRequest(`https://ref.supabase.co/flow${path}`, { method: "OPTIONS" }));
       expect(res.status, path).toBe(204);
       expect(res.headers.get("access-control-allow-headers")).toContain("x-session-token");

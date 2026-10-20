@@ -38,6 +38,10 @@ const ACTIONS: FlowActions = {
   retryUpload: noop,
   chooseAnotherDocument: noop,
   continueExpired: noop,
+  liveness: null,
+  livenessDone: noop,
+  livenessFailed: noop,
+  continueResult: noop,
 };
 
 const SESSION: FlowSession = {
@@ -75,6 +79,9 @@ const STATES: Record<string, FlowState> = {
   document: state({ screen: { name: "document" }, document: null }),
   "document-busy": state({ screen: { name: "document" }, busy: true }),
   turnover: state({ screen: { name: "turnOver", side: "document_back" } }),
+  // M5: the face check (the camera opens; Start stays off without a session link).
+  liveness: state({ screen: { name: "liveness" } }),
+  "liveness-missing": state({ screen: { name: "liveness" }, error: "liveness_required" }),
   // The server asked for the back again (M3): its reason instead of "turn it over".
   "turnover-retake": state({
     screen: { name: "turnOver", side: "document_back" },
@@ -116,6 +123,11 @@ const STATES: Record<string, FlowState> = {
     },
   }),
   done: state({ screen: { name: "done" } }),
+  // Automatic approval: the result screen after the submit, and the end screen after "Continue".
+  "result-pending": state({ screen: { name: "result" } }),
+  "result-verified": state({ screen: { name: "result" }, result: { state: "verified", returnUrl: null, leaving: false } }),
+  "result-review": state({ screen: { name: "result" }, result: { state: "review", returnUrl: null, leaving: false } }),
+  "done-verified": state({ screen: { name: "done" }, result: { state: "verified", returnUrl: null, leaving: false } }),
   expired: state({ screen: { name: "sessionError", reason: "expired" } }),
   invalid: state({ screen: { name: "sessionError", reason: "invalid" } }),
   submitted: state({ screen: { name: "sessionError", reason: "already_submitted" } }),

@@ -4,8 +4,11 @@
 // rider never waits for it.
 import { InternalError, type Logger } from "../_shared/log.ts";
 
-/** Why the worker is rung: the rider chose a document (warm-up) or a photo was accepted. */
-export type RingReason = "warm_up" | "capture";
+/**
+ * Why a worker is rung: the rider chose a document (warm-up) or a photo was accepted (the AI worker);
+ * a face check was recorded (the face worker, M6/M7).
+ */
+export type RingReason = "warm_up" | "capture" | "face_check";
 
 /**
  * Rings in the background. `onFailure` runs when the ring could not reach the worker (so the photo is

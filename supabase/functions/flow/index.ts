@@ -7,7 +7,7 @@ import { createCaptureStorage, createFlowRepo } from "./repo.ts";
 import { createWorkerRing } from "./ring.ts";
 
 const db = createServiceClient();
-const config = loadConfig({ needsWorkerRingUrl: true });
+const config = loadConfig({ needsWorkerRingUrl: true, needsFaceRingUrl: true });
 
 // Supabase's Edge Runtime keeps the function alive for a task passed to EdgeRuntime.waitUntil after
 // the response is sent. Elsewhere (local Deno) the ring simply runs on its own.
@@ -19,5 +19,6 @@ Deno.serve(createFlowHandler({
   storage: createCaptureStorage(db),
   allowedOrigins: config.allowedOrigins,
   ring: createWorkerRing({ url: config.workerRingUrl, waitUntil, log: consoleLogger }),
+  faceRing: createWorkerRing({ url: config.faceRingUrl, waitUntil, log: consoleLogger }),
   cases: createCaseStore(db),
 }));

@@ -20,8 +20,12 @@ import { type CaptureRecord, sessionOpen, sortCaptures, type StaffProfile, type 
 import { phoneLinesRead } from "../lib/mrz";
 import { photoAccess } from "../lib/roles";
 import { mayHaveDocumentData } from "../lib/serverChecks";
+import { isLivenessFrame } from "../lib/liveness";
 import { DocumentDataSection } from "./CaseData";
+import { FaceChecksSection } from "./CaseFace";
+import { LivenessSection } from "./CaseLiveness";
 import { MrzSection } from "./CaseMrz";
+import { RiskSection } from "./CaseRisk";
 import { ServerChecksSection } from "./CaseServer";
 
 export interface CaseViewProps {
@@ -46,11 +50,17 @@ export function CaseView({ id, profile, initialPhotos, initialDocumentData }: Ca
   // Each loaded on its own, so a failure there leaves the rest of the case readable.
   const mrz = useAsync(() => services.mrzChecks(id), `mrz:${id}`);
   const server = useAsync(() => services.serverChecks(id), `server:${id}`);
+  const liveness = useAsync(() => services.livenessCheck(id), `liveness:${id}`);
+  const face = useAsync(() => services.faceChecks(id), `face:${id}`);
   const reloadAll = () => {
     state.reload();
     mrz.reload();
     server.reload();
+    liveness.reload();
+    face.reload();
   };
+  // M5: the face check's frames have their own section; the photo list keeps the document photos.
+  const documentPhotos = useMemo(() => state.data?.captures.filter((c) => !isLivenessFrame(c)) ?? [], [state.data]);
   const mayHaveData = useMemo(
     () => mayHaveDocumentData(mrz.data ? phoneLinesRead(mrz.data) : false, server.data),
     [mrz.data, server.data],
@@ -85,6 +95,7 @@ export function CaseView({ id, profile, initialPhotos, initialDocumentData }: Ca
       {state.data?.verification && (
         <>
           <CaseSummary verification={state.data.verification} />
+          <RiskSection verification={state.data.verification} profile={profile} onDecided={reloadAll} />
           <ServerChecksSection
             verification={state.data.verification}
             captures={state.data.captures}
@@ -108,8 +119,27 @@ export function CaseView({ id, profile, initialPhotos, initialDocumentData }: Ca
             profile={profile}
             initialData={initialDocumentData}
           />
-          <Captures
+          <LivenessSection
             captures={state.data.captures}
+            check={liveness.data}
+            error={liveness.error}
+            loading={liveness.loading}
+            profile={profile}
+            onReload={reloadAll}
+            initialPhotos={initialPhotos}
+          />
+          <FaceChecksSection
+            checks={face.data}
+            captures={state.data.captures}
+            error={face.error}
+            loading={face.loading}
+            profile={profile}
+            onReload={reloadAll}
+            initialPhotos={initialPhotos}
+            faceMatchCounted={state.data.verification.risk.assessment?.uncalibratedCounted.includes("face_match") ?? false}
+          />
+          <Captures
+            captures={documentPhotos}
             profile={profile}
             initialPhotos={initialPhotos}
             onReload={reloadAll}

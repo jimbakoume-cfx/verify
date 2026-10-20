@@ -11,7 +11,8 @@
   "nav": {
     "home": "Verify Ops home",
     "signOut": "Sign out",
-    "signingOut": "Signing out…"
+    "signingOut": "Signing out…",
+    "thresholds": "Thresholds"
   },
   "roles": {
     "reviewer": "Reviewer",
@@ -95,7 +96,19 @@
     "empty": "No verifications yet.",
     "noDocument": "Document not chosen yet",
     "photos_one": "{{count}} photo",
-    "photos_other": "{{count}} photos"
+    "photos_other": "{{count}} photos",
+    "sortLabel": "Sort",
+    "sort": {
+      "newest": "Newest first",
+      "recommendation": "By recommendation"
+    },
+    "filterLabel": "Show",
+    "filter": {
+      "all": "All",
+      "autoApproved": "Approved automatically"
+    },
+    "filterEmpty": "No case matches this filter.",
+    "autoApproved": "Approved automatically · v{{version}}"
   },
   "badges": {
     "test": "Test",
@@ -403,6 +416,199 @@
       "carte_de_sejour": "Residence permit (carte de séjour)"
     }
   },
+  "liveness": {
+    "title": "Face check",
+    "intro": "The random challenge the server gave the rider and the frames their front camera took, with the capture check (whether the frames arrived complete and on time). The server's evaluation of the actions is in \"Server face checks\" below.",
+    "none": "No face check recorded yet.",
+    "challenge": "Challenge",
+    "notEvaluated": "Capture only",
+    "step0": "Look straight at the camera",
+    "actions": {
+      "turn_left": "Turn the head left",
+      "turn_right": "Turn the head right",
+      "look_up": "Look up",
+      "blink": "Blink",
+      "smile": "Smile"
+    },
+    "framesCount_one": "{{count}} frame",
+    "framesCount_other": "{{count}} frames",
+    "code": "Code shown on screen",
+    "frames": "Frames",
+    "duration": "Capture length",
+    "serverElapsed": "Challenge to frames (server)",
+    "maxGap": "Longest pause",
+    "startedWithWarning": "Started despite a light warning",
+    "yes": "Yes",
+    "no": "No",
+    "plausible": "Frames complete, timings plausible.",
+    "unreadable": "The details of this check cannot be read by this version of the dashboard.",
+    "framesTitle": "Frames",
+    "viewAll": "View all frames",
+    "viewFrame": "View frame",
+    "frameLabel": "Frame {{n}}",
+    "frameAlt": "Face check frame {{n}}",
+    "replaced_one": "{{count}} frame of an earlier face check was replaced and erased.",
+    "replaced_other": "{{count}} frames of earlier face checks were replaced and erased.",
+    "problems": {
+      "too_fast": {
+        "title": "Too fast.",
+        "body": "The frames cover less time than the actions need."
+      },
+      "longer_than_challenge": {
+        "title": "Timing does not add up.",
+        "body": "The frames claim more time than passed on the server since the challenge was issued."
+      },
+      "gap_too_long": {
+        "title": "Long pause.",
+        "body": "Several seconds passed between two frames."
+      },
+      "out_of_order": {
+        "title": "Out of order.",
+        "body": "Frame times or steps go backwards, or a frame does not fall in its step."
+      },
+      "step_missing_frames": {
+        "title": "Missing frames.",
+        "body": "A step has fewer frames than expected."
+      },
+      "duplicate_frames": {
+        "title": "Identical frames.",
+        "body": "Two frames are the same file."
+      },
+      "frames_reused": {
+        "title": "Frame seen before.",
+        "body": "A frame's file was already sent in another verification."
+      }
+    }
+  },
+  "face": {
+    "title": "Server face checks",
+    "intro": "The face worker's evaluation of the face check (test sessions; liveness on real sessions once the face switch is on) and the comparison of the ID portrait with the best frame (test sessions only). Every cut-off is a first guess: a person decides.",
+    "livenessTitle": "Liveness (actions re-checked on the server)",
+    "matchTitle": "Face match: ID portrait and face check",
+    "provisional": "Provisional",
+    "uncalibrated": "Uncalibrated",
+    "reviewOnly": "Review only",
+    "uncalibratedBody": "The threshold is a first guess, not yet set on Cameroonian faces (false matches are much more frequent for West Africans at a fixed threshold). This score never approves a case: compare the faces yourself.",
+    "waiting": "Waiting for the face worker. Refresh in a moment.",
+    "notChecked": {
+      "liveness": "Not checked by the server (real sessions wait for the face switch, or the daily cap or the attempts ran out).",
+      "faceMatch": "Not compared: the face match runs on test sessions only, or the server gave up."
+    },
+    "none": {
+      "liveness": "Not evaluated yet (no face check recorded).",
+      "faceMatch": "Not compared yet (needs a face check and the document front)."
+    },
+    "unreadable": "The details of this check cannot be read by this version of the dashboard.",
+    "action": "Action asked",
+    "result": "Seen",
+    "peak": "Strongest",
+    "framesWithFace": "Frames with one face",
+    "actionResult": {
+      "pass": "Done",
+      "fail": "Not done",
+      "unclear": "Cannot tell"
+    },
+    "degrees": "{{value}}°",
+    "flatPlane": "Depth when moving",
+    "flatPlaneResult": {
+      "depth": "Real depth seen",
+      "flat": "Moved like a flat picture",
+      "not_measured": "Not measured (the head barely moved)"
+    },
+    "framesWithFaceTotal": "Frames with one face",
+    "framesOf": "{{n}} of {{total}}",
+    "processing": "Processing time",
+    "coldStart": "models loaded first",
+    "engine": "Engine",
+    "livenessClean": "Every action seen in its own step; nothing else to note.",
+    "problems": {
+      "action_not_done": {
+        "title": "Action not seen.",
+        "body": "The face was seen during the step, but not doing what was asked."
+      },
+      "wrong_direction": {
+        "title": "Wrong way.",
+        "body": "The head turned or tilted the other way than asked."
+      },
+      "action_unclear": {
+        "title": "No face for an action.",
+        "body": "No frame of a step showed exactly one face: the action could not be judged."
+      },
+      "no_reference": {
+        "title": "No starting frame.",
+        "body": "No frame before the actions showed exactly one face: turns are measured from zero."
+      },
+      "face_missing": {
+        "title": "Face missing.",
+        "body": "Some frames show no face."
+      },
+      "multiple_faces": {
+        "title": "Several faces.",
+        "body": "Some frames show more than one face."
+      },
+      "face_jump": {
+        "title": "Possible cut.",
+        "body": "The face jumped between two frames (position or size): frames may come from different recordings."
+      },
+      "flat_plane": {
+        "title": "Flat face.",
+        "body": "When the head turned or tilted, the face moved like one flat picture (a print or a screen)."
+      },
+      "shape_change": {
+        "title": "Face shape changed.",
+        "body": "The face's 3-D shape differs from the first frame's: possibly another face."
+      },
+      "moire": {
+        "title": "Screen pattern.",
+        "body": "A fine periodic pattern, as when a screen is filmed."
+      },
+      "screen_glare": {
+        "title": "Glare on the face.",
+        "body": "Part of the face is blown out white, as with a glossy print or a screen."
+      },
+      "low_detail": {
+        "title": "Little detail.",
+        "body": "The face is unusually smooth, as with a re-photographed print."
+      }
+    },
+    "similarity": "Similarity",
+    "notCompared": "Not compared",
+    "threshold": "Threshold",
+    "lowThreshold": "different under {{value}}",
+    "model": "Model",
+    "matchProblems": {
+      "portrait_not_found": {
+        "title": "No portrait found.",
+        "body": "No face was found on the document photo: nothing was compared."
+      },
+      "selfie_not_found": {
+        "title": "No usable frame.",
+        "body": "No frame of the face check showed exactly one face: nothing was compared."
+      },
+      "portrait_small": {
+        "title": "Small portrait.",
+        "body": "The portrait on the document is very small: the score is less reliable."
+      },
+      "detector_alignment": {
+        "title": "Rough alignment.",
+        "body": "The portrait was aligned without the face mesh: the score is less reliable."
+      },
+      "selfie_not_frontal": {
+        "title": "Frame not straight.",
+        "body": "The best frame does not face the camera: the score is less reliable."
+      }
+    },
+    "sideBySideNote": "Only the faces are shown; each photo opens for 60 seconds and each view is logged.",
+    "showBoth": "Show the portrait and the frame (2 views)",
+    "portrait": "ID portrait (document front)",
+    "portraitAlt": "Portrait on the identity document",
+    "selfie": "Face check, frame {{n}}",
+    "selfieAlt": "Best frame of the face check",
+    "noSelfie": "No frame to show.",
+    "photosGone": "The document photo was replaced or erased.",
+    "countedForApproval": "Counts for automatic approval",
+    "uncalibratedCountedBody": "The threshold is a first guess, not yet set on Cameroonian faces (false matches are much more frequent for West Africans at a fixed threshold). The active thresholds let a passed face match count toward an automatic approval (PM decision of 2026-10-20, test sessions only): compare the faces yourself."
+  },
   "capture": {
     "size": "Size",
     "dimensions": "Dimensions (px)",
@@ -457,6 +663,254 @@
     "photoNotFound": "This photo is no longer available, or this case is not assigned to you.",
     "adminNoDataAccess": "Administrators have no routine access to data read from ID documents. A supervisor or the assigned reviewer can show it.",
     "documentDataNotFound": "This case is no longer available, or it is not assigned to you.",
-    "documentDataAuditFailed": "The access could not be recorded in the audit log, so the data is not shown. Try again in a moment."
+    "documentDataAuditFailed": "The access could not be recorded in the audit log, so the data is not shown. Try again in a moment.",
+    "liveness_required": "The face check is required first.",
+    "too_many_challenges": "Too many face checks for this session.",
+    "challenge_expired": "This face check expired or was replaced.",
+    "challenge_used": "This face check was already recorded.",
+    "invalid_liveness": "The face check's frames are not valid.",
+    "already_decided": "This case has already been decided. Reload the page.",
+    "not_submitted": "This case cannot be decided before the rider submits.",
+    "note_required": "A note is required for this decision.",
+    "invalid_reason": "Choose a reason for a reject (and none for an approval).",
+    "stale_version": "Someone saved a new version meanwhile. Reload the page and check the changes again.",
+    "decisionRole": "Your role does not allow deciding this case.",
+    "thresholdsRole": "Only administrators can change the thresholds.",
+    "thresholdsBadRequest": "The server refused these settings, or they are the same as the active version."
+  },
+  "risk": {
+    "title": "Risk and decision",
+    "intro": "What the rules recommend from the checks, with every signal and its weight, and the threshold version used. Today a person decides every case.",
+    "notAssessedBadge": "Not assessed",
+    "recommendation": {
+      "approve": "Recommend: approve",
+      "review": "Recommend: review",
+      "reject": "Recommend: reject"
+    },
+    "decision": {
+      "approve": "Approved",
+      "review": "Review",
+      "reject": "Rejected"
+    },
+    "notYet": "Assessed when the rider submits.",
+    "notAssessed": "Not assessed yet. Reload in a moment.",
+    "unknownShape": "This assessment was stored by a newer version of the rules. Reload the page.",
+    "score": "Score",
+    "firmScore": "Firm signals only",
+    "band": "Score band",
+    "version": "Threshold version",
+    "versionNumber": "Version {{version}}",
+    "assessedAt": "Assessed",
+    "reasons": {
+      "label": {
+        "hard_flag": "Hard flag",
+        "unknown_signal": "Unknown signal",
+        "always_review_document": "Always decided by a person",
+        "firm_score_high": "Firm signals reach the reject cut-off",
+        "provisional_signals": "High score from provisional signals",
+        "score_between": "Score between the cut-offs",
+        "score_low": "Low score",
+        "missing_checks": "Checks missing",
+        "review_only_check": "Review-only check"
+      },
+      "body": {
+        "hard_flag": "A hard flag is present: a person decides, whatever the score.",
+        "unknown_signal": "A signal this version of the rules does not know: a person decides.",
+        "always_review_document": "This kind of document is always decided by a person.",
+        "firm_score_high": "The firm signals alone add up to {{rejectMin}} or more: the rules recommend a reject.",
+        "provisional_signals": "The score reaches {{rejectMin}} only with provisional signals, which never reject: a person decides.",
+        "score_between": "The score is above {{approveMax}} and under {{rejectMin}}: a person decides.",
+        "score_low": "The score is {{approveMax}} or less: low enough to approve.",
+        "missing_checks": "Some checks are missing (listed below): no approval until they exist.",
+        "review_only_check": "The face match is not calibrated and this threshold version does not let it count: its result never helps approve a case (listed below)."
+      }
+    },
+    "rejectReason": "Rider reason if rejected: {{code}}",
+    "signalsTitle": "Signals",
+    "noSignals": "No signal: nothing adds to the score.",
+    "signal": "Signal",
+    "weight": "Weight",
+    "kind": "Kind",
+    "notCounted": "Switched off",
+    "firm": "Firm",
+    "provisional": "Provisional",
+    "unknownSignal": "Unknown signal",
+    "signals": {
+      "document_expired": "Document expired",
+      "under_18": "Under 18",
+      "image_reused": "Photo already used in another verification",
+      "unsupported_document": "Document not accepted",
+      "mrz_disagreement": "Code lines differ (phone vs server)",
+      "mrz_invalid_server": "Code lines fail their checks",
+      "mrz_print_mismatch": "Printed text differs from the code lines",
+      "type_mismatch": "Not the declared document",
+      "date_logic": "Dates contradict each other",
+      "number_format": "Unexpected number format",
+      "manual_review_document": "Always checked by a person",
+      "unrecognised_document": "Document not recognised",
+      "mrz_unreadable_server": "Code lines not read by the server",
+      "mrz_phone_flag": "Phone's reading of the code lines flagged",
+      "phone_report_missing": "Phone report missing",
+      "provisional_classification": "Type recognised provisionally",
+      "quality_poor": "Poor photo (server)",
+      "liveness_flag": "Liveness check not passed",
+      "face_match_flag": "Face match not passed"
+    },
+    "missingTitle": "Checks missing",
+    "missing": {
+      "server_checks": "Server checks of the photos (waiting, or not possible)",
+      "liveness": "Liveness check (server)",
+      "face_match": "Face match"
+    },
+    "reviewOnlyTitle": "Review only: never helps approve",
+    "reviewOnly": {
+      "face_match": "Face match (uncalibrated threshold)"
+    },
+    "approveUpTo": "Approve up to {{value}}",
+    "rejectFrom": "Reject from {{value}} (firm signals)",
+    "auto": {
+      "title": "Automatic approval",
+      "approved": "Approved automatically with threshold version {{version}} ({{at}}): every condition held.",
+      "eligible": "Every condition holds: the system approves this case.",
+      "notAssessed": "Not assessed for automatic approval (assessed before it existed).",
+      "blocked": "Not approved automatically: a person decides. Why:",
+      "uncalibratedCounted": "Counted although uncalibrated: {{checks}}.",
+      "blockers": {
+        "auto_decide_off": "Automatic approval is off in this threshold version",
+        "real_session": "Not a test session",
+        "not_recommended": "The rules do not recommend approval",
+        "document_not_firm": "The document check is not firm (code lines with every check digit right)",
+        "document_expired": "Document expired",
+        "under_18": "Under 18",
+        "mrz_print_mismatch": "Printed text differs from the code lines",
+        "hard_flag": "A hard flag is present",
+        "firm_signal": "A firm signal is present",
+        "unknown_signal": "An unknown signal is present",
+        "quality_not_ok": "The server's photo check is missing or not ok",
+        "liveness_not_passed": "Liveness check missing or not passed",
+        "face_match_not_passed": "Face match missing or not passed",
+        "face_match_not_counted": "The face match does not count in this threshold version",
+        "score_above_cutoff": "Score above the approve cut-off"
+      }
+    }
+  },
+  "decision": {
+    "title": "Decision",
+    "adminNoDecision": "Administrators do not decide cases: a supervisor or the assigned reviewer does.",
+    "noRecord": "No decision record for this case.",
+    "notSubmitted": "Can be decided once the rider has submitted.",
+    "outcome": {
+      "approve": "Approve",
+      "reject": "Reject"
+    },
+    "automatic": "Automatic",
+    "by": "By",
+    "bySystem": "The rules (automatic decision)",
+    "byYou": "You",
+    "byStaff": "Staff member {{id}}",
+    "at": "When",
+    "recommendationShown": "Recommendation shown",
+    "agreement": {
+      "agrees": "Agreed with the recommendation.",
+      "disagrees": "Went against the recommendation.",
+      "none": "The recommendation was review: nothing to agree with."
+    },
+    "riderReason": "Reason given to the rider",
+    "riderReasonHint": "Shown to the rider in their language.",
+    "note": "Note:",
+    "choose": "Your decision",
+    "chooseReason": "Choose a reason",
+    "preview": {
+      "agrees": "This follows the recommendation.",
+      "disagrees": "This goes against the recommendation: say why in the note.",
+      "none": "The rules leave this case to you."
+    },
+    "noteRequired": "Note (required)",
+    "noteOptional": "Note (optional)",
+    "noteHint": "For staff only, never shown to the rider. Required against the recommendation, or to approve a case with a hard flag. Do not copy data read from the document.",
+    "saving": "Recording…",
+    "submit": "Record the decision",
+    "autoApproved": "Approved automatically (version {{version}})",
+    "checkAutomatic": "The system approved this case on its own. Check it: confirm the approval, or reject it (a note is required to go against it)."
+  },
+  "thresholds": {
+    "title": "Decision thresholds",
+    "intro": "The rules' weights and cut-offs. A new version is active at once, without a redeploy: every case waiting for a decision is assessed again with it. Versions are never edited; each records who made it and why.",
+    "saved_one": "Version {{version}} is active. {{count}} case was assessed again.",
+    "saved_other": "Version {{version}} is active. {{count}} cases were assessed again.",
+    "activeUnknown": "The active version is in a format this dashboard does not know. Reload the page.",
+    "bySystem": "Set up with the system",
+    "createdAt": "Created",
+    "createdBy": "By",
+    "approveMax": "Approve cut-off",
+    "rejectMin": "Reject cut-off",
+    "autoDecide": "Automatic approval",
+    "on": "on",
+    "off": "off",
+    "note": "Why",
+    "editTitle": "New version ({{version}})",
+    "editIntro": "Weights and cut-offs are numbers from 0 to 1 with at most 4 decimals. The score adds the weights of the signals present (capped at 1).",
+    "approveMaxHint": "A score at or under this can be approved (only when no check is missing).",
+    "rejectMinHint": "Firm signals adding up to this or more recommend a reject. Provisional signals never reject.",
+    "signalsCaption": "Signals: weight, whether it counts, and whether it is a hard flag (always a person).",
+    "counted": "Counts",
+    "weightOf": "Weight of {{signal}}",
+    "countedOf": "{{signal}} counts in the score",
+    "hardOf": "{{signal}} is a hard flag",
+    "mandatoryHard": "Required by a PM decision",
+    "alwaysReview": "Documents always decided by a person",
+    "mandatoryDocument": "(required by a PM decision)",
+    "autoDecideLabel": "Approve automatically when every condition holds (never an automatic reject)",
+    "autoDecideHint": "Test sessions only. The system approves a case only when the document check is firm, nothing is expired or under age, no hard flag or firm signal, the photos, liveness and face match passed and the score is at or under the approve cut-off; anything else waits for a person. It never rejects.",
+    "reason": "Why this change (required)",
+    "reasonHint": "{{min}} to {{max}} characters, kept with the version.",
+    "noteError": {
+      "short": "At least {{min}} characters.",
+      "long": "At most {{max}} characters."
+    },
+    "changesTitle": "Changes from version {{version}}",
+    "fixErrors_one": "Fix {{count}} problem above first.",
+    "fixErrors_other": "Fix {{count}} problems above first.",
+    "noChanges": "No change yet.",
+    "saving": "Saving…",
+    "save": "Make version {{version}} active",
+    "change": {
+      "approveMax": "Approve cut-off: {{from}} → {{to}}",
+      "rejectMin": "Reject cut-off: {{from}} → {{to}}",
+      "autoDecide": "Automatic approval: {{from}} → {{to}}",
+      "weight": "Weight of “{{signal}}”: {{from}} → {{to}}",
+      "counted": "“{{signal}}” counts in the score again",
+      "notCounted": "“{{signal}}” no longer counts in the score",
+      "hard": "“{{signal}}” becomes a hard flag",
+      "notHard": "“{{signal}}” is no longer a hard flag",
+      "alwaysReview": "“{{document}}” always decided by a person",
+      "notAlwaysReview": "“{{document}}” no longer always decided by a person",
+      "faceMatchCountsForApproval": "Face match counts for approval: {{from}} → {{to}}"
+    },
+    "historyTitle": "All versions",
+    "active": "Active",
+    "earlierFormat": "Earlier format (before M8): every case went to a person.",
+    "firstOfFormat": "First version of the M8 rules.",
+    "errors": {
+      "not_object": "Not valid.",
+      "unknown_key": "Unknown setting.",
+      "missing_key": "Missing.",
+      "schema": "Wrong format version.",
+      "not_number": "Enter a number, e.g. 0.25.",
+      "out_of_range": "Between 0 and 1.",
+      "too_precise": "At most 4 decimals.",
+      "not_boolean": "Not valid.",
+      "not_array": "Not valid.",
+      "unknown_value": "Unknown value.",
+      "duplicate": "Listed twice.",
+      "mandatory": "A required item is missing.",
+      "order": "Must be above the approve cut-off."
+    },
+    "byMigration": "The migration {{name}}",
+    "faceMatchCounts": "Face match counts for approval",
+    "faceMatchCountsLabel": "Let a passed face match count toward approval (uncalibrated)",
+    "faceMatchCountsHint": "The face match threshold is not calibrated on Cameroonian faces (NIST: about 14 times more false matches for West Africans at a default threshold), and its model is for test sessions only. Off: every face match is review-only again.",
+    "yes": "yes",
+    "no": "no"
   }
 }

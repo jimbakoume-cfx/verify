@@ -87,7 +87,9 @@ export function parseSnapshot(data: unknown): CaseSnapshot | null {
 export function createWorkerRepo(db: SupabaseClient): WorkerRepo {
   return {
     async getKey(kid) {
+      // M6/M7: only the AI worker's keys (scope "documents"); a face worker's key is unknown here.
       const { data, error } = await db.from("worker_key").select("public_key, revoked_at").eq("kid", kid)
+        .eq("scope", "documents")
         .maybeSingle<{ public_key: string; revoked_at: string | null }>();
       if (error) throw dbError("worker_key.select", error);
       return data ? { publicKey: data.public_key, revoked: data.revoked_at !== null } : null;

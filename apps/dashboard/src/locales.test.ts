@@ -1,14 +1,24 @@
 import { describe, expect, it } from "vitest";
 import {
   CAPTURE_SIDES,
+  CONFIG_ERROR_CODES,
   CONSISTENCY_FLAGS,
+  DECISION_OUTCOMES,
   DECLARED_DOCUMENTS,
+  FACE_MATCH_PROBLEMS,
+  FLAT_PLANE_RESULTS,
+  LIVENESS_ACTION_RESULTS,
+  LIVENESS_EVAL_PROBLEMS,
   DETECTED_DOCUMENT_TYPES,
   type MrzServerDetails,
   parseMrz,
   MISMATCH_KINDS,
   POLICY_REASONS,
+  REQUIRED_CHECKS,
   RETAKE_REASONS,
+  RISK_REASONS,
+  RISK_SIGNALS,
+  STAFF_DECISIONS,
 } from "@verify/shared";
 import { KNOWN_SUBTYPES } from "./lib/documentData";
 import { mrzCheckLines, mrzFields, serverMrzCheckLines } from "./lib/mrz";
@@ -117,6 +127,30 @@ describe("FR/EN locales", () => {
     }
   });
 
+  it("label everything the risk section, the decision and the thresholds page can show (M8)", () => {
+    const keys = [
+      ...RISK_SIGNALS.map((code) => `risk.signals.${code}`),
+      ...RISK_REASONS.flatMap((reason) => [`risk.reasons.label.${reason}`, `risk.reasons.body.${reason}`]),
+      ...REQUIRED_CHECKS.map((check) => `risk.missing.${check}`),
+      ...DECISION_OUTCOMES.flatMap((outcome) => [`risk.recommendation.${outcome}`, `risk.decision.${outcome}`]),
+      ...STAFF_DECISIONS.map((outcome) => `decision.outcome.${outcome}`),
+      ...["agrees", "disagrees", "none"].flatMap((key) => [`decision.agreement.${key}`, `decision.preview.${key}`]),
+      ...CONFIG_ERROR_CODES.map((code) => `thresholds.errors.${code}`),
+      ...["approveMax", "rejectMin", "autoDecide", "weight", "counted", "notCounted", "hard", "notHard", "alwaysReview", "notAlwaysReview"].map(
+        (kind) => `thresholds.change.${kind}`,
+      ),
+      ...["short", "long"].map((key) => `thresholds.noteError.${key}`),
+      ...["saved_one", "saved_other", "fixErrors_one", "fixErrors_other"].map((key) => `thresholds.${key}`),
+      "nav.thresholds",
+      "recent.sort.newest",
+      "recent.sort.recommendation",
+    ];
+    for (const key of keys) {
+      expect(FR.has(key), `fr: ${key}`).toBe(true);
+      expect(EN.has(key), `en: ${key}`).toBe(true);
+    }
+  });
+
   it("label everything the server checks and the data viewer can show (M3)", () => {
     const passport: MrzServerDetails = {
       parserVersion: "mrz-v1",
@@ -193,6 +227,27 @@ describe("FR/EN locales", () => {
       // Its threshold is named, so "poor" (under 5) can be read against it.
       expect(server).toContain("5");
     }
+  });
+
+  it("label everything the server face checks can show (M6/M7)", () => {
+    const keys = [
+      ...LIVENESS_EVAL_PROBLEMS.flatMap((p) => [`face.problems.${p}.title`, `face.problems.${p}.body`]),
+      ...FACE_MATCH_PROBLEMS.flatMap((p) => [`face.matchProblems.${p}.title`, `face.matchProblems.${p}.body`]),
+      ...FLAT_PLANE_RESULTS.map((r) => `face.flatPlaneResult.${r}`),
+      ...LIVENESS_ACTION_RESULTS.map((r) => `face.actionResult.${r}`),
+      ...["liveness", "faceMatch"].flatMap((k) => [`face.notChecked.${k}`, `face.none.${k}`]),
+      "risk.reviewOnlyTitle",
+      "risk.reviewOnly.face_match",
+    ];
+    for (const key of keys) {
+      expect(FR.has(key), `fr: ${key}`).toBe(true);
+      expect(EN.has(key), `en: ${key}`).toBe(true);
+    }
+  });
+
+  it("always say the face match is uncalibrated and never approves (M7)", () => {
+    expect(EN.get("face.uncalibratedBody")).toMatch(/never approves/);
+    expect(FR.get("face.uncalibratedBody")).toMatch(/jamais approuver/);
   });
 
   it("keep the shared ServerStatus keys", () => {

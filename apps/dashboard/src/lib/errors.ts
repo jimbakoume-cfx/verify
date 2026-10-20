@@ -38,7 +38,7 @@ export function toClientError(error: unknown): ClientError {
 }
 
 /** Where an error happened: the same code can deserve a more specific message. */
-export type ErrorContext = "default" | "enroll" | "testSession" | "photo" | "documentData";
+export type ErrorContext = "default" | "enroll" | "testSession" | "photo" | "documentData" | "decision" | "thresholds";
 
 const CONTEXT_KEYS: Record<ErrorContext, Partial<Record<ClientErrorCode, string>>> = {
   default: {},
@@ -51,6 +51,9 @@ const CONTEXT_KEYS: Record<ErrorContext, Partial<Record<ClientErrorCode, string>
     not_found: "errors.documentDataNotFound",
     audit_failed: "errors.documentDataAuditFailed",
   },
+  // M8
+  decision: { forbidden_role: "errors.decisionRole", not_found: "errors.documentDataNotFound" },
+  thresholds: { forbidden_role: "errors.thresholdsRole", bad_request: "errors.thresholdsBadRequest" },
 };
 
 /** i18n key of the message to show for an error code. */

@@ -6,6 +6,8 @@
 // (flow/validation.ts, assessMrzReport), and GET /checks the real rules (flow/checks.ts) on the jobs
 // of a scripted AI worker, so what the tests see is judged exactly as the server judges it. M4: a
 // declared document can be scripted as expired (the consistency check's firm document_expired flag).
+// Automatic approval: GET /result answers what `result` scripts (default: review at once), through the
+// real handler's filter (flow/result.ts toFlowResult), only once the case is submitted.
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { Page, Request, Route } from "@playwright/test";
 import {
@@ -20,16 +22,25 @@ import {
   type DeclaredDocument,
   type ErrorCode,
   type FlowChecks,
+  type FlowResult,
   type FlowSession,
   type FlowStatus,
+  LIVENESS_LIMITS,
+  type LivenessAction,
+  type LivenessCaptureDetails,
+  type LivenessCaptureRequest,
+  type LivenessChallengeResponse,
   MRZ_EXPECTATION,
   type MrzCheckDetails,
   type MrzReportRequest,
   type QualityServerDetails,
 } from "../../supabase/functions/_shared/contract";
 import { type CheckStateRow, flowChecks } from "../../supabase/functions/flow/checks";
-import { assessMrzReport } from "../../supabase/functions/flow/handler";
+import { assessMrzReport, checkFrame } from "../../supabase/functions/flow/handler";
+import { toFlowResult } from "../../supabase/functions/flow/result";
+import { drawChallenge, livenessFramePath, validateLivenessCapture } from "../../supabase/functions/flow/liveness";
 import { validateMrzReport } from "../../supabase/functions/flow/validation";
+import { assessLivenessCapture } from "../../supabase/functions/worker/liveness";
 import { type JpegInfo, inspectJpeg } from "./jpeg";
 import { readFilePart } from "./multipart";
 
@@ -113,6 +124,24 @@ export interface RecordedMrzReport {
   details: MrzCheckDetails;
 }
 
+/** M5: a face-check challenge the fake server issued. */
+export interface IssuedChallenge {
+  response: LivenessChallengeResponse;
+  /** When it was issued (Date.now()). */
+  issuedAt: number;
+  used: boolean;
+  superseded: boolean;
+}
+
+/** M5: a face check the server recorded, with the verdict the real rule gives it. */
+export interface RecordedLiveness {
+  body: LivenessCaptureRequest;
+  outcome: "pass" | "flag";
+  details: LivenessCaptureDetails;
+  /** The frames as stored, in order. */
+  frames: StoredObject[];
+}
+
 class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -161,6 +190,22 @@ export class FakeBackend {
   checksOverride: ((checks: FlowChecks) => FlowChecks) | null = null;
   /** Requests the real backend would refuse or never receive: each one is a bug in the app. */
   readonly problems: string[] = [];
+  /**
+   * Automatic approval: what flow_result answers to the n-th GET /result (1-based), e.g. pending twice
+   * then verified. Default: review at once (a person checks the case, as for every real session).
+   */
+  result: (n: number) => FlowResult = () => ({ state: "review", returnUrl: null });
+  /** Automatic approval: every GET /result answer, in order, with when it was asked. */
+  readonly results: { at: number; answer: FlowResult }[] = [];
+  /** M5: every challenge issued, in order. */
+  readonly challenges: IssuedChallenge[] = [];
+  /** M5: every face check recorded, in order (a retried report changes nothing). */
+  readonly livenessRecords: RecordedLiveness[] = [];
+  /**
+   * M5: the next `count` POST /liveness/captures answer this error instead of recording (e.g. 410
+   * challenge_expired, as when the rider took too long), after checking the request as usual.
+   */
+  #failLiveness: { count: number; status: number; code: ErrorCode } = { count: 0, status: 410, code: "challenge_expired" };
 
   status: FlowStatus = "created";
   consentGiven = false;
@@ -171,7 +216,7 @@ export class FakeBackend {
   #failUploads: { count: number; status: number } = { count: 0, status: 503 };
   #failChecks: { count: number; status: number } = { count: 0, status: 503 };
   readonly #jobs = new Map<string, FakeJob>();
-  readonly #uploadTokens = new Map<string, { token: string; kind: CaptureSide }>();
+  readonly #uploadTokens = new Map<string, { token: string; kind: CaptureSide | "liveness_frame" }>();
   readonly #latest = new Map<CaptureSide, string>();
 
   /** From now on every flow call answers 410 session_expired, as after `session_expires_at`. */
@@ -182,6 +227,11 @@ export class FakeBackend {
   /** The next `count` uploads to storage fail with `status` (default 503, a storage outage). */
   failUploads(count: number, status = 503): void {
     this.#failUploads = { count, status };
+  }
+
+  /** M5: the next `count` reports of a face check are refused with `code` (default: the challenge expired). */
+  failLiveness(count: number, status = 410, code: ErrorCode = "challenge_expired"): void {
+    this.#failLiveness = { count, status, code };
   }
 
   /** The next `count` GET /checks answer `status` (default 503: the function is down). Infinity: all. */
@@ -198,9 +248,12 @@ export class FakeBackend {
     this.worker = (capture, n) => ({ result: "done", verdict: bySide[capture.kind]?.[n - 1] ?? "ok", pendingFor });
   }
 
-  /** The flow routes called, e.g. ["GET /session", "POST /consent", ...]. */
+  /**
+   * The flow routes called up to the submit, e.g. ["GET /session", "POST /consent", ...]. The result
+   * screen's polls (GET /result, as many as the wait takes) are in `results` instead.
+   */
   get routes(): string[] {
-    return this.calls.map((c) => c.route);
+    return this.calls.map((c) => c.route).filter((route) => route !== "GET /result");
   }
 
   session(): FlowSession {
@@ -293,6 +346,15 @@ export class FakeBackend {
     if (req.headers()[SESSION_TOKEN_HEADER] !== this.token) throw new ApiError(401, "invalid_session");
     if (this.#expired) throw new ApiError(410, "session_expired");
     if (name === "GET /session") return this.session();
+    if (name === "GET /result") {
+      if (this.status === "created" || this.status === "in_progress") {
+        this.problems.push(`${name}: asked before the submit`);
+        throw new ApiError(409, "not_submitted");
+      }
+      const answer = toFlowResult(this.result(this.results.length + 1));
+      this.results.push({ at: Date.now(), answer });
+      return answer;
+    }
     if (this.status !== "created" && this.status !== "in_progress") throw new ApiError(409, "already_submitted");
     const input = (body ?? {}) as Record<string, unknown>;
 
@@ -300,6 +362,8 @@ export class FakeBackend {
       case "POST /consent": {
         if (input.consentVersion !== CONSENT_VERSION) this.#badRequest(name, `consentVersion ${String(input.consentVersion)}`);
         if (input.language !== "fr" && input.language !== "en") this.#badRequest(name, `language ${String(input.language)}`);
+        // M5: the optional box, true or false (missing means false on the server; this app always sends it).
+        if (typeof input.keepFaceImages !== "boolean") this.#badRequest(name, `keepFaceImages ${String(input.keepFaceImages)}`);
         this.consentGiven = true;
         this.status = "in_progress";
         return this.session();
@@ -317,7 +381,9 @@ export class FakeBackend {
         if (!this.declaredDocument) throw new ApiError(409, "document_type_required");
         const kind = input.kind as CaptureSide;
         if (!REQUIRED_SIDES[this.declaredDocument].includes(kind)) throw new ApiError(400, "invalid_kind");
-        if (this.#uploadTokens.size >= CAPTURE_LIMITS.maxUploadUrlsPerSession) throw new ApiError(429, "too_many_uploads");
+        // The face check's upload slots have their own budget (M5: challenges per session).
+        const photoLinks = [...this.#uploadTokens.values()].filter((t) => t.kind !== "liveness_frame").length;
+        if (photoLinks >= CAPTURE_LIMITS.maxUploadUrlsPerSession) throw new ApiError(429, "too_many_uploads");
         const path = `${this.verificationId}/${kind}-${randomUUID()}.jpg`;
         const token = randomBytes(16).toString("hex");
         this.#uploadTokens.set(path, { token, kind });
@@ -329,8 +395,17 @@ export class FakeBackend {
         return this.#recordMrz(name, input);
       case "GET /checks":
         return this.#checks(name);
+      case "POST /liveness/challenge":
+        return this.#livenessChallenge(name, input);
+      case "POST /liveness/captures":
+        return this.#livenessCaptures(name, input);
       case "POST /submit": {
         if (!this.declaredDocument) throw new ApiError(409, "missing_sides");
+        // M5: the face check first (the app never submits without it).
+        if (this.livenessRecords.length === 0) {
+          this.problems.push(`${name}: submitted without a face check`);
+          throw new ApiError(409, "liveness_required");
+        }
         if (REQUIRED_SIDES[this.declaredDocument].some((side) => !this.#latest.has(side))) throw new ApiError(409, "missing_sides");
         this.status = "submitted";
         return this.session();
@@ -457,6 +532,97 @@ export class FakeBackend {
     const answer = this.checksOverride ? this.checksOverride(computed) : computed;
     this.checksAnswers.push(answer);
     return answer;
+  }
+
+  /**
+   * M5, POST /liveness/challenge: as the real handler, a challenge drawn by the server's own code, an
+   * unused earlier one replaced, and a signed upload slot per frame.
+   */
+  #livenessChallenge(name: string, input: Record<string, unknown>): LivenessChallengeResponse {
+    if (Object.keys(input).length > 0) this.#badRequest(name, "a body other than {}");
+    if (!this.consentGiven) throw new ApiError(403, "consent_required");
+    if (!this.declaredDocument) throw new ApiError(409, "document_type_required");
+    if (this.challenges.length >= LIVENESS_LIMITS.maxChallengesPerSession) throw new ApiError(429, "too_many_challenges");
+    for (const c of this.challenges) if (!c.used) c.superseded = true;
+    const challengeId = randomUUID();
+    const { actions, code } = drawChallenge();
+    const uploads = Array.from({ length: LIVENESS_LIMITS.maxFrames }, (_, index) => {
+      const path = livenessFramePath(this.verificationId, challengeId, index);
+      const token = randomBytes(16).toString("hex");
+      this.#uploadTokens.set(path, { token, kind: "liveness_frame" });
+      return { path, token };
+    });
+    const response: LivenessChallengeResponse = {
+      challengeId,
+      actions: actions as LivenessAction[],
+      code,
+      expiresAt: new Date(Date.now() + LIVENESS_LIMITS.challengeTtlSeconds * 1000).toISOString(),
+      bucket: BUCKET,
+      uploads,
+    };
+    this.challenges.push({ response, issuedAt: Date.now(), used: false, superseded: false });
+    return response;
+  }
+
+  /**
+   * M5, POST /liveness/captures, in the real handler's order: strict validation (flow/liveness.ts), the
+   * session's own slots, the challenge (unknown, used, replaced or expired), the code, each stored file
+   * (checkFrame and its SHA-256), then the real rule (worker/liveness.ts). The app should never be
+   * refused here, except by an injected fault.
+   */
+  #livenessCaptures(name: string, input: Record<string, unknown>): unknown {
+    const refuse = (status: number, code: ErrorCode, why: string): never => {
+      this.problems.push(`${name}: ${why}`);
+      throw new ApiError(status, code);
+    };
+    const check = validateLivenessCapture(input);
+    if (!check.ok) return refuse(400, "bad_request", check.message);
+    const body = check.request;
+    if (body.frames.some((f) => f.path !== livenessFramePath(this.verificationId, body.challengeId, f.index))) {
+      refuse(400, "bad_request", "a frame path that is not its slot");
+    }
+    const challenge = this.challenges.find((c) => c.response.challengeId === body.challengeId);
+    if (!challenge) return refuse(404, "not_found", "unknown challenge");
+    if (challenge.used) {
+      const recorded = this.livenessRecords.find((r) => r.body.challengeId === body.challengeId);
+      if (recorded && JSON.stringify(recorded.body.frames.map((f) => f.path)) === JSON.stringify(body.frames.map((f) => f.path))) {
+        return { recorded: true };
+      }
+      refuse(409, "challenge_used", "a used challenge");
+    }
+    if (challenge.superseded) refuse(410, "challenge_expired", "a replaced challenge");
+    if (body.code !== challenge.response.code) refuse(422, "invalid_liveness", "a wrong code");
+    const frames: StoredObject[] = [];
+    let total = 0;
+    for (const frame of body.frames) {
+      const object = this.objects.get(frame.path);
+      if (!object) return refuse(404, "upload_missing", `frame ${frame.index} not uploaded`);
+      total += object.bytes.length;
+      const checked = checkFrame(object.bytes);
+      if (!checked.ok) refuse(422, checked.code, `frame ${frame.index}: ${checked.code}`);
+      if (total > LIVENESS_LIMITS.maxTotalBytes) refuse(422, "image_too_large", "frames over the total limit");
+      if (createHash("sha256").update(object.bytes).digest("hex") !== frame.sha256) {
+        refuse(422, "invalid_liveness", `frame ${frame.index}: SHA-256 differs`);
+      }
+      frames.push(object);
+    }
+    if (this.#failLiveness.count > 0) {
+      this.#failLiveness.count--;
+      throw new ApiError(this.#failLiveness.status, this.#failLiveness.code);
+    }
+    const { outcome, details } = assessLivenessCapture({
+      challengeId: body.challengeId,
+      actions: challenge.response.actions,
+      code: challenge.response.code,
+      frames: body.frames,
+      stepStartsMs: body.stepStartsMs,
+      serverElapsedMs: Date.now() - challenge.issuedAt,
+      reusedElsewhere: false,
+      startedWithWarning: body.startedWithWarning,
+    });
+    challenge.used = true;
+    this.livenessRecords.push({ body, outcome, details, frames });
+    return { recorded: true };
   }
 
   /** worker_job.status as the server would see it now. */

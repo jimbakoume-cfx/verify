@@ -25,7 +25,8 @@ export default defineConfig<TestOptions>({
   testDir: "e2e",
   outputDir: `${OUT}/results`,
   globalSetup: "./e2e/global-setup.ts",
-  timeout: 60_000,
+  // M5: every complete flow now ends with the face check (about 15 s).
+  timeout: 90_000,
   expect: { timeout: 10_000 },
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
@@ -59,7 +60,13 @@ export default defineConfig<TestOptions>({
   projects: [
     {
       name: "card",
-      testMatch: ["capture-card.spec.ts", "capture-cni-biometric.spec.ts", "server-checks.spec.ts", "server-checks-expired.spec.ts"],
+      testMatch: [
+        "capture-card.spec.ts",
+        "capture-cni-biometric.spec.ts",
+        "server-checks.spec.ts",
+        "server-checks-expired.spec.ts",
+        "result.spec.ts",
+      ],
       use: { camera: "card", launchOptions: launch(cameraArgs("card")) },
     },
     {
@@ -83,6 +90,7 @@ export default defineConfig<TestOptions>({
       testMatch: "capture-low-resolution.spec.ts",
       use: { camera: "lowRes", launchOptions: launch(cameraArgs("lowRes")) },
     },
+    { name: "face", testMatch: "liveness.spec.ts", use: { camera: "face", launchOptions: launch(cameraArgs("face")) } },
     { name: "camera-denied", testMatch: "camera-denied.spec.ts", use: { camera: null, launchOptions: launch(DENIED_CAMERA_ARGS) } },
   ],
 });

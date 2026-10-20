@@ -92,6 +92,10 @@ export type Screen =
   | { name: "upload" }
   /** "Checking your photos…": waiting for the server's check of the photos just sent (M3). */
   | { name: "checking" }
+  /** M5: the face check (front camera, a random challenge), after the photos and before the submit. */
+  | { name: "liveness" }
+  /** Automatic approval: after the submit, "your ID is verified", "we're checking a few details", or waiting. */
+  | { name: "result" }
   | { name: "done" }
   | { name: "sessionError"; reason: SessionErrorReason };
 
@@ -124,6 +128,18 @@ export interface UploadState {
 export interface ServerRetake {
   side: CaptureSide;
   reason: RetakeReason;
+}
+
+/**
+ * The result screen (automatic approval). pending: waiting for GET /flow/result. verified: "Your ID is
+ * verified" and "Continue". review: "We're checking a few details, we'll let you know" (also when the
+ * wait times out or fails). leaving: "Continue" pressed with a return address: the app goes there.
+ */
+export interface ResultState {
+  state: "pending" | "verified" | "review";
+  /** An https address, with "verified" only. */
+  returnUrl: string | null;
+  leaving: boolean;
 }
 
 export interface FlowState {
@@ -165,6 +181,13 @@ export interface FlowState {
    * asked again for these photos.
    */
   expiredNotice: "none" | "shown" | "accepted";
+  /**
+   * M5: the server recorded this visit's face check. Kept when the document changes (the face does
+   * not), so "Use another document" does not ask for it again.
+   */
+  livenessDone: boolean;
+  /** Automatic approval: the result after the submit. */
+  result: ResultState;
 }
 
 export type FlowAction =
@@ -209,11 +232,22 @@ export type FlowAction =
   | { type: "expired/another" }
   /** "Continue anyway": the checks go on as usual, then the case is submitted (staff see the flag). */
   | { type: "expired/continue" }
+  /** M5: the server recorded the face check: on to the submit. */
+  | { type: "liveness/done" }
+  /** M5: the face check met an error that ends the session (expired link...); other errors stay on its screen. */
+  | { type: "liveness/failed"; error: FlowErrorCode }
   | { type: "error/dismiss" }
+  /** Automatic approval: GET /flow/result settled. */
+  | { type: "result/answer"; state: "verified" | "review"; returnUrl: string | null }
+  /** No settled answer within RESULT_WAIT_MS, or the result could not be read: shown as a review. */
+  | { type: "result/timeout" }
+  /** "Continue" on "Your ID is verified": to the return address when there is one, else the end screen. */
+  | { type: "result/continue" }
   /** The phone's Back button or gesture (see useFlow). */
   | { type: "nav/back" };
 
 const IDLE_UPLOAD: UploadState = { status: "idle", stage: "sides", progress: null };
+const PENDING_RESULT: ResultState = { state: "pending", returnUrl: null, leaving: false };
 
 export function initialFlowState(boot: { hasToken: boolean; invalidLink: boolean }): FlowState {
   return {
@@ -234,6 +268,8 @@ export function initialFlowState(boot: { hasToken: boolean; invalidLink: boolean
     serverRetakes: {},
     retakeReasons: {},
     expiredNotice: "none",
+    livenessDone: false,
+    result: PENDING_RESULT,
   };
 }
 
@@ -298,8 +334,12 @@ function captureStep(side: CaptureSide, fromReview: boolean): Screen {
   return side === "document_back" && fromReview ? { name: "turnOver", side } : { name: "capture", side };
 }
 
-/** After the checking screen: only the submit is left, shown on the upload screen. */
+/**
+ * After the checking screen: the face check (M5) unless it is already recorded, then the submit,
+ * shown on the upload screen.
+ */
 function queueSubmit(state: FlowState): FlowState {
+  if (!state.livenessDone) return { ...state, error: null, upload: IDLE_UPLOAD, screen: { name: "liveness" } };
   return {
     ...state,
     error: null,
@@ -498,6 +538,10 @@ export function flowReducer(state: FlowState, action: FlowAction): FlowState {
           screen: { name: "capture", side },
         };
       }
+      if (error === "liveness_required") {
+        // The server has no face check for this session (e.g. its frames were replaced): do it again.
+        return { ...state, error, livenessDone: false, upload: IDLE_UPLOAD, screen: { name: "liveness" } };
+      }
       if (error === "missing_sides") {
         const first = state.sides[0];
         if (!first) return fail(state, error);
@@ -520,7 +564,31 @@ export function flowReducer(state: FlowState, action: FlowAction): FlowState {
       return { ...state, error: null, upload: { ...state.upload, status: "queued", progress: null } };
 
     case "upload/submitted":
-      return { ...state, error: null, session: action.session, upload: IDLE_UPLOAD, screen: { name: "done" } };
+      // Automatic approval: the result screen asks the server whether the ID is verified.
+      return {
+        ...state,
+        error: null,
+        session: action.session,
+        upload: IDLE_UPLOAD,
+        result: PENDING_RESULT,
+        screen: { name: "result" },
+      };
+
+    case "result/answer":
+      if (state.screen.name !== "result" || state.result.state !== "pending") return state;
+      return {
+        ...state,
+        result: { state: action.state, returnUrl: action.state === "verified" ? action.returnUrl : null, leaving: false },
+      };
+
+    case "result/timeout":
+      if (state.screen.name !== "result" || state.result.state !== "pending") return state;
+      return { ...state, result: { ...PENDING_RESULT, state: "review" } };
+
+    case "result/continue":
+      if (state.screen.name !== "result" || state.result.state !== "verified" || state.result.leaving) return state;
+      // With a return address useFlow takes the rider there; without one, the end screen.
+      return state.result.returnUrl ? { ...state, result: { ...state.result, leaving: true } } : { ...state, screen: { name: "done" } };
 
     case "checks/ok":
     case "checks/timeout":
@@ -565,6 +633,14 @@ export function flowReducer(state: FlowState, action: FlowAction): FlowState {
       // Nothing the rider may still be asked for: the photos go as they are (staff review them).
       return retakes.length > 0 ? retakeSides(state, retakes) : queueSubmit(state);
     }
+
+    case "liveness/done":
+      if (state.screen.name !== "liveness") return state;
+      return queueSubmit({ ...state, livenessDone: true });
+
+    case "liveness/failed":
+      if (state.screen.name !== "liveness" || !sessionErrorReason(action.error)) return state;
+      return fail(state, action.error);
 
     case "error/dismiss":
       return { ...state, error: null };
@@ -625,7 +701,8 @@ export function handlesBack(screen: Screen): boolean {
     screen.name === "reading" ||
     screen.name === "review" ||
     screen.name === "upload" ||
-    screen.name === "checking"
+    screen.name === "checking" ||
+    screen.name === "liveness"
   );
 }
 

@@ -35,6 +35,19 @@ export function documentDataAccess(role: StaffRole): DocumentDataAccess {
   return role === "admin" ? "admin_blocked" : "view";
 }
 
+/**
+ * M8, POST /admin/decisions: supervisors, and reviewers on cases assigned to them (the only cases they
+ * see). Admins do not decide: they have no routine access to the photos or the data read.
+ */
+export function canDecide(role: StaffRole): boolean {
+  return role !== "admin";
+}
+
+/** M8, POST /admin/thresholds: admins only. */
+export function canEditThresholds(role: StaffRole): boolean {
+  return role === "admin";
+}
+
 /** Reviewers only see the verifications assigned to them, so their list needs saying so. */
 export function seesAllVerifications(role: StaffRole): boolean {
   return role !== "reviewer";

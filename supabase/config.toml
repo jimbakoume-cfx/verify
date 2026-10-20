@@ -22,3 +22,7 @@ import_map = "./functions/deno.json"
 [functions.worker]
 verify_jwt = false
 import_map = "./functions/deno.json"
+
+[functions.face]
+verify_jwt = false
+import_map = "./functions/deno.json"

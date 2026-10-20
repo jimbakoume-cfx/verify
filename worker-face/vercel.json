@@ -1,0 +1,17 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "regions": ["cdg1"],
+  "git": { "deploymentEnabled": false },
+  "buildCommand": "python3 scripts/fetch_models.py",
+  "build": {
+    "env": { "VERCEL_PYTHON_DISABLE_RUNTIME_INSTALL": "1" }
+  },
+  "functions": {
+    "api/process.py": {
+      "maxDuration": 120,
+      "memory": 2048,
+      "includeFiles": "models/**",
+      "excludeFiles": "{tests/**,.pytest_cache/**,README.md,scripts/**}"
+    }
+  }
+}

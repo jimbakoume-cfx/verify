@@ -81,10 +81,10 @@ Confiance ride app/backend ──(API key)──► Supabase Edge Function "sess
 | MRZ reading on the phone (since M2) | tesseract.js 7 with DoubangoTelecom's MRZ model; since M4, test sessions read with our own model (trained in M3 on fictitious renders only, fine-tuned from Google's `eng`), which passed its automated gates and awaits G4 | Apache-2.0 (engine); BSD-3-Clause (Doubango's model, checked 2026-10-13; trained by its authors on images collected from the web); Apache-2.0 (our model, derived from `eng`); see `LICENSES.md` |
 | AI worker (M3) | Python 3.12 on Vercel, headless OpenCV, NumPy, Pillow, ONNX Runtime, cryptography (Ed25519) | PSF, Apache-2.0 (OpenCV; its wheel bundles LGPL and other parts, documented), BSD-3 and others, MIT-CMU, MIT, Apache-2.0 / BSD-3 |
 | OCR, printed text FR/EN, and the server's re-read of the code lines (M3) | RapidOCR 3.9.2 with the PP-OCRv6 "small" models (no Tesseract on the server: its packages bring GPL code) | Apache-2.0 (code and models) |
-| Face detection | OpenCV YuNet | MIT |
-| Live face guidance on the phone (blink, head turn) | MediaPipe Face Landmarker | Apache-2.0 |
-| Passive anti-spoofing | MiniVision Silent-Face-Anti-Spoofing | Apache-2.0 |
-| **Face matching** | Candidates: **OpenCV SFace** (Apache-2.0) and **dlib ResNet** (released into the public domain by its author). We benchmark both on consented local data. | See warning below |
+| Face detection, landmarks and alignment (since M6, on the face worker) | MediaPipe Face Landmarker's three models (from Google's `face_landmarker.task`), run on LiteRT with MediaPipe's pipeline written out by us (the `mediapipe` package is too large for Vercel beside AuraFace). **Not YuNet, not SCRFD** (PM decision) | Apache-2.0 (models, LiteRT) |
+| Live face guidance on the phone (blink, head turn) | MediaPipe Face Landmarker (the only face detector allowed: green in `docs/research/FACE_MODELS.md`). **Not on the phone in M5:** too heavy a download (see "Decisions for M5"); the phone checks brightness only, and M6 runs MediaPipe on the server | Apache-2.0 |
+| Passive anti-spoofing | **Since M6: our own provisional cues** (moiré, screen glare, low detail; heuristics, no model) and the flat-plane check from the landmarks. Our own detectors later, trained on consented attack captures (`training/antispoof/`). Silent-Face-Anti-Spoofing allowed as a low-weight test-only signal, **not shipped** (see "Decisions for M6") | Ours |
+| **Face matching** (since M7, **test sessions only**) | **AuraFace v1 `glintr100.onnx` only** on ONNX Runtime; uncalibrated threshold, review-only unless the threshold version lets it count (automatic approval, 2026-10-20). **Before the pilot: a paid licence, a vendor SDK or our own model** (see "Decisions for M7"). SFace and dlib were rejected by the research (`docs/research/FACE_MODELS.md`) | Apache-2.0 on the weights, amber (undisclosed training data); see `LICENSES.md` |
 | Risk model (Phase 2) | scikit-learn | BSD-3 |
 
 **Licence warnings:**
@@ -111,9 +111,9 @@ Confiance ride app/backend ──(API key)──► Supabase Edge Function "sess
 - `api_client`: the Confiance backend now, driver app later. API key hash, webhook URL and secret (the secret kept in Vault).
 - `applicant`: `external_user_id`, `subject_type` (rider/driver), `verified_at`, status.
 - `verification`: one attempt. Status, document type, risk score, decision, threshold version, attempt number.
-- `consent_record`: consent text version, language, time, device.
-- `capture`: front/back/liveness, storage path, quality metrics, sha256.
-- `liveness_challenge`: actions, one-time code, expiry.
+- `consent_record`: consent text version, language, time, device. Since M5, the optional "keep my face images" answer with the version of its wording.
+- `capture`: front/back/liveness, storage path, quality metrics, sha256. Since M5, the face check's frames (kind `liveness_frame`), tied to their challenge.
+- `liveness_challenge` (since M5): actions, one-time code, expiry, used once. Only the Edge Functions can reach it.
 - `check_result`: check name and version, score, pass/flag/fail, details (outcomes and counts only, never personal data). Since M2, tied to the photo it ran on. Since M4, a case-level `consistency` check (generic codes: which flags, which kinds of field disagree, never a value).
 - `extracted_document_data`: sensitive fields encrypted; records whether each field came from MRZ or OCR. Since M2: the MRZ lines read on the phone (`source` = `mrz_phone`), encrypted inside the database with a key kept in Supabase Vault. Since M3: the code lines read by the server (`mrz_server`) and the printed fields it read, including the card sub-type (`ocr_server`), under the same key.
 - Since M3: `worker_job` (one per document photo: the AI worker's queue), `worker_key` (the worker's public keys), `worker_nonce` (replay guard) and `worker_settings` (the test-only switch and the daily job cap). Only the Edge Functions can reach them.
@@ -121,7 +121,7 @@ Confiance ride app/backend ──(API key)──► Supabase Edge Function "sess
 - `decision`: system or reviewer, outcome, reason code, note.
 - `reason_code`: FR/EN text shown to riders.
 - `appeal`.
-- `threshold_config`: versioned; who changed it and when.
+- `threshold_config`: versioned; who changed it and when. Since M8: append-only, the highest version is active, each with its reason; the case's assessment is stored on `verification` and each `decision` records the version, the recommendation shown and whether it agreed.
 - `staff_profile`: role is reviewer, supervisor or admin; linked to the Supabase Auth user.
 - `audit_event`: append-only and hash-chained. No one, admins included, can edit or delete a row.
 - `webhook_delivery`.
@@ -142,13 +142,15 @@ The exact routes, request and response types, limits and error codes of the impl
 - Since M1: `GET /flow/session` · `POST /flow/consent` · `POST /flow/document-type` · `POST /flow/upload-url` (a one-time upload link to private storage) · `POST /flow/captures {path, kind, quality}` (the server checks the uploaded image) · `POST /flow/submit`.
 - Since M2: `POST /flow/mrz` (what the phone read from the code lines; the server recomputes every check digit).
 - Since M3: `GET /flow/checks` (the server's check of each photo: pending, ok, retake with a reason, or unchecked; the rider waits for it for at most 20 seconds). Since M4 it also says when the code lines show an expired document.
-- Planned: `POST /flow/liveness/challenge` (M5) · `GET /flow/status` (result, reason, retries left; M10) · `POST /flow/appeal` (M10).
+- Since M5: `POST /flow/liveness/challenge` (a random challenge and its upload slots) · `POST /flow/liveness/captures` (the frames' report; the server checks every file). The submit needs the face check.
+- Since automatic approval (2026-10-20): `GET /flow/result` (after the submit: verified, pending or review; nothing else).
+- Planned: `GET /flow/status` (result, reason, retries left; M10) · `POST /flow/appeal` (M10).
 
 ### API 3: Ops dashboard → Verify (Supabase Auth with 2FA required; enforced by role)
 - Queue and case details: read directly via database rules. Each role sees only what it is allowed.
 - Since M1: `POST /admin/enroll {email, code, password}` (staff account set-up by one-time invite code) · `POST /admin/test-sessions` (test rider links, until M10) · `POST /admin/captures/view {captureId}` (audited, 60-second link).
 - Since M2: `POST /admin/document-data {verificationId}` (the code lines read on the phone, decrypted; audited before decryption; never for admins). Since M3 it also returns the code lines and printed fields read by the server.
-- Planned: `POST /admin/verifications/{id}/decision`
+- Since M8: `POST /admin/decisions {verificationId, outcome, reasonCode, note}` (supervisor or the assigned reviewer; never admin) · `POST /admin/thresholds {baseVersion, config, note}` (admins only; active at once).
 - Search: supervisors and above.
 - Thresholds: admins only.
 - Metrics, audit log, appeals.
@@ -174,9 +176,9 @@ Each milestone ends with a Netlify link and short test steps. The flow has a "de
 | **M2** | **MRZ reading.** Read the MRZ on the phone, parse passport (TD3) and the new CNI (2025, TD1), validate check digits on the phone and again on the server. The old CNI has no MRZ. | Scan your passport or new CNI with the debug link: fields shown with ✅/❌ for each check digit; the dashboard shows the server's own check and "Show data read" |
 | **M3** | **AI worker goes live (Q8).** On test sessions, the server re-checks each photo's quality (an unusable photo is retaken at once, at most once per side), re-reads the MRZ from the image and compares it with the phone's, recognises the document (firm from code lines, provisional from printed words) and reads a few printed fields. Our own MRZ model's training pipeline and gates. | Scan each document type with a test session: correct type, the server's code lines agree with the phone's, the fields behind "Show data read"; a blank card is sent back once (`M3_SPEC.md`) |
 | **M4** | **Consistency checks and first risk flags.** On test sessions the server compares the printed fields with the code lines (tolerantly), checks the dates against each other and against today, and flags an expired document (the rider is told at once and may use another document), a holder under 18 and a printed field that disagrees. Our own MRZ model reads test sessions. | Try an expired ID, and a test card whose printed data does not match its MRZ (`M4_SPEC.md`) |
-| M5 | Active liveness capture: random challenge, frames uploaded | A new challenge appears each time |
-| M6 | Server-side liveness evaluation + passive anti-spoofing | A printed photo or a phone screen held to the camera is flagged |
-| M7 | Face match between selfie and ID portrait | Your selfie vs your ID matches; a colleague's does not |
+| **M5** | **Active liveness capture.** After the document photos, a face check with the front camera: the server's random challenge (3 of 5 actions and a one-time code), 13 small frames to private storage, a `liveness_capture` check (complete, plausible timings; not evaluated). The dashboard shows the challenge and the frames through the audited viewer. | A new challenge appears each time (`M5_SPEC.md`) |
+| **M6** | **Server-side liveness evaluation.** A second Vercel worker (`worker-face/`, key `f1`) re-checks the challenge's actions from MediaPipe's face landmarks, in order; a flat-plane check (a print or a screen moves as one flat surface); the same face throughout; provisional screen and print cues. A `liveness` check: pass, flag or fail, review only. Training pipeline stub for our own detectors. | A printed photo or a phone screen held to the camera is flagged (`M6_SPEC.md`) |
+| **M7** | **Face match**, test sessions only: the best face-check frame against the ID portrait with AuraFace; a `face_match` check with the similarity and an **uncalibrated** threshold, always review-only (no case is approved on it). The dashboard shows both faces side by side through the audited viewer. | Your selfie vs your ID matches; a colleague's does not (`M7_SPEC.md`) |
 | M8 | Risk score, editable thresholds, approve/reject/review | Change a threshold and see the decision change, with no redeploy |
 | M9 | Ops dashboard v1: login with 2FA, roles, queue, side-by-side view, decide with a reason, audit log | Log in as reviewer vs admin and confirm each sees different things |
 | M10 | Integration API, webhooks, consent screen (placeholder text), result screen, retries and appeal | A small "fake ride app" page starts a session and receives the webhook |
@@ -262,6 +264,82 @@ Details: `docs/M4_SPEC.md`.
 2. **Face model (M7): research first, then you decide.** Most good public face models, and the datasets they were trained on, are non-commercial (InsightFace, the published ArcFace weights, VGGFace2). We will find the best option that is licensed for commercial use, or a plan to train our own. We document its licence and its accuracy limits, and show you before anything is built on it. The rest of M5–M7 is built around it in the meantime.
 3. **Hosting: Vercel Hobby, test sessions only, for now.** Liveness and face checks run only on test sessions, under the daily cap. Moving to Vercel Pro (with its DPA) or to another host is decided before the pilot.
 4. **Product decisions during the build: the safest default, recorded.** We pick the conservative option (more staff review, less automatic), record it in this file and list it at each milestone's ping for you to review. Anything legal, financial or licence-related still waits for you.
+
+### Decisions for M5 (2026-10-19)
+Your decision first; the others are the safest defaults (decision 4 above), for you to review.
+1. **Your decision: an optional box to keep face images.** The consent screen gets a separate box, unticked by default: "keep my face images to improve and tune Confiance's checks (deleted on request)". The answer is stored with the version of its wording (`consent_record.keep_face_images`). Nothing depends on it yet. Placeholder wording, for the lawyer.
+2. **Your decision: on-device face detection, if any, uses MediaPipe** (green in `docs/research/FACE_MODELS.md`), never YuNet. **M5 uses none:** MediaPipe's engine is a 13.5 MB download (3.9 MB compressed) on every rider's first visit, which is not cheap on low-end Android over slow networks. The phone only checks brightness and contrast in the oval; the server runs MediaPipe on the frames in M6.
+3. **The face check is required** before the submit (the server refuses a submit without it). It comes after the document photos and their server check, and is kept if the rider then chooses another document.
+4. **Challenge:** 3 different actions drawn at random from 5 (turn the head left, turn it right, look up, blink, smile), in a random order, plus a 6-digit code shown on screen during the capture. A challenge is valid for 10 minutes and used once; at most 5 per session (then the rider starts again from the Confiance app).
+5. **Frames, not video:** 13 still frames of the whole camera picture, 480 px on the long side, about 40 KB each, under 600 KB in all. The server accepts 8 to 15 frames, refuses any file that is not what the phone said (size, JPEG, dimensions, SHA-256), and erases refused frames.
+6. **The hints never block:** "Start" works after 6 seconds whatever the brightness check says; the server records that the rider started despite a warning, for staff.
+7. **Recorded for every session, evaluated by nobody yet:** the server writes a `liveness_capture` check (frames complete, timings plausible) as the frames arrive. It runs inside Supabase with no model and no third party, so it is not limited to test sessions; M6's evaluation on the AI worker will be, as decision 3 above says. Staff see "Not evaluated yet".
+8. **Retries:** a network failure resends the same frames ("Try again"); anything else needs a new challenge ("Start the face check again").
+9. **Staff access to the frames** is the same as for the document photos: audited 60-second links, supervisors and the assigned reviewer, never admins.
+
+Details: `docs/M5_SPEC.md`.
+
+### Decisions for M6 (2026-10-19)
+Your decisions first; then the safest defaults taken while building, for you to review.
+1. **Your decision: liveness from MediaPipe Face Landmarker's landmarks, on the server.** The M5 challenge is re-checked from the frames: head turn direction (yaw), look up (pitch), blink (eye aspect ratio, and MediaPipe's blink score) and smile, each in the step the server asked for it, in order. Plus a **flat-plane check** (a print or a screen moves as one rigid plane; a real head shows parallax) and **frame-to-frame consistency** (the same face throughout, no cuts or jumps).
+2. **Your decision: Silent-Face-Anti-Spoofing only as a low-weight signal, test sessions only.** **Not shipped:** PyTorch only (a 2020 model to export), undisclosed training data, for one more provisional cue. To reconsider with the first attack captures.
+3. **Your decision: our own screen and print detectors** need attack photos we do not have yet: the training pipeline stub and the data-collection notes are in `training/antispoof/`; **heuristic signals ship now, marked provisional** (moiré, screen glare, low detail).
+4. **Your decision: the result is a `check_result` named exactly `liveness`**, outcome pass, flag or fail, with generic codes and scores only in its details (no landmark, no per-frame value).
+5. **Your decision: face images are kept for training only when the rider ticked `keep_face_images`.** `private.face_training_cases()` lists those cases (the latest consent only); nothing else may be exported.
+6. **Your decision: a second Vercel Python project** (`worker-face/`, project `confiance-verify-face`, Paris `cdg1`), because the AI worker has no room left under Vercel's 500 MB. The same signed protocol with job kinds `liveness` and `face_match`, and every M3 property: Ed25519 signatures, nonces, bytes relayed, no Supabase credential on Vercel, a ring that carries no authority, a test-sessions-only switch and a daily cap (100). Its key id is `f1`. Models are fetched at build time from pinned URLs with their SHA-256 (no model in git).
+7. **MediaPipe's models run on LiteRT, not with the `mediapipe` package** (its native library is 112 MB: with AuraFace the function would be about 533 MB, over the limit). Our port of MediaPipe's pipeline matches the official package within 0.5 px on average. Bundle: about 479 MB.
+8. **A separate `face_job` table and scoped keys:** a key signs for one function only (`worker_key.scope`), the face function has its own signature audience, its own claim, cap, sweep and switch (`face_enabled_for_real_sessions`, off).
+9. **Liveness never rejects a case:** `fail` (an action not done, or done the wrong way) and `flag` (everything else that needs a person, including every provisional cue) both mean review in M8 (`liveness_flag`, provisional).
+10. **The rider app is unchanged:** the rider never waits for the face worker; staff see the result on the dashboard.
+
+Details: `docs/M6_SPEC.md`.
+
+### Decisions for M7 (2026-10-19)
+1. **Your decision: AuraFace v1, its `glintr100.onnx` only, test sessions only.** Its SHA-256 (`a7933ea5…`) is checked to differ from InsightFace antelopev2's (`4ab1d643…`); the repository's other four files (InsightFace's own, non-commercial) are never shipped: the fetch script and the loader refuse their hashes.
+2. **Your decision: detection and alignment with MediaPipe** (not YuNet, not SCRFD); the portrait is searched on the document front (or the passport's data page), the best selfie frame (one face, frontal, eyes open, largest) is chosen by the worker.
+3. **Your decision: the result is a `check_result` named exactly `face_match`**, with the similarity.
+4. **Your decision: the threshold is uncalibrated**: `FACE_MATCH_THRESHOLD` (0.35) is marked "uncalibrated — must be set on Cameroonian impostor pairs (NIST shows ~14x higher false-match rate for West Africans at fixed thresholds)".
+5. **Review-only is a hard rule in the database, not a threshold setting** (the safest of the two options): `private.face_match_review_only()` returns true, so a case with a face match is never recommended for approval (`review_only_check`) and never approved automatically. No admin can turn it off; only a migration, after calibration and your decision. The face match never rejects either. **Consequence: no case is recommended for approval while this holds** (Phase 1: a person decides every case). *Superseded on 2026-10-20: a threshold setting now (see "Decisions for automatic approval").*
+6. **The face match never runs on a real session**, whatever the face switch (licence).
+7. **No crop or embedding is stored:** the details hold each face's box; the dashboard shows the portrait and the frame side by side by framing the whole photos, each opened through the audited viewer.
+8. **Your decision: before the pilot, switch to a paid licence (InsightFace), an on-premise vendor SDK, or our own model.** The lawyer's items (AuraFace's undisclosed dataset, InsightFace files relabelled in its repository, biometric data) are in `LICENSES.md`.
+
+Details: `docs/M7_SPEC.md`.
+
+### Decisions for M8 (2026-10-19, safest defaults, for your review)
+1. **Every case still goes to a person.** Automatic decisions exist but are off. Even switched on (a threshold setting), they apply to test sessions only and never approve a case with a check missing; liveness and face match do not exist before M6 and M7, so nothing is approved automatically, or even recommended for approval, before then. **Since M7, the face match is review-only (hard rule), so still no case is recommended for approval.** *Superseded on 2026-10-20 for test sessions: see "Decisions for automatic approval".*
+2. **Hard flags mean review, whatever the score.** Always: expired document, under 18, and the documents always checked by a person (M3/M4 decisions); by default also a photo already used in another verification and a foreign ID card. An admin can add hard flags, never remove those three.
+3. **Only firm signals can recommend a reject** (code lines with every check digit right, or the same photo bytes twice). Printed text, keywords, untuned quality thresholds and, later, liveness and face scores can only send a case to a person. Under 18 counts as provisional (it may come from print).
+4. **The documents you decided are always reviewed** (old CNI, residence permits and refugee cards, driving licence, voter card) stay so in every threshold version.
+5. **Decisions:** supervisors and the assigned reviewer, never admins (no routine access to photos or data). A reject needs a rider reason; a note is required to go against the recommendation or to approve a case with a hard flag. Each decision records the threshold version, the recommendation and score shown, and whether it agreed (for M12).
+6. **Thresholds:** admins only, from the dashboard, without a redeploy. Versions are never edited; each records who and why. A new version re-assesses every case waiting for a decision at once.
+7. **First weights and cut-offs are guesses** (approve at 0.15 or less, reject from 0.9 of firm signals), to calibrate in M12. Q1 (speed target) and Q4 (duplicate detection) stay open: nothing is matched across riders beyond the M1 "same photo" signal.
+
+Details: `docs/M8_SPEC.md`.
+
+### Decisions for automatic approval (2026-10-20)
+**Your decision:** "When a user uploads their face and ID, the system tells them if their ID is verified and they move forward."
+
+**What you were told before deciding:**
+- **The face match threshold is not calibrated on Cameroonian faces.** NIST measures about 14 times more false matches for West Africans at default thresholds. An impostor with a similar face may therefore be approved, with no person before the decision.
+- **The free AuraFace model is for test sessions only** (licence and provenance; `LICENSES.md`).
+- **Vercel Hobby is for test sessions only** (non-commercial terms, no DPA).
+
+**How it is built:** the safest version of the decision, for you to review. Details: `docs/AUTO_APPROVAL.md`.
+1. **Automatic approval only, never an automatic reject.** Anything not approved goes to staff. The rider then sees "Nous vérifions quelques détails, nous vous tiendrons informé / We're checking a few details, we'll let you know".
+2. **Every condition must hold.** The system approves a case only when:
+   - the document check is firm: code lines with every check digit right; a document without code lines never qualifies;
+   - the document is not expired and the holder is not under 18;
+   - the printed text does not differ from the code lines;
+   - there is no hard flag and no firm signal;
+   - the server's photo check is ok;
+   - liveness passed and the face match passed;
+   - the score is at or under the approve cut-off of the active threshold version.
+3. **The M7 hard rule "the face match is always review-only" becomes a threshold setting** (`faceMatchCountsForApproval`). A new threshold version made by the migration sets it, with automatic approval on, and the reason "PM decision 2026-10-20: automatic approval". Admins can switch either off from the Thresholds page, with no redeploy.
+4. **Test sessions only.** The face worker runs on test sessions only, so a real session has no face match and goes to staff.
+5. **The system's approval is recorded like a staff decision** (actor system, threshold version, recommendation and score) and audited. Staff can still confirm or overturn it afterwards (once; a note is required to go against it). The dashboard shows "Approved automatically" with the version, and the queue can show only those cases.
+6. **The rider's result screen** asks the server for at most 75 s, every 2.5 s: verified (with "Continue", to the session's return address or an end screen), review, or waiting. A time-out shows the review message. Nothing personal is returned.
+7. **Before any real rider:** calibrate the face match on Cameroonian impostor pairs, move to a licensed model (`M7_SPEC.md`), move to Vercel Pro with its DPA, and decide again whether automatic approval stays. The ride app must treat a later staff reject (M10 webhook) as final.
 
 ---
 

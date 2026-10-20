@@ -247,12 +247,18 @@ function setup(configOverrides: Partial<FunctionConfig> = {}, { logToConsole = f
     riderAppUrl: RIDER_APP_URL,
     testSessionTtlMinutes: 30,
     workerRingUrl: null,
+    faceRingUrl: null,
     ...configOverrides,
   };
   const handler = createAdminHandler({
     repo,
     auth,
     storage,
+    // M8's routes have their own tests (decisions.test.ts).
+    decisions: {
+      decide: () => Promise.reject(new Error("not used here")),
+      createThresholdVersion: () => Promise.reject(new Error("not used here")),
+    },
     config,
     now: () => NOW,
     ...(logToConsole ? {} : { log }),

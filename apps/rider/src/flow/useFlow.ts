@@ -19,7 +19,9 @@ import { createLazyMrzReader, unavailableRead } from "../mrz/lazyReader";
 import { type MrzModel, type MrzReader, mrzModelFor } from "../mrz/types";
 import { type FlowApi, createFlowApi } from "./api";
 import { type ChecksTiming, waitForChecks } from "./checks";
-import { isTransient, toFlowError } from "./errors";
+import { type ResultTiming, waitForResult } from "./result";
+import type { LivenessService } from "../liveness/send";
+import { type FlowErrorCode, isTransient, toFlowError } from "./errors";
 import { listenForBack, pushBackGuard } from "./history";
 import { sessionLanguage } from "./language";
 import {
@@ -44,7 +46,8 @@ import { Uploader, uploadSteps } from "./upload";
 export interface FlowActions {
   start(): void;
   retryLoad(): void;
-  acceptConsent(): void;
+  /** `keepFaceImages`: the separate, optional box (M5), unticked unless the rider ticks it. */
+  acceptConsent(keepFaceImages: boolean): void;
   declineConsent(): void;
   reviewConsent(): void;
   chooseDocument(document: DeclaredDocument): void;
@@ -59,6 +62,14 @@ export interface FlowActions {
   chooseAnotherDocument(): void;
   /** M4, the document has expired: go on with it (staff see the flag). */
   continueExpired(): void;
+  /** M5: what the face check screen asks of the server; null without a session link. */
+  liveness: LivenessService | null;
+  /** M5: the server recorded the face check. */
+  livenessDone(): void;
+  /** M5: the face check met an error; one that ends the session shows the session's error screen. */
+  livenessFailed(error: FlowErrorCode): void;
+  /** Automatic approval: "Continue" on "Your ID is verified". */
+  continueResult(): void;
 }
 
 export interface Boot {
@@ -69,6 +80,8 @@ export interface Boot {
 export interface FlowOptions {
   /** How long to wait for the server's checks, and how often to ask (default: CHECKS_TIMING). */
   checks?: Partial<ChecksTiming>;
+  /** How long the result screen waits, and how often it asks (default: RESULT_TIMING). */
+  result?: Partial<ResultTiming>;
 }
 
 export function useFlow(boot: Boot, options: FlowOptions = {}): { state: FlowState; actions: FlowActions } {
@@ -200,10 +213,11 @@ export function useFlow(boot: Boot, options: FlowOptions = {}): { state: FlowSta
     };
   }, [readingShot, document, reader]);
 
-  // Closing or leaving the page during an upload, or while the server checks the photos before the
-  // submit, loses the photos: ask first (where browsers allow).
+  // Closing or leaving the page during an upload, while the server checks the photos or during the
+  // face check, before the submit, loses the photos: ask first (where browsers allow).
   const checking = screen.name === "checking";
-  const uploading = state.upload.status === "running" || state.upload.status === "queued" || checking;
+  const uploading =
+    state.upload.status === "running" || state.upload.status === "queued" || checking || screen.name === "liveness";
   useEffect(() => {
     if (!uploading) return;
     const warn = (event: BeforeUnloadEvent) => {
@@ -308,14 +322,43 @@ export function useFlow(boot: Boot, options: FlowOptions = {}): { state: FlowSta
     return () => controller.abort();
   }, [waiting, api, waitMs, pollMs]);
 
+  // Automatic approval: the result screen asks whether the ID is verified until it is settled or the
+  // time is up (then it says what a review says). Leaving the screen stops the wait.
+  const resultWaitMs = options.result?.waitMs;
+  const resultPollMs = options.result?.pollMs;
+  const awaitingResult = screen.name === "result" && state.result.state === "pending";
+  useEffect(() => {
+    if (!awaitingResult || !api) return;
+    const controller = new AbortController();
+    void waitForResult({
+      getResult: (signal) => api.getResult(signal),
+      timing: { waitMs: resultWaitMs, pollMs: resultPollMs },
+      signal: controller.signal,
+    }).then((result) => {
+      if (!result || controller.signal.aborted) return;
+      dispatch(
+        result.type === "decided"
+          ? { type: "result/answer", state: result.decision.state, returnUrl: result.decision.returnUrl }
+          : { type: "result/timeout" },
+      );
+    });
+    return () => controller.abort();
+  }, [awaitingResult, api, resultWaitMs, resultPollMs]);
+
+  // "Continue" with a return address (an https one: result.ts): the rider goes back to the ride app.
+  const leaveTo = state.result.leaving ? state.result.returnUrl : null;
+  useEffect(() => {
+    if (leaveTo) window.location.assign(leaveTo);
+  }, [leaveTo]);
+
   const actions = useMemo<FlowActions>(() => {
     const language = () => (isSupportedLanguage(i18n.language) ? i18n.language : DEFAULT_LANGUAGE);
     return {
       start: () => dispatch({ type: "start" }),
       retryLoad: () => void loadSession(),
-      acceptConsent: () =>
+      acceptConsent: (keepFaceImages) =>
         void request(
-          (a) => a.consent({ consentVersion: CONSENT_VERSION, language: language() }),
+          (a) => a.consent({ consentVersion: CONSENT_VERSION, language: language(), keepFaceImages }),
           (session) => ({ type: "consent/accepted", session }),
         ),
       declineConsent: () => dispatch({ type: "consent/decline" }),
@@ -340,8 +383,18 @@ export function useFlow(boot: Boot, options: FlowOptions = {}): { state: FlowSta
       retryUpload: () => dispatch({ type: "upload/retry" }),
       chooseAnotherDocument: () => dispatch({ type: "expired/another" }),
       continueExpired: () => dispatch({ type: "expired/continue" }),
+      liveness: api
+        ? {
+            challenge: () => api.livenessChallenge(),
+            upload: putObjectWithSupabase,
+            record: (body) => api.recordLiveness(body),
+          }
+        : null,
+      livenessDone: () => dispatch({ type: "liveness/done" }),
+      livenessFailed: (error) => dispatch({ type: "liveness/failed", error }),
+      continueResult: () => dispatch({ type: "result/continue" }),
     };
-  }, [i18n, loadSession, request]);
+  }, [i18n, loadSession, request, api]);
 
   return { state, actions };
 }

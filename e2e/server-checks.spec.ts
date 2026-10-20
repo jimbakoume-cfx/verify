@@ -11,7 +11,7 @@ import {
 import { OCR_ASSETS, mrzModelFor } from "../apps/rider/src/mrz/types";
 import type { FakeBackend } from "./support/backend";
 import { GUIDES } from "./support/camera";
-import { CARD_FLOW, afterPhotos, expectCleanPhoto } from "./support/expectations";
+import { CARD_FLOW, LIVENESS, afterPhotos, expectCleanPhoto } from "./support/expectations";
 import { expect, test } from "./support/fixtures";
 
 /** The routes of one round of photos sent: an upload link and its confirmation per photo. */
@@ -47,7 +47,7 @@ test("checks pass: 'Checking your photos…' while the worker looks at them, eve
   await expect(page.locator("main > :not(header) button")).toHaveCount(0);
   await rider.waitForSubmit();
 
-  expect(afterPhotos(backend.routes)).toEqual([...SEND(2), "GET /checks", "GET /checks", "GET /checks", "POST /submit"]);
+  expect(afterPhotos(backend.routes)).toEqual([...SEND(2), "GET /checks", "GET /checks", "GET /checks", ...LIVENESS, "POST /submit"]);
   expect(states(backend)).toEqual([
     ["pending", "pending"],
     ["pending", "pending"],
@@ -64,7 +64,7 @@ test("checks pass: 'Checking your photos…' while the worker looks at them, eve
   }
   const screens = await rider.screensSeen();
   expect(screens.indexOf(rider.t("checks.title"))).toBeGreaterThan(screens.indexOf(rider.t("upload.title")));
-  expect(screens.indexOf(rider.t("checks.title"))).toBeLessThan(screens.indexOf(rider.t("done.title")));
+  expect(screens.indexOf(rider.t("checks.title"))).toBeLessThan(screens.indexOf(rider.t("result.reviewTitle")));
   expect(backend.status).toBe("submitted");
 });
 
@@ -91,7 +91,7 @@ test("server retake of the front: straight back to its camera, told why; only th
   await rider.waitForSubmit();
 
   // The back was already on the server: only the new front is sent, then checked again.
-  expect(afterPhotos(backend.routes)).toEqual([...SEND(2), "GET /checks", ...SEND(1), "GET /checks", "POST /submit"]);
+  expect(afterPhotos(backend.routes)).toEqual([...SEND(2), "GET /checks", ...SEND(1), "GET /checks", ...LIVENESS, "POST /submit"]);
   expect(backend.calls.filter((c) => c.route === "POST /upload-url").map((c) => c.body)).toEqual([
     { kind: "document_front" },
     { kind: "document_back" },
@@ -158,7 +158,7 @@ test("both sides retaken (in English): the front's camera first, then 'turn over
   await rider.usePhoto();
   await rider.waitForSubmit();
 
-  expect(afterPhotos(backend.routes)).toEqual([...SEND(2), "GET /checks", ...SEND(2), "GET /checks", "POST /submit"]);
+  expect(afterPhotos(backend.routes)).toEqual([...SEND(2), "GET /checks", ...SEND(2), "GET /checks", ...LIVENESS, "POST /submit"]);
   expect(backend.calls[1].body).toMatchObject({ language: "en" });
   expect(backend.captures.map((c) => [c.kind, c.live])).toEqual([
     ["document_front", false],
@@ -206,6 +206,7 @@ test("server retake of the code-lines side (new CNI back): read again on the pho
     ...SEND(1),
     "POST /mrz",
     "GET /checks",
+    ...LIVENESS,
     "POST /submit",
   ]);
   const [, firstBack, newBack] = backend.captures;
@@ -240,7 +241,7 @@ test("code lines read right on the phone: never retaken, whatever the server's r
   await rider.photographCard("cni_biometric");
   await rider.waitForSubmit();
 
-  expect(afterPhotos(backend.routes)).toEqual([...SEND(2), "POST /mrz", "GET /checks", "POST /submit"]);
+  expect(afterPhotos(backend.routes)).toEqual([...SEND(2), "POST /mrz", "GET /checks", ...LIVENESS, "POST /submit"]);
   expect(backend.mrzReports.map((r) => r.outcome)).toEqual(["pass"]);
   expect(computed.map((c) => c.sides.map((s) => s.state))).toEqual([["ok", "ok"]]);
   expect(backend.captures.every((c) => c.live)).toBe(true);
@@ -262,7 +263,7 @@ test("retake limit: a second unusable photo of the same side goes to staff, the 
   await rider.waitForSubmit();
 
   // The server's rule: one retake per side, then the photo is flagged, never refused.
-  expect(afterPhotos(backend.routes)).toEqual([...SEND(2), "GET /checks", ...SEND(1), "GET /checks", "POST /submit"]);
+  expect(afterPhotos(backend.routes)).toEqual([...SEND(2), "GET /checks", ...SEND(1), "GET /checks", ...LIVENESS, "POST /submit"]);
   expect(states(backend)).toEqual([
     ["retake", "ok"],
     ["ok", "ok"],
@@ -283,7 +284,7 @@ test("retake limit on the phone too: a server asking for the same side again is 
   await rider.usePhoto();
   await rider.waitForSubmit();
 
-  expect(afterPhotos(backend.routes)).toEqual([...SEND(2), "GET /checks", ...SEND(1), "GET /checks", "POST /submit"]);
+  expect(afterPhotos(backend.routes)).toEqual([...SEND(2), "GET /checks", ...SEND(1), "GET /checks", ...LIVENESS, "POST /submit"]);
   expect(states(backend)).toEqual([
     ["retake", "ok"],
     ["retake", "ok"],
@@ -307,10 +308,11 @@ test("time-out: the worker never answers; after CHECKS_WAIT_MS the photos are su
   await expect(page.getByRole("alert")).toHaveCount(0);
 
   const asked = callTimes(backend, "GET /checks");
-  const [submitted] = callTimes(backend, "POST /submit");
+  // M5: the checks are over when the face check appears (the submit follows it).
+  const checksOver = await rider.screenShownAt(rider.t("liveness.title"));
   // The real defaults (no ?debug=1 override): asked every 2 s for 20 s, then submitted.
-  expect(submitted - asked[0]).toBeGreaterThanOrEqual(CHECKS_WAIT_MS - 250);
-  expect(submitted - asked[0]).toBeLessThan(CHECKS_WAIT_MS + 5_000);
+  expect(checksOver - asked[0]).toBeGreaterThanOrEqual(CHECKS_WAIT_MS - 250);
+  expect(checksOver - asked[0]).toBeLessThan(CHECKS_WAIT_MS + 5_000);
   expect(asked.length).toBeGreaterThanOrEqual(CHECKS_WAIT_MS / CHECKS_POLL_MS - 2);
   expect(asked.length).toBeLessThanOrEqual(CHECKS_WAIT_MS / CHECKS_POLL_MS + 1);
   expect(states(backend).every((answer) => answer.every((state) => state === "pending"))).toBe(true);
@@ -342,8 +344,9 @@ test("unchecked: the worker is out of budget for one photo and could not be rung
     },
   ]));
   const [asked] = callTimes(backend, "GET /checks");
-  const [submitted] = callTimes(backend, "POST /submit");
-  expect(submitted - asked).toBeLessThan(CHECKS_POLL_MS);
+  // M5: the checks are over when the face check appears (the submit follows it).
+  const checksOver = await rider.screenShownAt(rider.t("liveness.title"));
+  expect(checksOver - asked).toBeLessThan(CHECKS_POLL_MS);
   expect(backend.status).toBe("submitted");
 });
 
@@ -360,11 +363,12 @@ test("checks unavailable (the function answers 503): asked again until the wait 
   await expect(page.getByRole("alert")).toHaveCount(0);
 
   const asked = callTimes(backend, "GET /checks");
-  const [submitted] = callTimes(backend, "POST /submit");
+  // M5: the checks are over when the face check appears (the submit follows it).
+  const checksOver = await rider.screenShownAt(rider.t("liveness.title"));
   expect(asked.length).toBeGreaterThanOrEqual(3);
   expect(asked.length).toBeLessThanOrEqual(3_000 / 500 + 1);
-  expect(submitted - asked[0]).toBeGreaterThanOrEqual(3_000 - 250);
-  expect(submitted - asked[0]).toBeLessThan(3_000 + 5_000);
+  expect(checksOver - asked[0]).toBeGreaterThanOrEqual(3_000 - 250);
+  expect(checksOver - asked[0]).toBeLessThan(3_000 + 5_000);
   expect(backend.checksAnswers).toEqual([]);
   expect(backend.status).toBe("submitted");
 });

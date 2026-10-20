@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
-"""Fails if the AI worker's Python environment holds anything whose licence has not been reviewed.
+"""Fails if a worker's Python environment holds anything whose licence has not been reviewed.
 
-Run from worker/, in its development environment, after building the production one:
+Run from worker/ (the AI worker), in its development environment, after building the production one:
 
     UV_PROJECT_ENVIRONMENT=/tmp/worker-prod uv sync --frozen --no-dev
     uv run python ../scripts/check-python-licenses.py --prod-python /tmp/worker-prod/bin/python
+
+and from worker-face/ (the face worker, M6/M7) with its own table:
+
+    uv run python ../scripts/check-python-licenses.py --prod-python /tmp/face-prod/bin/python \
+        --table ../scripts/python-licenses-face.toml
 
 Three checks against the reviewed table in scripts/python-licenses.toml (the policy is in
 docs/LICENSES.md, as for npm in scripts/check-licenses.mjs):
@@ -32,7 +37,7 @@ import sys
 import tomllib
 from pathlib import Path
 
-TABLE = Path(__file__).resolve().parent / "python-licenses.toml"
+DEFAULT_TABLE = Path(__file__).resolve().parent / "python-licenses.toml"
 
 ALLOWED = {
     "MIT", "MIT-0", "MIT-CMU", "X11", "ISC", "0BSD", "BSD-2-Clause", "BSD-3-Clause", "Apache-2.0",
@@ -148,9 +153,11 @@ def check_packages(table: dict, installed: dict[str, dict], groups: set[str], wh
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--prod-python", required=True, help="interpreter of the production environment (uv sync --no-dev)")
+    parser.add_argument("--table", type=Path, default=DEFAULT_TABLE, help="the reviewed table (default: the AI worker's)")
     args = parser.parse_args()
+    table_path = args.table.resolve()
 
-    table = tomllib.loads(TABLE.read_text(encoding="utf-8"))
+    table = tomllib.loads(table_path.read_text(encoding="utf-8"))
     packages: dict[str, dict] = table["packages"]
     natives: list[dict] = table["native"]
     problems: list[str] = []
@@ -198,7 +205,7 @@ def main() -> int:
         print(f"Python licence check FAILED ({len(problems)} problem(s)):", file=sys.stderr)
         for problem in problems:
             print(f"  - {problem}", file=sys.stderr)
-        print(f"Review the licence, then update {TABLE.relative_to(TABLE.parent.parent)} and docs/LICENSES.md.", file=sys.stderr)
+        print(f"Review the licence, then update {table_path.name} (scripts/) and docs/LICENSES.md.", file=sys.stderr)
         return 1
     print(
         f"Python licence check passed: {len(production)} runtime and {len(development) - len(production)} development "

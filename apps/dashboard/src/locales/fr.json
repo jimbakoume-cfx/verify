@@ -11,7 +11,8 @@
   "nav": {
     "home": "Accueil Verify Ops",
     "signOut": "Se déconnecter",
-    "signingOut": "Déconnexion…"
+    "signingOut": "Déconnexion…",
+    "thresholds": "Seuils"
   },
   "roles": {
     "reviewer": "Vérificateur",
@@ -95,7 +96,19 @@
     "empty": "Aucune vérification pour le moment.",
     "noDocument": "Document pas encore choisi",
     "photos_one": "{{count}} photo",
-    "photos_other": "{{count}} photos"
+    "photos_other": "{{count}} photos",
+    "sortLabel": "Trier",
+    "sort": {
+      "newest": "Plus récentes",
+      "recommendation": "Par recommandation"
+    },
+    "filterLabel": "Afficher",
+    "filter": {
+      "all": "Tout",
+      "autoApproved": "Approuvés automatiquement"
+    },
+    "filterEmpty": "Aucun dossier ne correspond à ce filtre.",
+    "autoApproved": "Approuvé automatiquement · v{{version}}"
   },
   "badges": {
     "test": "Test",
@@ -403,6 +416,199 @@
       "carte_de_sejour": "Carte de séjour"
     }
   },
+  "liveness": {
+    "title": "Vérification du visage",
+    "intro": "Le défi aléatoire donné par le serveur et les images prises par la caméra avant du passager, avec le contrôle de la capture (les images sont-elles arrivées complètes et à temps). L'évaluation des actions par le serveur est dans « Contrôles du visage par le serveur » ci-dessous.",
+    "none": "Aucune vérification du visage enregistrée pour l'instant.",
+    "challenge": "Défi",
+    "notEvaluated": "Capture seulement",
+    "step0": "Regarder droit vers la caméra",
+    "actions": {
+      "turn_left": "Tourner la tête à gauche",
+      "turn_right": "Tourner la tête à droite",
+      "look_up": "Lever les yeux",
+      "blink": "Cligner des yeux",
+      "smile": "Sourire"
+    },
+    "framesCount_one": "{{count}} image",
+    "framesCount_other": "{{count}} images",
+    "code": "Code affiché à l'écran",
+    "frames": "Images",
+    "duration": "Durée de la prise",
+    "serverElapsed": "Du défi aux images (serveur)",
+    "maxGap": "Plus longue pause",
+    "startedWithWarning": "Commencé malgré un avertissement de lumière",
+    "yes": "Oui",
+    "no": "Non",
+    "plausible": "Images complètes, durées plausibles.",
+    "unreadable": "Cette version du tableau de bord ne sait pas lire le détail de cette vérification.",
+    "framesTitle": "Images",
+    "viewAll": "Voir toutes les images",
+    "viewFrame": "Voir l'image",
+    "frameLabel": "Image {{n}}",
+    "frameAlt": "Image {{n}} de la vérification du visage",
+    "replaced_one": "{{count}} image d'une vérification précédente a été remplacée et effacée.",
+    "replaced_other": "{{count}} images de vérifications précédentes ont été remplacées et effacées.",
+    "problems": {
+      "too_fast": {
+        "title": "Trop rapide.",
+        "body": "Les images couvrent moins de temps que les actions n'en demandent."
+      },
+      "longer_than_challenge": {
+        "title": "Durées incohérentes.",
+        "body": "Les images annoncent plus de temps qu'il ne s'en est écoulé sur le serveur depuis l'envoi du défi."
+      },
+      "gap_too_long": {
+        "title": "Longue pause.",
+        "body": "Plusieurs secondes se sont écoulées entre deux images."
+      },
+      "out_of_order": {
+        "title": "Dans le désordre.",
+        "body": "Les heures ou les étapes des images reculent, ou une image ne tombe pas dans son étape."
+      },
+      "step_missing_frames": {
+        "title": "Images manquantes.",
+        "body": "Une étape a moins d'images que prévu."
+      },
+      "duplicate_frames": {
+        "title": "Images identiques.",
+        "body": "Deux images sont le même fichier."
+      },
+      "frames_reused": {
+        "title": "Image déjà vue.",
+        "body": "Le fichier d'une image a déjà été envoyé dans une autre vérification."
+      }
+    }
+  },
+  "face": {
+    "title": "Contrôles du visage par le serveur",
+    "intro": "L'évaluation de la vérification du visage par le service visage (sessions de test ; test de présence des vraies sessions une fois l'interrupteur visage activé) et la comparaison du portrait de la pièce avec la meilleure image (sessions de test seulement). Tous les seuils sont des premières estimations : une personne décide.",
+    "livenessTitle": "Test de présence (actions revérifiées par le serveur)",
+    "matchTitle": "Comparaison : portrait de la pièce et vérification du visage",
+    "provisional": "Provisoire",
+    "uncalibrated": "Non calibré",
+    "reviewOnly": "Consultatif",
+    "uncalibratedBody": "Le seuil est une première estimation, pas encore fixé sur des visages camerounais (les fausses correspondances sont bien plus fréquentes pour les Africains de l'Ouest à seuil fixe). Ce score ne fait jamais approuver un dossier : comparez vous-même les visages.",
+    "waiting": "En attente du service visage. Actualisez dans un instant.",
+    "notChecked": {
+      "liveness": "Non vérifié par le serveur (les vraies sessions attendent l'interrupteur visage, ou le plafond quotidien ou les tentatives sont épuisés).",
+      "faceMatch": "Non comparé : la comparaison ne tourne que sur les sessions de test, ou le serveur a abandonné."
+    },
+    "none": {
+      "liveness": "Pas encore évalué (aucune vérification du visage enregistrée).",
+      "faceMatch": "Pas encore comparé (il faut la vérification du visage et le recto du document)."
+    },
+    "unreadable": "Les détails de ce contrôle ne peuvent pas être lus par cette version du tableau de bord.",
+    "action": "Action demandée",
+    "result": "Vue",
+    "peak": "Maximum",
+    "framesWithFace": "Images avec un visage",
+    "actionResult": {
+      "pass": "Faite",
+      "fail": "Non faite",
+      "unclear": "Impossible à dire"
+    },
+    "degrees": "{{value}}°",
+    "flatPlane": "Relief en mouvement",
+    "flatPlaneResult": {
+      "depth": "Relief réel vu",
+      "flat": "A bougé comme une image plate",
+      "not_measured": "Non mesuré (la tête a peu bougé)"
+    },
+    "framesWithFaceTotal": "Images avec un visage",
+    "framesOf": "{{n}} sur {{total}}",
+    "processing": "Temps de traitement",
+    "coldStart": "modèles chargés d'abord",
+    "engine": "Moteur",
+    "livenessClean": "Chaque action vue dans son étape ; rien d'autre à signaler.",
+    "problems": {
+      "action_not_done": {
+        "title": "Action non vue.",
+        "body": "Le visage était visible pendant l'étape, mais ne faisait pas ce qui était demandé."
+      },
+      "wrong_direction": {
+        "title": "Mauvais sens.",
+        "body": "La tête a tourné ou s'est inclinée dans l'autre sens que demandé."
+      },
+      "action_unclear": {
+        "title": "Pas de visage pour une action.",
+        "body": "Aucune image d'une étape ne montre exactement un visage : l'action n'a pas pu être jugée."
+      },
+      "no_reference": {
+        "title": "Pas d'image de départ.",
+        "body": "Aucune image avant les actions ne montre exactement un visage : les rotations sont mesurées depuis zéro."
+      },
+      "face_missing": {
+        "title": "Visage absent.",
+        "body": "Certaines images ne montrent aucun visage."
+      },
+      "multiple_faces": {
+        "title": "Plusieurs visages.",
+        "body": "Certaines images montrent plus d'un visage."
+      },
+      "face_jump": {
+        "title": "Coupure possible.",
+        "body": "Le visage a sauté entre deux images (position ou taille) : les images peuvent venir d'enregistrements différents."
+      },
+      "flat_plane": {
+        "title": "Visage plat.",
+        "body": "Quand la tête a tourné ou s'est inclinée, le visage a bougé comme une image plate (un tirage ou un écran)."
+      },
+      "shape_change": {
+        "title": "Forme du visage changée.",
+        "body": "La forme 3D du visage diffère de celle de la première image : peut-être un autre visage."
+      },
+      "moire": {
+        "title": "Motif d'écran.",
+        "body": "Un motif fin et régulier, comme quand on filme un écran."
+      },
+      "screen_glare": {
+        "title": "Reflet sur le visage.",
+        "body": "Une partie du visage est brûlée en blanc, comme avec un tirage brillant ou un écran."
+      },
+      "low_detail": {
+        "title": "Peu de détails.",
+        "body": "Le visage est anormalement lisse, comme avec un tirage photographié."
+      }
+    },
+    "similarity": "Similarité",
+    "notCompared": "Non comparé",
+    "threshold": "Seuil",
+    "lowThreshold": "différent sous {{value}}",
+    "model": "Modèle",
+    "matchProblems": {
+      "portrait_not_found": {
+        "title": "Pas de portrait trouvé.",
+        "body": "Aucun visage n'a été trouvé sur la photo du document : rien n'a été comparé."
+      },
+      "selfie_not_found": {
+        "title": "Pas d'image utilisable.",
+        "body": "Aucune image de la vérification du visage ne montre exactement un visage : rien n'a été comparé."
+      },
+      "portrait_small": {
+        "title": "Petit portrait.",
+        "body": "Le portrait du document est très petit : le score est moins fiable."
+      },
+      "detector_alignment": {
+        "title": "Alignement approximatif.",
+        "body": "Le portrait a été aligné sans le maillage du visage : le score est moins fiable."
+      },
+      "selfie_not_frontal": {
+        "title": "Image de biais.",
+        "body": "La meilleure image ne fait pas face à la caméra : le score est moins fiable."
+      }
+    },
+    "sideBySideNote": "Seuls les visages sont montrés ; chaque photo s'ouvre 60 secondes et chaque affichage est journalisé.",
+    "showBoth": "Afficher le portrait et l'image (2 affichages)",
+    "portrait": "Portrait de la pièce (recto)",
+    "portraitAlt": "Portrait sur la pièce d'identité",
+    "selfie": "Vérification du visage, image {{n}}",
+    "selfieAlt": "Meilleure image de la vérification du visage",
+    "noSelfie": "Aucune image à montrer.",
+    "photosGone": "La photo du document a été remplacée ou effacée.",
+    "countedForApproval": "Compte pour l'approbation automatique",
+    "uncalibratedCountedBody": "Le seuil est une première estimation, pas encore fixé sur des visages camerounais (les fausses correspondances sont bien plus fréquentes pour les Africains de l'Ouest à seuil fixe). Les seuils actifs laissent une comparaison réussie compter pour une approbation automatique (décision du PM du 20/10/2026, sessions de test seulement) : comparez vous-même les visages."
+  },
   "capture": {
     "size": "Taille",
     "dimensions": "Dimensions (px)",
@@ -457,6 +663,254 @@
     "photoNotFound": "Cette photo n'est plus disponible, ou ce dossier ne vous est pas assigné.",
     "adminNoDataAccess": "Les administrateurs n'ont pas d'accès courant aux données lues sur les pièces d'identité. Un superviseur ou le vérificateur assigné peut les afficher.",
     "documentDataNotFound": "Ce dossier n'est plus disponible, ou il ne vous est pas assigné.",
-    "documentDataAuditFailed": "L'accès n'a pas pu être enregistré dans le journal d'audit : les données ne sont donc pas affichées. Réessayez dans un instant."
+    "documentDataAuditFailed": "L'accès n'a pas pu être enregistré dans le journal d'audit : les données ne sont donc pas affichées. Réessayez dans un instant.",
+    "liveness_required": "La vérification du visage est d'abord nécessaire.",
+    "too_many_challenges": "Trop de vérifications du visage pour cette session.",
+    "challenge_expired": "Cette vérification du visage a expiré ou a été remplacée.",
+    "challenge_used": "Cette vérification du visage est déjà enregistrée.",
+    "invalid_liveness": "Les images de la vérification du visage ne sont pas valides.",
+    "already_decided": "Ce dossier a déjà été décidé. Rechargez la page.",
+    "not_submitted": "Ce dossier ne peut pas être décidé avant l'envoi par l'usager.",
+    "note_required": "Une note est obligatoire pour cette décision.",
+    "invalid_reason": "Choisissez un motif pour un refus (et aucun pour une approbation).",
+    "stale_version": "Quelqu'un a enregistré une nouvelle version entre-temps. Rechargez la page et revoyez les changements.",
+    "decisionRole": "Votre rôle ne permet pas de décider ce dossier.",
+    "thresholdsRole": "Seuls les administrateurs peuvent modifier les seuils.",
+    "thresholdsBadRequest": "Le serveur a refusé ces réglages, ou ils sont identiques à la version active."
+  },
+  "risk": {
+    "title": "Risque et décision",
+    "intro": "Ce que les règles recommandent à partir des vérifications, avec chaque signal et son poids, et la version des seuils utilisée. Aujourd'hui, une personne décide chaque dossier.",
+    "notAssessedBadge": "Non évalué",
+    "recommendation": {
+      "approve": "Recommandé : approuver",
+      "review": "Recommandé : examiner",
+      "reject": "Recommandé : refuser"
+    },
+    "decision": {
+      "approve": "Approuvé",
+      "review": "Examen",
+      "reject": "Refusé"
+    },
+    "notYet": "Évalué quand l'usager envoie son dossier.",
+    "notAssessed": "Pas encore évalué. Rechargez dans un instant.",
+    "unknownShape": "Cette évaluation vient d'une version plus récente des règles. Rechargez la page.",
+    "score": "Score",
+    "firmScore": "Signaux fermes seuls",
+    "band": "Zone du score",
+    "version": "Version des seuils",
+    "versionNumber": "Version {{version}}",
+    "assessedAt": "Évalué",
+    "reasons": {
+      "label": {
+        "hard_flag": "Signal bloquant",
+        "unknown_signal": "Signal inconnu",
+        "always_review_document": "Toujours décidé par une personne",
+        "firm_score_high": "Signaux fermes au seuil de refus",
+        "provisional_signals": "Score élevé dû à des signaux provisoires",
+        "score_between": "Score entre les seuils",
+        "score_low": "Score faible",
+        "missing_checks": "Vérifications manquantes",
+        "review_only_check": "Contrôle consultatif"
+      },
+      "body": {
+        "hard_flag": "Un signal bloquant est présent : une personne décide, quel que soit le score.",
+        "unknown_signal": "Un signal que cette version des règles ne connaît pas : une personne décide.",
+        "always_review_document": "Ce type de document est toujours décidé par une personne.",
+        "firm_score_high": "Les signaux fermes atteignent à eux seuls {{rejectMin}} ou plus : les règles recommandent un refus.",
+        "provisional_signals": "Le score n'atteint {{rejectMin}} qu'avec des signaux provisoires, qui ne refusent jamais : une personne décide.",
+        "score_between": "Le score est au-dessus de {{approveMax}} et sous {{rejectMin}} : une personne décide.",
+        "score_low": "Le score est de {{approveMax}} ou moins : assez faible pour approuver.",
+        "missing_checks": "Des vérifications manquent (liste ci-dessous) : pas d'approbation tant qu'elles n'existent pas.",
+        "review_only_check": "La comparaison des visages n'est pas calibrée et cette version des seuils ne la fait pas compter : son résultat ne fait jamais approuver un dossier (voir ci-dessous)."
+      }
+    },
+    "rejectReason": "Motif donné à l'usager en cas de refus : {{code}}",
+    "signalsTitle": "Signaux",
+    "noSignals": "Aucun signal : rien ne s'ajoute au score.",
+    "signal": "Signal",
+    "weight": "Poids",
+    "kind": "Nature",
+    "notCounted": "Désactivé",
+    "firm": "Ferme",
+    "provisional": "Provisoire",
+    "unknownSignal": "Signal inconnu",
+    "signals": {
+      "document_expired": "Document expiré",
+      "under_18": "Moins de 18 ans",
+      "image_reused": "Photo déjà utilisée dans une autre vérification",
+      "unsupported_document": "Document non accepté",
+      "mrz_disagreement": "Lignes de code différentes (téléphone et serveur)",
+      "mrz_invalid_server": "Lignes de code invalides",
+      "mrz_print_mismatch": "Texte imprimé différent des lignes de code",
+      "type_mismatch": "Pas le document déclaré",
+      "date_logic": "Dates contradictoires",
+      "number_format": "Format de numéro inattendu",
+      "manual_review_document": "Toujours vérifié par une personne",
+      "unrecognised_document": "Document non reconnu",
+      "mrz_unreadable_server": "Lignes de code non lues par le serveur",
+      "mrz_phone_flag": "Lecture des lignes de code sur le téléphone signalée",
+      "phone_report_missing": "Rapport du téléphone manquant",
+      "provisional_classification": "Type reconnu provisoirement",
+      "quality_poor": "Photo de mauvaise qualité (serveur)",
+      "liveness_flag": "Test de présence non réussi",
+      "face_match_flag": "Comparaison des visages non réussie"
+    },
+    "missingTitle": "Vérifications manquantes",
+    "missing": {
+      "server_checks": "Vérification des photos par le serveur (en attente, ou impossible)",
+      "liveness": "Test de présence (serveur)",
+      "face_match": "Comparaison des visages"
+    },
+    "reviewOnlyTitle": "Consultatif : ne fait jamais approuver",
+    "reviewOnly": {
+      "face_match": "Comparaison des visages (seuil non calibré)"
+    },
+    "approveUpTo": "Approuver jusqu'à {{value}}",
+    "rejectFrom": "Refuser à partir de {{value}} (signaux fermes)",
+    "auto": {
+      "title": "Approbation automatique",
+      "approved": "Approuvé automatiquement avec la version {{version}} des seuils ({{at}}) : toutes les conditions étaient remplies.",
+      "eligible": "Toutes les conditions sont remplies : le système approuve ce dossier.",
+      "notAssessed": "Pas évalué pour l'approbation automatique (évalué avant qu'elle n'existe).",
+      "blocked": "Pas approuvé automatiquement : une personne décide. Pourquoi :",
+      "uncalibratedCounted": "Compté bien que non calibré : {{checks}}.",
+      "blockers": {
+        "auto_decide_off": "L'approbation automatique est désactivée dans cette version des seuils",
+        "real_session": "Pas une session de test",
+        "not_recommended": "Les règles ne recommandent pas l'approbation",
+        "document_not_firm": "La vérification du document n'est pas sûre (lignes de code avec tous les chiffres de contrôle justes)",
+        "document_expired": "Document expiré",
+        "under_18": "Moins de 18 ans",
+        "mrz_print_mismatch": "Le texte imprimé diffère des lignes de code",
+        "hard_flag": "Un signal bloquant est présent",
+        "firm_signal": "Un signal sûr est présent",
+        "unknown_signal": "Un signal inconnu est présent",
+        "quality_not_ok": "Le contrôle des photos par le serveur manque ou n'est pas bon",
+        "liveness_not_passed": "Test de présence manquant ou non réussi",
+        "face_match_not_passed": "Comparaison des visages manquante ou non réussie",
+        "face_match_not_counted": "La comparaison des visages ne compte pas dans cette version des seuils",
+        "score_above_cutoff": "Score au-dessus du seuil d'approbation"
+      }
+    }
+  },
+  "decision": {
+    "title": "Décision",
+    "adminNoDecision": "Les administrateurs ne décident pas des dossiers : un superviseur ou le vérificateur assigné le fait.",
+    "noRecord": "Aucune décision enregistrée pour ce dossier.",
+    "notSubmitted": "Pourra être décidé une fois le dossier envoyé par l'usager.",
+    "outcome": {
+      "approve": "Approuver",
+      "reject": "Refuser"
+    },
+    "automatic": "Automatique",
+    "by": "Par",
+    "bySystem": "Les règles (décision automatique)",
+    "byYou": "Vous",
+    "byStaff": "Membre de l'équipe {{id}}",
+    "at": "Quand",
+    "recommendationShown": "Recommandation affichée",
+    "agreement": {
+      "agrees": "Conforme à la recommandation.",
+      "disagrees": "Contraire à la recommandation.",
+      "none": "La recommandation était l'examen : rien à confirmer."
+    },
+    "riderReason": "Motif donné à l'usager",
+    "riderReasonHint": "Affiché à l'usager dans sa langue.",
+    "note": "Note :",
+    "choose": "Votre décision",
+    "chooseReason": "Choisissez un motif",
+    "preview": {
+      "agrees": "Conforme à la recommandation.",
+      "disagrees": "Contraire à la recommandation : expliquez pourquoi dans la note.",
+      "none": "Les règles vous laissent ce dossier."
+    },
+    "noteRequired": "Note (obligatoire)",
+    "noteOptional": "Note (facultative)",
+    "noteHint": "Pour l'équipe seulement, jamais montrée à l'usager. Obligatoire contre la recommandation, ou pour approuver un dossier avec un signal bloquant. Ne recopiez pas de données lues sur le document.",
+    "saving": "Enregistrement…",
+    "submit": "Enregistrer la décision",
+    "autoApproved": "Approuvé automatiquement (version {{version}})",
+    "checkAutomatic": "Le système a approuvé ce dossier seul. Vérifiez-le : confirmez l'approbation, ou refusez-le (une note est requise pour aller contre)."
+  },
+  "thresholds": {
+    "title": "Seuils de décision",
+    "intro": "Les poids et les seuils des règles. Une nouvelle version s'applique aussitôt, sans redéploiement : chaque dossier en attente de décision est réévalué avec elle. Les versions ne sont jamais modifiées ; chacune garde qui l'a créée et pourquoi.",
+    "saved_one": "La version {{version}} est active. {{count}} dossier a été réévalué.",
+    "saved_other": "La version {{version}} est active. {{count}} dossiers ont été réévalués.",
+    "activeUnknown": "La version active est dans un format que ce tableau de bord ne connaît pas. Rechargez la page.",
+    "bySystem": "Installée avec le système",
+    "createdAt": "Créée",
+    "createdBy": "Par",
+    "approveMax": "Seuil d'approbation",
+    "rejectMin": "Seuil de refus",
+    "autoDecide": "Approbation automatique",
+    "on": "activée",
+    "off": "désactivée",
+    "note": "Pourquoi",
+    "editTitle": "Nouvelle version ({{version}})",
+    "editIntro": "Les poids et les seuils sont des nombres de 0 à 1, avec 4 décimales au plus. Le score additionne les poids des signaux présents (plafonné à 1).",
+    "approveMaxHint": "Un score inférieur ou égal peut être approuvé (seulement si aucune vérification ne manque).",
+    "rejectMinHint": "Des signaux fermes qui atteignent ce total recommandent un refus. Les signaux provisoires ne refusent jamais.",
+    "signalsCaption": "Signaux : poids, prise en compte, et signal bloquant (toujours une personne).",
+    "counted": "Compte",
+    "weightOf": "Poids de {{signal}}",
+    "countedOf": "{{signal}} compte dans le score",
+    "hardOf": "{{signal}} est un signal bloquant",
+    "mandatoryHard": "Exigé par une décision du PM",
+    "alwaysReview": "Documents toujours décidés par une personne",
+    "mandatoryDocument": "(exigé par une décision du PM)",
+    "autoDecideLabel": "Approuver automatiquement quand toutes les conditions sont remplies (jamais de refus automatique)",
+    "autoDecideHint": "Sessions de test seulement. Le système n'approuve un dossier que si la vérification du document est sûre, rien n'est expiré ni mineur, aucun signal bloquant ni signal sûr, les photos, le test de présence et la comparaison des visages sont réussis et le score est au plus au seuil d'approbation ; tout le reste attend une personne. Il ne refuse jamais.",
+    "reason": "Pourquoi ce changement (obligatoire)",
+    "reasonHint": "De {{min}} à {{max}} caractères, conservés avec la version.",
+    "noteError": {
+      "short": "Au moins {{min}} caractères.",
+      "long": "Au plus {{max}} caractères."
+    },
+    "changesTitle": "Changements par rapport à la version {{version}}",
+    "fixErrors_one": "Corrigez d'abord {{count}} problème ci-dessus.",
+    "fixErrors_other": "Corrigez d'abord {{count}} problèmes ci-dessus.",
+    "noChanges": "Aucun changement pour l'instant.",
+    "saving": "Enregistrement…",
+    "save": "Activer la version {{version}}",
+    "change": {
+      "approveMax": "Seuil d'approbation : {{from}} → {{to}}",
+      "rejectMin": "Seuil de refus : {{from}} → {{to}}",
+      "autoDecide": "Approbation automatique : {{from}} → {{to}}",
+      "weight": "Poids de « {{signal}} » : {{from}} → {{to}}",
+      "counted": "« {{signal}} » compte de nouveau dans le score",
+      "notCounted": "« {{signal}} » ne compte plus dans le score",
+      "hard": "« {{signal}} » devient un signal bloquant",
+      "notHard": "« {{signal}} » n'est plus un signal bloquant",
+      "alwaysReview": "« {{document}} » toujours décidé par une personne",
+      "notAlwaysReview": "« {{document}} » n'est plus toujours décidé par une personne",
+      "faceMatchCountsForApproval": "La comparaison des visages compte pour l'approbation : {{from}} → {{to}}"
+    },
+    "historyTitle": "Toutes les versions",
+    "active": "Active",
+    "earlierFormat": "Format antérieur (avant M8) : chaque dossier allait à une personne.",
+    "firstOfFormat": "Première version des règles M8.",
+    "errors": {
+      "not_object": "Non valide.",
+      "unknown_key": "Réglage inconnu.",
+      "missing_key": "Manquant.",
+      "schema": "Mauvaise version du format.",
+      "not_number": "Saisissez un nombre, par ex. 0,25.",
+      "out_of_range": "Entre 0 et 1.",
+      "too_precise": "4 décimales au plus.",
+      "not_boolean": "Non valide.",
+      "not_array": "Non valide.",
+      "unknown_value": "Valeur inconnue.",
+      "duplicate": "En double.",
+      "mandatory": "Un élément obligatoire manque.",
+      "order": "Doit être au-dessus du seuil d'approbation."
+    },
+    "byMigration": "La migration {{name}}",
+    "faceMatchCounts": "La comparaison des visages compte pour l'approbation",
+    "faceMatchCountsLabel": "Laisser une comparaison des visages réussie compter pour l'approbation (non calibrée)",
+    "faceMatchCountsHint": "Le seuil de la comparaison des visages n'est pas calibré sur des visages camerounais (NIST : environ 14 fois plus de fausses correspondances pour les Africains de l'Ouest à un seuil par défaut), et son modèle est réservé aux sessions de test. Désactivé : chaque comparaison redevient consultative.",
+    "yes": "oui",
+    "no": "non"
   }
 }

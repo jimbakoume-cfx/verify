@@ -1,0 +1,7 @@
+# Never uploaded to Vercel: the local environment and the tests. models/ IS uploaded when present
+# (a prebuilt deploy); otherwise the build command fetches it (scripts/fetch_models.py).
+.venv
+tests
+.pytest_cache
+__pycache__
+*.pyc
