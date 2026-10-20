@@ -60,12 +60,25 @@ describe("compareName", () => {
     ["ALEXANDRA", "ALEXANDRA MARIE", true, "agree"],
     // ... but not when the field has room left.
     ["ALEXANDRA MARIE-CHRISTINE", "ALEXANDRA MARIE CHRIS", false, "disagree"],
-    ["ALEXANDRA", "ALEXANDRA MARIE", false, "disagree"],
+    // Fixes after the PM's first real test: a middle name on one side only, words in another order, OCR
+    // splits and merges, labels read into the value, one misread letter in a long word.
+    ["ALEXANDRA", "ALEXANDRA MARIE", false, "agree"],
+    ["MARIE", "ALEXANDRA MARIE", true, "agree"],
+    ["ALEXANDRA MARIE PAULE", "ALEXANDRA PAULE", false, "agree"],
+    ["MARIE ALEXANDRA", "ALEXANDRA MARIE", false, "agree"],
+    ["ALEXANDRAMARIE", "ALEXANDRA MARIE", false, "agree"],
+    ["ALEX ANDRA MARIE", "ALEXANDRA MARIE", false, "agree"],
+    ["NOM/SURNAME SPÉCIMEN", "SPECIMEN", false, "agree"],
+    ["Prénoms / Given names: Hélène", "HELENE", false, "agree"],
+    ["SPECIMAN", "SPECIMEN", false, "agree"],
     // A real difference.
     ["DIFFERENT", "SPECIMEN", false, "disagree"],
-    ["SPECIMAN", "SPECIMEN", false, "disagree"],
-    ["MODELE", "MODEL", false, "disagree"],
-    ["MARIE", "ALEXANDRA MARIE", true, "disagree"],
+    ["MODELE", "MODEL", false, "agree"],
+    ["MODELE", "MOREAU", false, "disagree"],
+    ["PAUL", "PAOLO", false, "disagree"],
+    ["SPECIMEN", "SPECIMEN MARIE", false, "agree"],
+    ["MARTIN", "ALEXANDRA MARIE", true, "disagree"],
+    ["ALEXANDRA MARIE-CHRIS", "ALEXANDRA MARIE CHRISTINE", false, "disagree"],
     // Nothing to compare.
     [null, "SPECIMEN", false, "unknown"],
     ["", "SPECIMEN", false, "unknown"],
@@ -97,6 +110,19 @@ describe("compareNames", () => {
   it("disagrees on a real difference in either part", () => {
     expect(compareNames({ surname: "SPECIMEN", givenNames: "MARIE TEST" }, mrz, false)).toBe("disagree");
     expect(compareNames({ surname: "DIFFÉRENT", givenNames: "HÉLÈNE TEST" }, mrz, false)).toBe("disagree");
+  });
+
+  it("forgives what OCR does to a real card's names (fixes after the PM's first real test)", () => {
+    const real = { surname: "MBARGA ATANGANA", givenNames: "JEAN PIERRE" };
+    // Surname and given names swapped by the layout, labels read into the values, a middle name missing.
+    expect(compareNames({ surname: "JEAN PIERRE", givenNames: "MBARGA ATANGANA" }, real, false)).toBe("agree");
+    expect(compareNames({ surname: "NOM MBARGA ATANGANA", givenNames: "PRÉNOMS JEAN" }, real, false)).toBe("agree");
+    expect(compareNames({ surname: "MBARGA", givenNames: "JEAN PIERRE" }, real, false)).toBe("agree");
+    expect(compareNames({ surname: "MBARGAATANGANA", givenNames: "JEAN-PIERRE" }, real, false)).toBe("agree");
+    expect(compareNames({ surname: "MBARGA ATANGANA JEAN", givenNames: "PIERRE" }, real, false)).toBe("agree");
+    // Another person is still another person.
+    expect(compareNames({ surname: "ESSOMBA", givenNames: "JEAN PIERRE" }, real, false)).toBe("disagree");
+    expect(compareNames({ surname: "MBARGA ATANGANA", givenNames: "PAUL" }, real, false)).toBe("disagree");
   });
 
   it("does not compare given names the code lines have none of", () => {

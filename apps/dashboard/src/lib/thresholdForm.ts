@@ -9,6 +9,7 @@ import {
   normaliseThresholdConfig,
   RISK_SIGNALS,
   type RiskSignal,
+  signalSetting,
   THRESHOLD_CONFIG_SCHEMA,
   THRESHOLD_NOTE_MAX_LENGTH,
   THRESHOLD_NOTE_MIN_LENGTH,
@@ -39,8 +40,9 @@ export function formFromConfig(config: ThresholdConfig): ThresholdForm {
   const weights = {} as Record<RiskSignal, string>;
   const enabled = {} as Record<RiskSignal, boolean>;
   for (const code of RISK_SIGNALS) {
-    weights[code] = String(config.signals[code].weight);
-    enabled[code] = config.signals[code].enabled;
+    // A version stored before an optional signal existed shows its default (OPTIONAL_SIGNAL_DEFAULTS).
+    weights[code] = String(signalSetting(config, code).weight);
+    enabled[code] = signalSetting(config, code).enabled;
   }
   return {
     weights,

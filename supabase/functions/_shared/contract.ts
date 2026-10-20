@@ -387,6 +387,13 @@ export interface FlowResult {
 /** How long the rider waits on the result screen, and how often the app asks. */
 export const RESULT_WAIT_MS = 75_000;
 export const RESULT_POLL_MS = 2_500;
+/**
+ * Fixes after the PM's first real test (the result within 10 s of the end of the face check): the app
+ * asks every FAST_POLL_MS during the first FAST_POLL_FOR_MS of a wait (the checks and the result), then
+ * every CHECKS_POLL_MS or RESULT_POLL_MS.
+ */
+export const FAST_POLL_MS = 1_000;
+export const FAST_POLL_FOR_MS = 15_000;
 
 // ---------------------------------------------------------------------------
 // Active liveness capture (M5). Edge Function "flow". Auth: session token.
@@ -962,8 +969,28 @@ export interface FaceResultRequest {
   liveness: FaceLivenessEvidence | null;
   /** Set for a face_match job, null otherwise. */
   faceMatch: FaceMatchEvidence | null;
-  timing: { ms: number; cold: boolean };
+  timing: FaceWorkerTiming;
 }
+
+/**
+ * How long the worker took. ms: CPU time of the analysis; cold: models loaded for this job. Since the
+ * fixes after the PM's first real test (optional, a worker before them sends neither): fetchMs, the
+ * wall time to fetch the job's inputs (in parallel, or 0 when the ring already had them); wallMs, the
+ * wall time from the claim to the result.
+ */
+export interface FaceWorkerTiming {
+  ms: number;
+  cold: boolean;
+  fetchMs?: number;
+  wallMs?: number;
+}
+
+/** The timing stored with a face check: the worker's, plus the time from the job's creation to its result. */
+export interface LivenessTiming extends FaceWorkerTiming {
+  /** Wall time from the face job's creation (the frames recorded) to the result's arrival. */
+  sinceJobMs?: number;
+}
+export const FACE_TIMING_KEYS = ["ms", "cold", "fetchMs", "wallMs", "sinceJobMs"] as const;
 
 export interface FaceResultResponse {
   status: "recorded" | "already_done";
@@ -987,7 +1014,7 @@ export type LivenessActionResult = (typeof LIVENESS_ACTION_RESULTS)[number];
 export interface LivenessActionDetails {
   action: LivenessAction;
   result: LivenessActionResult;
-  /** Frames of this action's step with exactly one face. */
+  /** Frames of this action's window (its step, and since liveness-eval-v2 the first late frames) with exactly one face. */
   framesWithFace: number;
   /**
    * The measure that decided, at its strongest in the step: the head's turn or tilt from the
@@ -1047,8 +1074,57 @@ export interface LivenessDetails {
   /** Median planar residual over the frames that moved enough; null when not measured. */
   flatPlaneScore: number | null;
   problems: LivenessEvalProblem[];
-  timing: { ms: number; cold: boolean };
+  timing: LivenessTiming;
+  /**
+   * Since liveness-eval-v2 (fixes after the PM's first real test): the generic per-frame numbers the
+   * decision used, for tuning the cut-offs on real riders. Angles in degrees, scores and ratios; never a
+   * landmark, a crop or a pixel.
+   */
+  metrics?: LivenessMetrics;
 }
+
+/** The rider's neutral for each measure (the median of the frames where it should not move). */
+export interface LivenessBaseline {
+  yaw: number | null;
+  pitch: number | null;
+  smile: number | null;
+  mouthWidth: number | null;
+  eyeOpenness: number | null;
+}
+
+export interface LivenessFrameMetric {
+  index: number;
+  step: number | null;
+  faces: number;
+  yaw: number | null;
+  pitch: number | null;
+  blink: number | null;
+  eyeOpenness: number | null;
+  smile: number | null;
+  mouthWidth: number | null;
+}
+
+export interface LivenessMetrics {
+  /** The neutral over the whole capture (each action is judged against its own, without its window). */
+  baseline: LivenessBaseline;
+  /** Per action, in order: the frame indexes it was judged on (its step, then the first late frames). */
+  windows: number[][];
+  frames: LivenessFrameMetric[];
+}
+
+export const LIVENESS_METRIC_FRAMES_MAX = 16;
+export const LIVENESS_BASELINE_KEYS = ["yaw", "pitch", "smile", "mouthWidth", "eyeOpenness"] as const satisfies readonly (keyof LivenessBaseline)[];
+export const LIVENESS_FRAME_METRIC_KEYS = [
+  "index",
+  "step",
+  "faces",
+  "yaw",
+  "pitch",
+  "blink",
+  "eyeOpenness",
+  "smile",
+  "mouthWidth",
+] as const satisfies readonly (keyof LivenessFrameMetric)[];
 
 export const LIVENESS_EVAL_DETAIL_KEYS = [
   "evaluated",
@@ -1062,6 +1138,7 @@ export const LIVENESS_EVAL_DETAIL_KEYS = [
   "flatPlaneScore",
   "problems",
   "timing",
+  "metrics",
 ] as const satisfies readonly (keyof LivenessDetails)[];
 
 /**
@@ -1097,7 +1174,7 @@ export interface FaceMatchDetails {
   problems: FaceMatchProblem[];
   portrait: { captureId: string; box: number[] | null };
   selfie: { captureId: string | null; box: number[] | null };
-  timing: { ms: number; cold: boolean };
+  timing: LivenessTiming;
 }
 
 export const FACE_MATCH_DETAIL_KEYS = [

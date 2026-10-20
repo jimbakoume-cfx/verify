@@ -2,7 +2,7 @@
 // every CHECKS_POLL_MS, for at most CHECKS_WAIT_MS. The server never holds the rider up: when it is
 // slow, down, or answers with an error, the wait ends and the photos are submitted as they are
 // (staff then review the case), with nothing shown to the rider.
-import { CHECKS_POLL_MS, CHECKS_WAIT_MS, FLOW_CHECK_STATES, type FlowChecks } from "@verify/shared";
+import { CHECKS_POLL_MS, CHECKS_WAIT_MS, FAST_POLL_FOR_MS, FAST_POLL_MS, FLOW_CHECK_STATES, type FlowChecks } from "@verify/shared";
 import { isTransient, toFlowError } from "./errors";
 
 export interface ChecksTiming {
@@ -98,8 +98,19 @@ export interface PollOptions<A, T> {
   decide: (answer: A) => T | null;
   waitMs: number;
   pollMs: number;
+  /** A shorter pause during the first `fastForMs` of the wait (the answer is usually ready by then). */
+  fastPollMs?: number;
+  fastForMs?: number;
   /** Stops the wait: it then resolves null. */
   signal?: AbortSignal;
+}
+
+/**
+ * The pauses of a wait: FAST_POLL_MS during its first FAST_POLL_FOR_MS, then `pollMs`; a pause set
+ * from the URL (debug) is used throughout.
+ */
+export function pollPauses(overridden: number | undefined): Pick<PollOptions<unknown, unknown>, "fastPollMs" | "fastForMs"> {
+  return overridden === undefined ? { fastPollMs: FAST_POLL_MS, fastForMs: FAST_POLL_FOR_MS } : {};
 }
 
 /**
@@ -112,7 +123,8 @@ export interface PollOptions<A, T> {
 export async function pollUntil<A, T>(options: PollOptions<A, T>): Promise<ChecksWait<T> | null> {
   const { waitMs, pollMs } = options;
   const stopped = options.signal ?? new AbortController().signal;
-  const deadline = Date.now() + waitMs;
+  const started = Date.now();
+  const deadline = started + waitMs;
   const timeout: ChecksWait<T> = { type: "timeout" };
 
   for (;;) {
@@ -143,7 +155,8 @@ export async function pollUntil<A, T>(options: PollOptions<A, T>): Promise<Check
 
     const rest = deadline - Date.now();
     if (rest <= 0) return timeout;
-    await pause(Math.min(pollMs, rest), stopped);
+    const fast = options.fastPollMs !== undefined && Date.now() - started < (options.fastForMs ?? 0);
+    await pause(Math.min(fast ? options.fastPollMs! : pollMs, rest), stopped);
   }
 }
 
@@ -158,6 +171,7 @@ export function waitForChecks<T>(options: ChecksWaitOptions<T>): Promise<ChecksW
     decide: options.decide,
     waitMs: options.timing?.waitMs ?? CHECKS_TIMING.waitMs,
     pollMs: options.timing?.pollMs ?? CHECKS_TIMING.pollMs,
+    ...pollPauses(options.timing?.pollMs),
     signal: options.signal,
   });
 }

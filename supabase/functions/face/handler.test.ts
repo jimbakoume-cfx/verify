@@ -318,10 +318,29 @@ describe("POST /result", () => {
     expect(res.status).toBe(200);
     expect(await readJson(res)).toEqual({ status: "recorded" });
     const record = repo.recorded[0];
-    expect(record).toMatchObject({ kid: "f1", checkName: "liveness", version: "liveness-eval-v1", outcome: "pass", score: 1 });
+    expect(record).toMatchObject({ kid: "f1", checkName: "liveness", version: "liveness-eval-v2", outcome: "pass", score: 1 });
     expect(record.details).toMatchObject({ evaluated: true, provisional: true, challengeId: CHALLENGE, flatPlane: "depth", problems: [] });
     // The measures stay with the job (never readable by staff).
     expect(record.evidence).toMatchObject({ referenceIndex: 0 });
+  });
+
+  it("keeps the timings (fetch, wall, and since the job was created) with the check, and logs them", async () => {
+    const { send, addJob, repo } = await setup();
+    const job = addJob("liveness", { createdAt: new Date(NOW.getTime() - 4_200).toISOString() });
+    await send("/claim", {});
+    const body = { ...livenessResult(job.jobId), timing: { ms: 350, cold: false, fetchMs: 900, wallMs: 1_500 } };
+    expect(await readJson(await send("/result", body))).toEqual({ status: "recorded" });
+    expect(repo.recorded[0].details.timing).toEqual({ ms: 350, cold: false, fetchMs: 900, wallMs: 1_500, sinceJobMs: 4_200 });
+    // Per-frame metrics for tuning, numbers only.
+    expect(repo.recorded[0].details.metrics).toMatchObject({ windows: [[1, 2, 3, 4, 5, 6], [5, 6, 7, 8, 9, 10], [9, 10, 11, 12]] });
+  });
+
+  it("refuses a timing with any other key", async () => {
+    const { send, addJob } = await setup();
+    const job = addJob("liveness");
+    await send("/claim", {});
+    const body = { ...livenessResult(job.jobId), timing: { ms: 350, cold: false, photo: 1 } };
+    await expectError(await send("/result", body), 400, "bad_request");
   });
 
   it("face_match: recorded as the case's face_match check, review-only and uncalibrated", async () => {
@@ -437,5 +456,9 @@ describe("repo parsers", () => {
     expect(parseJobContext(context)?.inputs[0].role).toBe("document");
     expect(() => parseJobContext({ ...context, status: "running" })).toThrow();
     expect(() => parseJobContext({ ...context, inputs: [{ captureId: "x", role: "frame", index: 0, step: 0 }] })).toThrow();
+    // createdAt since the real-test fixes (a database before them sends none).
+    expect(parseJobContext(context)?.createdAt).toBeNull();
+    expect(parseJobContext({ ...context, createdAt: "2026-10-20T13:34:09.988058+00:00" })?.createdAt).toBe("2026-10-20T13:34:09.988058+00:00");
+    expect(() => parseJobContext({ ...context, createdAt: "yesterday" })).toThrow();
   });
 });

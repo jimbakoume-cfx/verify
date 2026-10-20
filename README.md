@@ -52,7 +52,7 @@ M4 compares what the document says with itself and with today's date. The full t
    - **Utiliser une autre pièce** (*Use another document*) goes back to the list of documents;
    - **Continuer quand même** (*Continue anyway*) finishes as usual.
    On the dashboard, **À décider par une personne** (*For a person to decide*) lists **Document expiré** in red with **Signal bloquant** (*Hard flag*), and the new **Cohérence** (*Consistency*) block says the same.
-2. **Printed data that does not match the code lines.** Print `e2e/fixtures/specimens/passport-mismatch.jpg` and photograph it as a passport. The phone shows nothing special; the dashboard shows **Texte imprimé différent des lignes de code** with "Nom" (*Name*).
+2. **Printed data that does not match the code lines.** Print `e2e/fixtures/specimens/passport-mismatch.jpg` and photograph it as a passport. The phone shows nothing special; the dashboard shows **Texte imprimé différent des lignes de code** with "Nom" (*Name*) as a provisional note (since the fixes after the PM's first real test, a name that differs never blocks on its own; a number or a date does).
 3. **Your own valid documents:** **Cohérence** should say nothing is inconsistent (provisional notes, from printed text only, may appear). Tell us about any false flag: which kind of field, never its value.
 4. **Our own reading model.** With the Debug link, the debug panel under the photo shows **modèle** (*model*) **tesseract.js-7.0.0/mrz-2** on test sessions. Tell us if a document's code lines read worse than with M3.
 

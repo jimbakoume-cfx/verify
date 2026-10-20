@@ -6,8 +6,9 @@
 // dates are real; then they are the source of the birth and expiry dates and of the number. Printed
 // text (the AI worker's OCR, on layouts not yet seen on real cards) is provisional: what depends on it
 // goes into `provisional`, never into `flags`, with two exceptions decided by the PM (2026-10-15):
-// a printed birth date under 18 is a flag, and a printed field that disagrees with firm code lines is
-// a flag (the code lines are the firm side of that comparison).
+// a printed birth date under 18 is a flag, and a printed number or date that disagrees with firm code
+// lines is a flag (the code lines are the firm side of that comparison). A printed NAME that disagrees
+// is provisional only (fixes after the PM's first real test, 2026-10-20: OCR on real cards is not tuned).
 //
 // Privacy: the inputs are values read from the document (decrypted by the database for this decision
 // only); the result holds generic codes only. Never a value, never which value disagreed.
@@ -149,7 +150,10 @@ export function decideConsistency(
     if (compareNumber(fields.documentNumber, firm.documentNumber) === "disagree") mismatches.add("number");
     if (compareDate(fields.birthDate, firm.birthDate.iso, "birth", today) === "disagree") mismatches.add("birth_date");
     if (compareDate(fields.expiryDate, firm.expiryDate.iso, "expiry", today) === "disagree") mismatches.add("expiry_date");
-    if (mismatches.size > 0) flags.add("mrz_print_mismatch");
+    // Fixes after the PM's first real test (2026-10-20): printed text is read by OCR, so a name that
+    // differs is a provisional note for staff; a number or a date that differs stays a firm flag.
+    if ([...mismatches].some((kind) => kind !== "name")) flags.add("mrz_print_mismatch");
+    else if (mismatches.size > 0) provisional.add("mrz_print_mismatch");
   }
 
   // Date logic: firm only when every date a rule uses is firm (only birth against expiry can be).

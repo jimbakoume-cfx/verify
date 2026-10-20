@@ -247,8 +247,8 @@ export function useFlow(boot: Boot, options: FlowOptions = {}): { state: FlowSta
     [api],
   );
 
-  // Uploads start when the reducer queues them: the photos after the last one is accepted (then the
-  // checking screen), the submit once the checks are over, and either again on "Try again".
+  // Uploads start when the reducer queues them: the photos after the last one is accepted (in the
+  // background of the face check), the submit once the checks are over, and either again on "Try again".
   const { status: uploadStatus } = state.upload;
   useEffect(() => {
     if (uploadStatus !== "queued" || !uploader) return;
@@ -306,7 +306,9 @@ export function useFlow(boot: Boot, options: FlowOptions = {}): { state: FlowSta
   // starts a new wait.
   const waitMs = options.checks?.waitMs;
   const pollMs = options.checks?.pollMs;
-  const waiting = checking && state.expiredNotice !== "shown";
+  // Since "ID and face steps all at once", the photos may still be uploading when the face check ends:
+  // the wait starts once they are all sent.
+  const waiting = checking && state.expiredNotice !== "shown" && state.upload.status === "idle";
   useEffect(() => {
     if (!waiting || !api) return;
     const controller = new AbortController();

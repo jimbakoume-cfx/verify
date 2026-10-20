@@ -6,7 +6,7 @@
 // no crop is cut out or kept).
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { type FaceMatchDetails, type LivenessDetails } from "@verify/shared";
+import { type FaceMatchDetails, type LivenessDetails, type LivenessMetrics } from "@verify/shared";
 import { useServices } from "../api/services";
 import { OutcomeBadge } from "../components/Checks";
 import { Countdown } from "../components/Countdown";
@@ -153,11 +153,18 @@ function LivenessEvaluation({ record, job }: { record: FaceChecks["liveness"]; j
                 {d.timing.cold && <span className="muted"> · {t("face.coldStart")}</span>}
               </dd>
             </div>
+            {d.timing.sinceJobMs !== undefined && (
+              <div>
+                <dt>{t("face.sinceJob")}</dt>
+                <dd>{t("capture.seconds", { value: formatNumber(d.timing.sinceJobMs / 1000, lang, 1) })}</dd>
+              </div>
+            )}
             <div>
               <dt>{t("face.engine")}</dt>
               <dd className="mono">{d.engine}</dd>
             </div>
           </dl>
+          {d.metrics && <LivenessMetricsTable metrics={d.metrics} lang={lang} />}
           {d.problems.length > 0 ? (
             <ul className="dash-reasons">
               {d.problems.map((p) => (
@@ -176,6 +183,59 @@ function LivenessEvaluation({ record, job }: { record: FaceChecks["liveness"]; j
         </>
       )}
     </article>
+  );
+}
+
+/**
+ * The per-frame numbers the decision used (liveness-eval-v2), folded away: angles and scores only, for
+ * tuning the cut-offs on real riders. Never a picture.
+ */
+function LivenessMetricsTable({ metrics, lang }: { metrics: LivenessMetrics; lang: "fr" | "en" }) {
+  const { t } = useTranslation();
+  const n = (value: number | null, digits: number) => (value === null ? "—" : formatNumber(value, lang, digits));
+  const b = metrics.baseline;
+  return (
+    <details className="dash-subsection">
+      <summary>{t("face.metrics.title")}</summary>
+      <p className="muted dash-small">{t("face.metrics.body")}</p>
+      <table className="dash-table dash-small">
+        <thead>
+          <tr>
+            <th>{t("face.metrics.frame")}</th>
+            <th>{t("face.metrics.step")}</th>
+            <th>{t("face.metrics.yaw")}</th>
+            <th>{t("face.metrics.pitch")}</th>
+            <th>{t("face.metrics.smile")}</th>
+            <th>{t("face.metrics.mouthWidth")}</th>
+            <th>{t("face.metrics.eyeOpenness")}</th>
+            <th>{t("face.metrics.blink")}</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th scope="row" colSpan={2}>{t("face.metrics.neutral")}</th>
+            <td>{n(b.yaw, 1)}</td>
+            <td>{n(b.pitch, 1)}</td>
+            <td>{n(b.smile, 3)}</td>
+            <td>{n(b.mouthWidth, 3)}</td>
+            <td>{n(b.eyeOpenness, 3)}</td>
+            <td>—</td>
+          </tr>
+          {metrics.frames.map((f) => (
+            <tr key={f.index}>
+              <td>{f.index}</td>
+              <td>{f.step ?? "—"}</td>
+              <td>{n(f.yaw, 1)}</td>
+              <td>{n(f.pitch, 1)}</td>
+              <td>{n(f.smile, 3)}</td>
+              <td>{n(f.mouthWidth, 3)}</td>
+              <td>{n(f.eyeOpenness, 3)}</td>
+              <td>{n(f.blink, 2)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </details>
   );
 }
 

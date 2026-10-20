@@ -1,7 +1,8 @@
 // Camera: the sharp ID card, declared as the new CNI (2025). M4: the server finds the document expired
 // from its code lines (the consistency check's firm flag document_expired; FakeBackend.expiredDocuments)
-// and GET /flow/checks says so once the back is checked. "Checking your photos…" then stops waiting
-// and asks the rider to use another, valid document, or to continue anyway.
+// and GET /flow/checks says so once the back is checked. Since "ID and face steps all at once" (PM,
+// 2026-10-20) the rider is told at the end, after the face check: the wait stops and the app asks the
+// rider to use another, valid document, or to continue anyway.
 import { expect, test } from "./support/fixtures";
 import { CARD_FLOW, LIVENESS, NEW_CNI_FLOW, afterPhotos } from "./support/expectations";
 
@@ -16,9 +17,11 @@ test("expired document, 'Continue anyway': told at once, then the case is submit
   await rider.turnOver();
   await rider.autoCapture("cni_biometric", "document_back");
   await rider.usePhoto();
+  // Not told during the photos nor the face check: at the end.
+  await rider.passLiveness(5_000);
 
-  // On "Checking your photos…": the message and the two choices; nothing else is asked meanwhile.
-  await expect(rider.checkingHeading).toBeVisible({ timeout: 20_000 });
+  // The message and the two choices; nothing else is asked meanwhile.
+  await expect(rider.heading("checks.title")).toBeVisible({ timeout: 20_000 });
   const notice = page.locator(".notice.warn[role=alert]");
   await expect(notice).toContainText(rider.t("checks.expired.title"));
   await expect(notice).toContainText(rider.t("checks.expired.body"));
@@ -30,9 +33,9 @@ test("expired document, 'Continue anyway': told at once, then the case is submit
   expect(backend.status).toBe("in_progress");
 
   await rider.button("checks.expired.continue").click();
-  await rider.waitForSubmit();
+  await rider.waitForResult();
   // Asked once more after "Continue anyway", then submitted: staff see the hard flag.
-  expect(backend.routes).toEqual([...NEW_CNI_FLOW.slice(0, -3), "GET /checks", ...LIVENESS, "POST /submit"]);
+  expect(backend.routes).toEqual([...NEW_CNI_FLOW.slice(0, -1), "GET /checks", "POST /submit"]);
   expect(backend.status).toBe("submitted");
   await expect(page.getByRole("alert")).toHaveCount(0);
 });
@@ -53,6 +56,7 @@ test("expired document, 'Use another document': back to the list; the next docum
   await rider.turnOver();
   await rider.autoCapture("cni_biometric", "document_back");
   await rider.usePhoto();
+  await rider.passLiveness(5_000);
 
   await expect(page.getByText("This document has expired")).toBeVisible({ timeout: 20_000 });
   await rider.button("checks.expired.another").click();
@@ -61,7 +65,8 @@ test("expired document, 'Use another document': back to the list; the next docum
   await expect(rider.heading("document.title")).toBeVisible();
   await rider.chooseDocument("cni_legacy");
   await rider.photographCard("cni_legacy");
-  await rider.waitForSubmit();
+  // The face is the same: the face check is not asked again.
+  await rider.waitForResult();
 
   expect(backend.declaredDocuments).toEqual(["cni_biometric", "cni_legacy"]);
   // Both sides photographed again and sent: each new photo replaced the expired document's.
@@ -69,11 +74,11 @@ test("expired document, 'Use another document': back to the list; the next docum
   expect(routes).toEqual([
     ...SEND(2),
     "POST /mrz",
+    ...LIVENESS,
     "GET /checks",
     "POST /document-type",
     ...SEND(2),
     "GET /checks",
-    ...LIVENESS,
     "POST /submit",
   ]);
   expect(backend.captures.map((c) => [c.kind, c.live])).toEqual([

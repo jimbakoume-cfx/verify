@@ -152,6 +152,9 @@ a:hover { color: var(--brand-hover); }
 
 /* Case view */
 .dash-back { display: inline-flex; align-items: center; min-height: 44px; font-weight: 600; text-decoration: none; }
+/* The rules' recommendation, first and large; the score band is only a detail below it. */
+.dash-risk-recommendation { display: flex; align-items: center; gap: 8px; margin: 4px 0 8px; font-size: 1.05rem; }
+.dash-risk-recommendation .badge { font-size: 1rem; padding: 4px 12px; }
 .dash-facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px 16px; margin: 8px 0 0; }
 .dash-facts div { min-width: 0; }
 .dash-facts dt { font-size: 0.8rem; color: var(--text-3); }

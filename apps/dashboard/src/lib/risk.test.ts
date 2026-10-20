@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AUTO_APPROVAL_CONFIG, DEFAULT_THRESHOLD_CONFIG, evaluateRisk, type RiskFacts } from "@verify/shared";
+import { AUTO_APPROVAL_CONFIG, DEFAULT_THRESHOLD_CONFIG, evaluateRisk, normaliseThresholdConfig, type RiskFacts } from "@verify/shared";
 import {
   activeVersion,
   agreement,
@@ -248,7 +248,8 @@ describe("threshold versions", () => {
     const config = { ...DEFAULT_THRESHOLD_CONFIG, hardFlags: [...DEFAULT_THRESHOLD_CONFIG.hardFlags].reverse() };
     expect(toThresholdVersion({ version: 2, config, note: "M8", created_by: null, created_at: "2026-10-19T00:00:00Z" })).toEqual({
       version: 2,
-      config: { ...DEFAULT_THRESHOLD_CONFIG, faceMatchCountsForApproval: false },
+      // Normalised: the optional print_name_mismatch (fixes after the PM's first real test) written out.
+      config: normaliseThresholdConfig(DEFAULT_THRESHOLD_CONFIG),
       note: "M8",
       createdBy: null,
       createdByMigration: null,

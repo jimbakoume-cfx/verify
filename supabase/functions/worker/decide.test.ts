@@ -581,12 +581,12 @@ describe("decideCaseChecks", () => {
     const checks = decideCaseChecks({
       declaredDocument: "passport",
       sides: [side("document_front", page)],
-      documentData: [{ ...front, mrzLines: lines, fields: { surname: "AUTRE" } }],
+      documentData: [{ ...front, mrzLines: lines, fields: { surname: "AUTRE", documentNumber: "XX0000000" } }],
     }, TODAY)!;
     expect(checks.version).toBe(SERVER_CHECKS_VERSION);
     expect(checks.consistency).toEqual({
       outcome: "flag",
-      details: { flags: ["mrz_print_mismatch"], provisional: [], basis: "mrz", mismatches: ["name"] },
+      details: { flags: ["mrz_print_mismatch"], provisional: [], basis: "mrz", mismatches: ["name", "number"] },
     });
     expect(checks.reasons).toEqual(["mrz_print_mismatch"]);
   });

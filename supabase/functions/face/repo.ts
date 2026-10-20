@@ -69,11 +69,12 @@ export function parseJobContext(data: unknown): FaceJobContext | null {
   if (data === null) return null;
   const fail = () => new InternalError("rpc.face_job_context returned an unexpected value");
   if (!isPlainObject(data)) throw fail();
-  const { jobId, kind, verificationId, status, attempts, live, challengeId, actions, inputs } = data;
+  const { jobId, kind, verificationId, status, attempts, live, challengeId, actions, inputs, createdAt } = data;
   const parsedActions = parseActions(actions);
   if (
     !isUuid(jobId) || !isOneOf(FACE_JOB_KINDS, kind) || !isUuid(verificationId) || !isOneOf(JOB_STATUSES, status) ||
-    !isInt(attempts) || typeof live !== "boolean" || !isUuid(challengeId) || !parsedActions || !Array.isArray(inputs)
+    !isInt(attempts) || typeof live !== "boolean" || !isUuid(challengeId) || !parsedActions || !Array.isArray(inputs) ||
+    (createdAt !== undefined && createdAt !== null && (typeof createdAt !== "string" || !Number.isFinite(Date.parse(createdAt))))
   ) {
     throw fail();
   }
@@ -83,7 +84,18 @@ export function parseJobContext(data: unknown): FaceJobContext | null {
     const role: "frame" | "document" = input.role;
     return { captureId: input.captureId, role, index: input.index, step: input.step };
   });
-  return { jobId, kind, verificationId, status, attempts, live, challengeId, actions: parsedActions, inputs: parsedInputs };
+  return {
+    jobId,
+    kind,
+    verificationId,
+    status,
+    attempts,
+    live,
+    challengeId,
+    actions: parsedActions,
+    inputs: parsedInputs,
+    createdAt: typeof createdAt === "string" ? createdAt : null,
+  };
 }
 
 export function createFaceRepo(db: SupabaseClient): FaceRepo {

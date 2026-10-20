@@ -3,6 +3,8 @@
 
 export interface Logger {
   error(event: string, err?: unknown): void;
+  /** A measurement (timings, counts): generic numbers, codes and booleans only, never a value read. */
+  info?(event: string, fields: Record<string, number | string | boolean>): void;
 }
 
 /** An error raised by our own glue code; its message is written by us and is safe to log. */
@@ -49,5 +51,8 @@ export function summarizeError(err: unknown): ErrorSummary {
 export const consoleLogger: Logger = {
   error(event, err) {
     console.error(JSON.stringify({ level: "error", event, ...(err === undefined ? {} : summarizeError(err)) }));
+  },
+  info(event, fields) {
+    console.log(JSON.stringify({ level: "info", event, ...fields }));
   },
 };

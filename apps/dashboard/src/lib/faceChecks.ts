@@ -14,7 +14,13 @@ import {
   LIVENESS_EVAL_CHECK_NAME,
   LIVENESS_EVAL_PROBLEMS,
   type LivenessActionDetails,
+  LIVENESS_BASELINE_KEYS,
+  LIVENESS_FRAME_METRIC_KEYS,
+  FACE_TIMING_KEYS,
   type LivenessDetails,
+  type LivenessFrameMetric,
+  type LivenessMetrics,
+  type LivenessTiming,
   PROVISIONAL_LIVENESS_PROBLEMS,
 } from "@verify/shared";
 import { type CheckRecord, toCheckRow } from "./records";
@@ -44,10 +50,49 @@ const exactKeys = (row: Row, keys: readonly string[]) =>
 const isUuid = (value: unknown): value is string =>
   typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 
-function timing(value: unknown): { ms: number; cold: boolean } | null {
+/** ms and cold always; fetchMs, wallMs and sinceJobMs since the fixes after the PM's first real test. */
+function timing(value: unknown): LivenessTiming | null {
   const t = asRow(value);
   const ms = num(t?.ms);
-  return t && exactKeys(t, ["ms", "cold"]) && ms !== null && typeof t.cold === "boolean" ? { ms, cold: t.cold } : null;
+  if (!t || ms === null || typeof t.cold !== "boolean") return null;
+  if (Object.keys(t).some((key) => !(FACE_TIMING_KEYS as readonly string[]).includes(key))) return null;
+  const out: LivenessTiming = { ms, cold: t.cold };
+  for (const key of ["fetchMs", "wallMs", "sinceJobMs"] as const) {
+    if (t[key] === undefined) continue;
+    const n = num(t[key]);
+    if (n === null) return null;
+    out[key] = n;
+  }
+  return out;
+}
+
+/** The per-frame numbers of liveness-eval-v2 (for tuning); null when absent or not of the contract's shape. */
+function toMetrics(value: unknown): LivenessMetrics | null {
+  const m = asRow(value);
+  const baseline = asRow(m?.baseline);
+  if (!m || !baseline || !Array.isArray(m.frames) || !Array.isArray(m.windows)) return null;
+  const numOrNull = (v: unknown) => (v === null ? null : num(v));
+  const base = {} as LivenessMetrics["baseline"];
+  for (const key of LIVENESS_BASELINE_KEYS) {
+    if (baseline[key] !== null && num(baseline[key]) === null) return null;
+    base[key] = numOrNull(baseline[key]);
+  }
+  const frames: LivenessFrameMetric[] = [];
+  for (const raw of m.frames) {
+    const f = asRow(raw);
+    if (!f || !exactKeys(f, LIVENESS_FRAME_METRIC_KEYS)) return null;
+    if (LIVENESS_FRAME_METRIC_KEYS.some((key) => f[key] !== null && num(f[key]) === null)) return null;
+    const index = num(f.index);
+    const faces = num(f.faces);
+    if (index === null || faces === null) return null;
+    frames.push({
+      index, step: numOrNull(f.step), faces, yaw: numOrNull(f.yaw), pitch: numOrNull(f.pitch), blink: numOrNull(f.blink),
+      eyeOpenness: numOrNull(f.eyeOpenness), smile: numOrNull(f.smile), mouthWidth: numOrNull(f.mouthWidth),
+    });
+  }
+  const windows = m.windows.map((w) => (Array.isArray(w) && w.every((i) => num(i) !== null) ? (w as number[]) : null));
+  if (windows.some((w) => w === null)) return null;
+  return { baseline: base, windows: windows as number[][], frames };
 }
 
 /** [x, y, width, height] as fractions of the photo, or null. */
@@ -95,6 +140,7 @@ export function toLivenessEvalDetails(value: unknown): LivenessDetails | null {
     flatPlaneScore: d.flatPlaneScore as number | null,
     problems: LIVENESS_EVAL_PROBLEMS.filter((p) => (d.problems as string[]).includes(p)),
     timing: t,
+    ...(d.metrics === undefined ? {} : { metrics: toMetrics(d.metrics) ?? undefined }),
   };
 }
 

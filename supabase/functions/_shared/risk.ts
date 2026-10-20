@@ -20,6 +20,9 @@ import { DECLARED_DOCUMENTS, type DeclaredDocument, type DecisionOutcome } from 
  * - image_reused: the same photo bytes (SHA-256) were uploaded in another verification (M1);
  * - mrz_phone_flag: the phone's report of the code lines was flagged (unreadable, or check digits wrong);
  * - quality_poor: the server found a photo poor (thresholds not tuned yet);
+ * - print_name_mismatch: the printed name differs from firm code lines that the phone read the same way
+ *   (fixes after the PM's first real test, 2026-10-20): printed-text OCR is provisional, so a name that
+ *   differs is a note for staff, never a firm signal (a differing number or date stays mrz_print_mismatch);
  * - liveness_flag, face_match_flag: the liveness (M6) or face match (M7) check ran and did not pass
  *   (flag or fail; both provisional, so they can only send a case to a person).
  * server_unchecked is not a signal: a photo the server could not check is a missing check.
@@ -36,6 +39,7 @@ export const RISK_SIGNALS = [
   "date_logic",
   "number_format",
   "manual_review_document",
+  "print_name_mismatch",
   "unrecognised_document",
   "mrz_unreadable_server",
   "mrz_phone_flag",
@@ -46,6 +50,19 @@ export const RISK_SIGNALS = [
   "face_match_flag",
 ] as const;
 export type RiskSignal = (typeof RISK_SIGNALS)[number];
+
+/**
+ * Signals added after threshold versions were already stored: a version may leave them out, and then
+ * uses the default setting below (normaliseThresholdConfig writes it). Every other signal is required.
+ */
+export const OPTIONAL_SIGNALS = ["print_name_mismatch"] as const;
+export type OptionalSignal = (typeof OPTIONAL_SIGNALS)[number];
+export type RequiredSignal = Exclude<RiskSignal, OptionalSignal>;
+/** The setting of an optional signal a version leaves out: a note, adding nothing to the score. */
+export const OPTIONAL_SIGNAL_DEFAULTS: Record<OptionalSignal, SignalSetting> = {
+  print_name_mismatch: { weight: 0, enabled: true },
+};
+const isOptionalSignal = (code: string): code is OptionalSignal => (OPTIONAL_SIGNALS as readonly string[]).includes(code);
 
 /**
  * Firm signals: computed from code lines whose check digits are all right, or from exact facts (a
@@ -201,7 +218,8 @@ export interface SignalSetting {
 
 export interface ThresholdConfig {
   schema: typeof THRESHOLD_CONFIG_SCHEMA;
-  signals: Record<RiskSignal, SignalSetting>;
+  /** Every required signal; an optional one (OPTIONAL_SIGNALS) may be missing (signalSetting gives its default). */
+  signals: Record<RequiredSignal, SignalSetting> & Partial<Record<OptionalSignal, SignalSetting>>;
   /** A score at or under this is low enough to approve. */
   approveMax: number;
   /** Firm signals adding up to this or more recommend a reject. Strictly above approveMax. */
@@ -278,6 +296,24 @@ export const AUTO_APPROVAL_CONFIG: ThresholdConfig = {
   autoDecide: true,
   faceMatchCountsForApproval: true,
 };
+
+/**
+ * The version the migration 20261022000000_real_test_fixes.sql adds on top of the active one ("Fixes
+ * after the PM's first real test"): the automatic-approval version with the new provisional signal
+ * print_name_mismatch written out (weight 0: a note for staff that never blocks an automatic approval).
+ */
+export const REAL_TEST_FIXES_CONFIG: ThresholdConfig = {
+  ...AUTO_APPROVAL_CONFIG,
+  signals: { ...AUTO_APPROVAL_CONFIG.signals, print_name_mismatch: { weight: 0, enabled: true } },
+};
+
+/** The setting of `code` in `config`: its own, or the default of an optional signal the version leaves out. */
+export function signalSetting(config: ThresholdConfig, code: RiskSignal): SignalSetting {
+  const own = (config.signals as Partial<Record<RiskSignal, SignalSetting>>)[code];
+  if (own) return own;
+  if (isOptionalSignal(code)) return OPTIONAL_SIGNAL_DEFAULTS[code];
+  throw new Error(`threshold configuration without ${code}`);
+}
 
 /** "path:code", e.g. "signals.date_logic.weight:out_of_range". Sorted, each once. */
 export type ConfigError = string;
@@ -366,7 +402,7 @@ export function thresholdConfigErrors(value: unknown): ConfigError[] {
     const signals = value.signals;
     if (!isObject(signals)) errors.add("signals:not_object");
     else {
-      checkExactKeys(signals, RISK_SIGNALS, "signals", errors);
+      checkExactKeys(signals, RISK_SIGNALS.filter((code) => !isOptionalSignal(code)), "signals", errors, OPTIONAL_SIGNALS);
       for (const code of RISK_SIGNALS) {
         const setting = signals[code];
         if (setting === undefined) continue;
@@ -409,7 +445,10 @@ export function isThresholdConfig(value: unknown): value is ThresholdConfig {
  */
 export function normaliseThresholdConfig(config: ThresholdConfig): ThresholdConfig {
   const signals = {} as Record<RiskSignal, SignalSetting>;
-  for (const code of RISK_SIGNALS) signals[code] = { weight: config.signals[code].weight, enabled: config.signals[code].enabled };
+  for (const code of RISK_SIGNALS) {
+    const setting = signalSetting(config, code);
+    signals[code] = { weight: setting.weight, enabled: setting.enabled };
+  }
   return {
     schema: THRESHOLD_CONFIG_SCHEMA,
     signals,
@@ -448,8 +487,8 @@ export function diffThresholdConfig(from: ThresholdConfig, to: ThresholdConfig):
     changes.push({ kind: "faceMatchCountsForApproval", from: faceMatchCounts(from), to: faceMatchCounts(to) });
   }
   for (const signal of RISK_SIGNALS) {
-    const a = from.signals[signal];
-    const b = to.signals[signal];
+    const a = signalSetting(from, signal);
+    const b = signalSetting(to, signal);
     if (toUnits(a.weight) !== toUnits(b.weight)) changes.push({ kind: "weight", signal, from: a.weight, to: b.weight });
     if (a.enabled !== b.enabled) changes.push({ kind: "enabled", signal, from: a.enabled, to: b.enabled });
     const hardA = from.hardFlags.includes(signal);
@@ -553,8 +592,8 @@ export function evaluateRisk(facts: RiskFacts, config: ThresholdConfig): RiskAss
   const present = new Set(facts.signals);
   const contributions: RiskContribution[] = RISK_SIGNALS.filter((code) => present.has(code)).map((signal) => ({
     signal,
-    weight: config.signals[signal].weight,
-    counted: config.signals[signal].enabled,
+    weight: signalSetting(config, signal).weight,
+    counted: signalSetting(config, signal).enabled,
     firm: FIRM_SIGNALS.includes(signal),
     hard: config.hardFlags.includes(signal),
   }));

@@ -1,10 +1,11 @@
 // The result screen (automatic approval, PM 2026-10-20): after the submit, the app asks GET /flow/result
-// at once, then every RESULT_POLL_MS, for at most RESULT_WAIT_MS. "verified": the ID is verified.
+// at once, then every FAST_POLL_MS for FAST_POLL_FOR_MS (the result within 10 s of the face check, fixes
+// after the PM's first real test), then every RESULT_POLL_MS, for at most RESULT_WAIT_MS. "verified": the ID is verified.
 // "review": a person checks the case. "pending": ask again. When the time is up, the server is slow or
 // down, or anything goes wrong, the rider is told what a review says ("we're checking a few details,
 // we'll let you know"): never an error, never a refusal.
 import { FLOW_RESULT_STATES, type FlowResult, RESULT_POLL_MS, RESULT_WAIT_MS } from "@verify/shared";
-import { type ChecksWait, pollUntil } from "./checks";
+import { type ChecksWait, pollPauses, pollUntil } from "./checks";
 
 export interface ResultTiming {
   /** The longest the rider waits, from the first request. */
@@ -84,6 +85,7 @@ export function waitForResult(options: ResultWaitOptions): Promise<ChecksWait<Se
         : { state: answer.state, returnUrl: answer.state === "verified" ? safeReturnUrl(answer.returnUrl) : null },
     waitMs: options.timing?.waitMs ?? RESULT_TIMING.waitMs,
     pollMs: options.timing?.pollMs ?? RESULT_TIMING.pollMs,
+    ...pollPauses(options.timing?.pollMs),
     signal: options.signal,
   });
 }

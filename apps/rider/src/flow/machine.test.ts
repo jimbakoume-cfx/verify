@@ -205,7 +205,8 @@ describe("capture and review", () => {
     state = run(state, { type: "turnOver/ready" });
     expect(state.screen).toEqual({ name: "capture", side: "document_back" });
     state = run(state, { type: "capture/taken", shot: shot("document_back") }, { type: "review/accept" });
-    expect(state.screen).toEqual({ name: "upload" });
+    // "ID and face steps all at once" (PM, 2026-10-20): straight to the face check, the photos uploading meanwhile.
+    expect(state.screen).toEqual({ name: "liveness" });
     expect(state.upload.status).toBe("queued");
     expect(pendingShots(state).map((s) => s.side)).toEqual(["document_front", "document_back"]);
   });
@@ -216,7 +217,7 @@ describe("capture and review", () => {
       session: withDocument("passport", ["document_front"]),
     });
     const state = run(passport, { type: "capture/taken", shot: shot("document_front") }, { type: "review/accept" });
-    expect(state.screen).toEqual({ name: "upload" });
+    expect(state.screen).toEqual({ name: "liveness" });
   });
 
   it("retakes a photo", () => {
@@ -317,24 +318,43 @@ describe("upload", () => {
     expect(state.upload.status).toBe("idle");
   });
 
+  it("uploads in the background of the face check, which it never interrupts", () => {
+    expect(running.screen).toEqual({ name: "liveness" });
+    const sent = run(running, { type: "upload/sideDone", side: "document_front" }, { type: "upload/sideDone", side: "document_back" }, { type: "upload/sent" });
+    expect(sent.screen).toEqual({ name: "liveness" });
+    expect(sent.upload.status).toBe("idle");
+    // The face check done: the checks (then the submit).
+    expect(run(sent, LIVENESS_DONE).screen).toEqual({ name: "checking" });
+    // Done before the photos are all sent: the checks wait for the upload (useFlow), on the same screen.
+    const early = run(running, LIVENESS_DONE);
+    expect(early).toMatchObject({ screen: { name: "checking" }, upload: { status: "running" } });
+    expect(run(early, { type: "upload/sent" })).toMatchObject({ screen: { name: "checking" }, upload: { status: "idle" } });
+  });
+
   it("waits for a manual retry after the automatic retries failed, keeping finished sides", () => {
-    const failed = run(
+    const during = run(
       running,
       { type: "upload/sideDone", side: "document_front" },
       { type: "upload/failed", error: "network", side: "document_back" },
     );
-    expect(failed).toMatchObject({ error: "network", upload: { status: "failed" }, screen: { name: "upload" } });
+    // Not shown during the face check...
+    expect(during).toMatchObject({ error: null, upload: { status: "failed" }, screen: { name: "liveness" } });
+    // ...but once it is done.
+    const failed = run(during, LIVENESS_DONE);
+    expect(failed).toMatchObject({ error: "network", upload: { status: "failed" }, screen: { name: "upload" }, livenessDone: true });
     const retried = run(failed, { type: "upload/retry" });
     expect(retried.upload.status).toBe("queued");
     expect(pendingShots(retried).map((s) => s.side)).toEqual(["document_back"]);
   });
 
-  it("sends a refused image back to the camera for that side only", () => {
-    const state = run(
+  it("sends a refused image back to the camera for that side only, after the face check", () => {
+    const during = run(
       running,
       { type: "upload/sideDone", side: "document_front" },
       { type: "upload/failed", error: "image_resolution_too_low", side: "document_back" },
     );
+    expect(during.screen).toEqual({ name: "liveness" });
+    const state = run(during, LIVENESS_DONE);
     expect(state).toMatchObject({
       error: "image_resolution_too_low",
       screen: { name: "capture", side: "document_back" },
@@ -358,7 +378,7 @@ describe("upload", () => {
   });
 
   it("does not auto-retry a permanent failure but shows it", () => {
-    const state = run(running, { type: "upload/failed", error: "too_many_uploads", side: "document_front" });
+    const state = run(running, { type: "upload/failed", error: "too_many_uploads", side: "document_front" }, LIVENESS_DONE);
     expect(state).toMatchObject({ error: "too_many_uploads", upload: { status: "failed" } });
   });
 
@@ -395,10 +415,13 @@ describe("the phone's Back button", () => {
     expect(run(cniChosen, back).screen).toEqual({ name: "document" });
   });
 
-  it("does nothing during an upload", () => {
+  it("does nothing during an upload (the face check, with the photos uploading)", () => {
     const queued = run(backReview, { type: "review/accept" });
-    expect(queued.screen.name).toBe("upload");
+    expect(queued.screen.name).toBe("liveness");
     expect(run(queued, back)).toBe(queued);
+    const retakeUpload = run({ ...backReview, livenessDone: true }, { type: "review/accept" });
+    expect(retakeUpload.screen.name).toBe("upload");
+    expect(run(retakeUpload, back)).toBe(retakeUpload);
   });
 
   it("returns from the declined screen to the consent text", () => {
@@ -487,7 +510,7 @@ describe("reading the code lines (MRZ)", () => {
     expect(state.mrzFailures).toEqual({});
     expect(mrzReview(state, kept)).toEqual({ status: "read" });
     expect(canUseShot(state, kept)).toBe(true);
-    expect(run(state, { type: "review/accept" }).screen).toEqual({ name: "upload" });
+    expect(run(state, { type: "review/accept" }).screen).toEqual({ name: "liveness" });
   });
 
   it("reads the passport's photo page", () => {
@@ -579,7 +602,7 @@ describe("reading the code lines (MRZ)", () => {
         expect(state.screen).toEqual({ name: "capture", side: "document_back" });
       }
     }
-    expect(run(state, { type: "review/accept" }).screen).toEqual({ name: "upload" });
+    expect(run(state, { type: "review/accept" }).screen).toEqual({ name: "liveness" });
   });
 
   it("needs no override when a later try reads the lines", () => {
@@ -599,7 +622,7 @@ describe("reading the code lines (MRZ)", () => {
     expect(state.mrzReads).toEqual({ document_front: 1 });
     expect(mrzReview(state, kept)).toBeNull();
     expect(canUseShot(state, kept)).toBe(true);
-    expect(run(state, { type: "review/accept" }).screen).toEqual({ name: "upload" });
+    expect(run(state, { type: "review/accept" }).screen).toEqual({ name: "liveness" });
   });
 
   it("never blocks on an optional MRZ (residence permit), but says when it was read", () => {
@@ -609,7 +632,7 @@ describe("reading the code lines (MRZ)", () => {
     expect(unread.mrzReads).toEqual({ document_back: 1 });
     expect(mrzReview(unread, kept)).toBeNull();
     expect(canUseShot(unread, kept)).toBe(true);
-    expect(run(unread, { type: "review/accept" }).screen).toEqual({ name: "upload" });
+    expect(run(unread, { type: "review/accept" }).screen).toEqual({ name: "liveness" });
 
     const readOk = takeAndRead(run(unread, { type: "review/retake" }), "document_back", read("valid"));
     expect(mrzReview(readOk, readOk.shots.document_back!)).toEqual({ status: "read" });
@@ -665,6 +688,8 @@ describe("reading the code lines (MRZ)", () => {
       { type: "review/accept" },
       { type: "upload/started", progress: { done: 0, total: 5, phase: "link", photo: 1, photos: 1, attempt: 1 } },
       { type: "upload/failed", error: "image_too_small", side: "document_front" },
+      // Told once the face check is done.
+      LIVENESS_DONE,
     );
     expect(state.screen).toEqual({ name: "capture", side: "document_front" });
     state = takeAndRead(state, "document_front", read("valid", "TD3"));
@@ -687,16 +712,20 @@ describe("the server's checks (M3)", () => {
     return { status, format: "TD1", lines, parsed: null, ...timing };
   }
 
-  /** Runs the queued upload of the photos still to send to its end: the checking screen. */
+  /**
+   * Runs the queued upload of the photos still to send to its end, and the face check when it is still
+   * to do (the photos upload during it): the checking screen.
+   */
   function send(state: FlowState): FlowState {
     expect(state.upload).toMatchObject({ status: "queued", stage: "sides" });
     const sides = pendingShots(state).map((s) => s.side);
-    return run(
+    const sent = run(
       state,
       { type: "upload/started", progress },
       ...sides.map((side): FlowAction => ({ type: "upload/sideDone", side })),
       { type: "upload/sent" },
     );
+    return sent.screen.name === "liveness" ? run(sent, LIVENESS_DONE) : sent;
   }
 
   /** Both sides of the old CNI taken (`front`, `back`), accepted and sent: the checking screen. */
@@ -745,11 +774,11 @@ describe("the server's checks (M3)", () => {
     expect(run(state, { type: "nav/back" })).toBe(state);
   });
 
-  it("submits once the checks are over and the face check is recorded (M5), then finishes", () => {
-    const face = run(checkingCni(), { type: "checks/ok" });
-    expect(face.screen).toEqual({ name: "liveness" });
-    expect(face.upload).toEqual({ status: "idle", stage: "sides", progress: null });
-    const state = run(face, LIVENESS_DONE);
+  it("submits once the checks are over (the face check is already recorded, M5), then finishes", () => {
+    const checking = checkingCni();
+    expect(checking.livenessDone).toBe(true);
+    const state = run(checking, { type: "checks/ok" });
+    // Shown as the result's wait (FlowView): one result step at the end.
     expect(state.screen).toEqual({ name: "upload" });
     expect(state.upload).toEqual({ status: "queued", stage: "submit", progress: null });
     // Nothing left to send: only the submit.
@@ -767,9 +796,7 @@ describe("the server's checks (M3)", () => {
   });
 
   it("submits with no error shown when the checks time out or cannot be read", () => {
-    const face = run(checkingCni(), { type: "checks/timeout" });
-    expect(face).toMatchObject({ error: null, screen: { name: "liveness" } });
-    const state = run(face, LIVENESS_DONE);
+    const state = run(checkingCni(), { type: "checks/timeout" });
     expect(state).toMatchObject({ error: null, screen: { name: "upload" } });
     expect(state.upload).toMatchObject({ status: "queued", stage: "submit" });
   });
@@ -871,7 +898,7 @@ describe("the server's checks (M3)", () => {
     const answer = checks({ document_front: "retake", document_back: "ok" });
     expect(checksDecision(state, answer)).toEqual({ type: "checks/ok" });
     const again = run(state, retakeFront);
-    expect(again).toMatchObject({ screen: { name: "liveness" } });
+    expect(again).toMatchObject({ screen: { name: "upload" } });
     expect(again.serverRetakes).toEqual({ document_front: SERVER_RETAKES_PER_SIDE });
     // The other side still may be asked for.
     expect(acceptsServerRetake(state, "document_back")).toBe(true);
@@ -887,7 +914,7 @@ describe("the server's checks (M3)", () => {
     state = send(run(state, { type: "capture/taken", shot: shot("document_back") }, { type: "review/accept" }));
     expect(usedOverride(state, state.shots.document_front!)).toBe(true);
     expect(acceptsServerRetake(state, "document_front")).toBe(false);
-    expect(run(state, retakeFront)).toMatchObject({ screen: { name: "liveness" }, serverRetakes: {} });
+    expect(run(state, retakeFront)).toMatchObject({ screen: { name: "upload" }, serverRetakes: {} });
   });
 
   describe("on the side with the code lines", () => {
@@ -916,14 +943,14 @@ describe("the server's checks (M3)", () => {
       expect(checksDecision(state, checks({ document_front: "ok", document_back: "retake" }))).toEqual({
         type: "checks/ok",
       });
-      expect(run(state, retakeBack).screen).toEqual({ name: "liveness" });
+      expect(run(state, retakeBack).screen).toEqual({ name: "upload" });
     });
 
     it(`never asks again after "Continue anyway"`, () => {
       const state = checkingBiometric(...Array.from({ length: MRZ_TRIES_BEFORE_OVERRIDE }, () => "not_found" as const));
       expect(mrzReview(state, state.shots.document_back!)).toMatchObject({ status: "unread", canContinue: true });
       expect(usedOverride(state, state.shots.document_back!)).toBe(true);
-      expect(run(state, retakeBack).screen).toEqual({ name: "liveness" });
+      expect(run(state, retakeBack).screen).toEqual({ name: "upload" });
     });
 
     it("reads the code lines of the retaken photo again, for a new report", () => {
@@ -991,7 +1018,7 @@ describe("the server's checks (M3)", () => {
       };
       expect(checksDecision(state, odd)).toEqual({ type: "checks/ok" });
       const unknown = { side: "document_front", reason: "too_shiny" as never } as const;
-      expect(run(state, { type: "checks/retake", sides: [unknown] }).screen).toEqual({ name: "liveness" });
+      expect(run(state, { type: "checks/retake", sides: [unknown] }).screen).toEqual({ name: "upload" });
       const passport = send(
         run(
           run(ready, { type: "document/chosen", session: withDocument("passport", ["document_front"]) }),

@@ -271,6 +271,14 @@ export function ConsistencyItem({ consistency }: { consistency: CheckRecord<Cons
                 {d.provisional.map((code) => (
                   <li key={code}>
                     <strong>{t(`serverChecks.reasons.label.${code}`)}</strong>
+                    {/* A printed name that differs is provisional since the PM's first real test. */}
+                    {code === "mrz_print_mismatch" && d.mismatches.length > 0 && (
+                      <span>
+                        {t("serverChecks.consistency.mismatches", {
+                          kinds: d.mismatches.map((kind) => t(`serverChecks.consistency.kind.${kind}`)).join(", "),
+                        })}
+                      </span>
+                    )}
                     <code className="mono muted">{code}</code>
                   </li>
                 ))}

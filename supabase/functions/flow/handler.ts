@@ -200,6 +200,8 @@ export interface FlowRepo {
   consistencyFlags(verificationId: string): Promise<string[]>;
   /** M3: worker_settings.enabled_for_real_sessions (off until Vercel Pro and its DPA). */
   workerEnabledForRealSessions(): Promise<boolean>;
+  /** worker_settings.face_enabled_for_real_sessions (M6): the face worker's liveness on real sessions. */
+  faceEnabledForRealSessions(): Promise<boolean>;
   /** M6/M7: a face job of this case waits for the face worker (flow_face_jobs_pending). */
   faceJobsPending(verificationId: string): Promise<boolean>;
   /** M5: flow_issue_liveness_challenge (replaces an unused earlier challenge; audited, never the code). */
@@ -546,6 +548,14 @@ export function createFlowHandler(deps: FlowDeps): Handler {
         : new HttpError(429, "too_many_challenges");
     }
     const { challengeId, expiresAt } = issued;
+    // Warm-up (fixes after the PM's first real test: the rider's result must come within 10 s of the
+    // end of the face check): the face worker loads its models while the rider follows the prompts, so
+    // the ring that brings the frames finds it ready. Only for sessions it may process. Never fails the rider.
+    try {
+      if (v.isTest || (await repo.faceEnabledForRealSessions())) faceRing("face_warm_up");
+    } catch (err) {
+      log.error("flow.face_warm_up_check_failed", err);
+    }
     const uploads = await Promise.all(
       Array.from({ length: LIVENESS_LIMITS.maxFrames }, async (_, index) => {
         const signed = await storage.createSignedUploadUrl(livenessFramePath(v.id, challengeId, index));

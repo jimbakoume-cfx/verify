@@ -143,6 +143,7 @@ def test_a_filmed_screen_shows_moire(landmarker):
 
 def test_a_liveness_job_end_to_end(landmarker):
     claim, images = claim_for("liveness", sequence(("turn_left", "blink", "smile")))
+    pipeline._FACES_CACHE.clear()  # measure the face mesh on every frame
     result = timed("liveness job, 13 frames (warm)", lambda: pipeline.analyse(claim, images))
     evidence = result["liveness"]
     assert result["faceMatch"] is None and result["kind"] == "liveness"
@@ -159,9 +160,14 @@ def test_face_match_same_drawn_person_against_another(landmarker):
     document = sf.document_with_portrait(SPECIMENS / "passport-cmr.jpg", sf.render(sf.ALICE, size=(300, 380), face_width=200), PASSPORT_PORTRAIT_BOX)
     claim, images = claim_for("face_match", sequence(("turn_left", "blink", "smile"), sf.ALICE), document)
     models.reset()  # measure a cold face match: both models load
+    pipeline._FACES_CACHE.clear()
     same = timed("face_match job, cold (models load)", lambda: pipeline.analyse(claim, images))
     assert same["timing"]["cold"] is True
+    pipeline._FACES_CACHE.clear()
     same = timed("face_match job, warm", lambda: pipeline.analyse(claim, images))
+    # As in a ring: the liveness job of the same face check already ran the mesh on the frames.
+    reused = timed("face_match job, warm, frames measured by the liveness job", lambda: pipeline.analyse(claim, images))
+    assert reused["faceMatch"] == same["faceMatch"]
     other_claim, other_images = claim_for("face_match", sequence(("turn_left", "blink", "smile"), sf.BOB), document)
     other = pipeline.analyse(other_claim, other_images)
     for result in (same, other):

@@ -4,6 +4,11 @@
 
 This is the safest version of that decision. It builds on M8 (`M8_SPEC.md`: score, thresholds, decisions) and M6/M7 (`M6_SPEC.md`, `M7_SPEC.md`: liveness and face match).
 
+> **Since 2026-10-20 (fixes after the PM's first real test):**
+> - **"ID and face steps all at once" (PM):** consent → document → front/back → straight to the face check; the photos upload and are checked meanwhile; one result step at the end. A server retake or an expired document is shown only there; the rider then retakes that side (or picks another document) and the result is evaluated again, without a new face check.
+> - **The result within 10 s of the end of the face check (PM):** the face worker warms up when the face check starts, fetches in parallel and shares a face check's frames between its two jobs; the case is assessed as the last check lands (no sweep in the path, `95_real_test_fixes_test.sql`); the app asks every `FAST_POLL_MS` (1 s) during the first `FAST_POLL_FOR_MS` (15 s) of the checks' and the result's waits. Expected: frames sent and recorded about 1.5–3 s after the capture ends; the warm worker claims, fetches 14 frames in parallel (about 1 s), measures (0.1–0.4 s) and records the liveness (about 0.5 s); the face match reuses the frames, fetches the document (about 0.7 s), embeds (0.6 s) and records (0.5 s); meanwhile the app has read the checks (done during the face check) and submitted; the next poll within 1 s: about 6–8 s in all. A cold worker (no warm-up) adds 3–8 s.
+> - **Printed name:** condition 6 below is about the printed number and dates; a printed name that differs while the code lines are trustworthy is the note `print_name_mismatch`, which never blocks.
+
 ## What the system does
 - **It approves automatically. It never rejects automatically.** A case that is not approved waits for a person, as before.
 - **It approves only when every condition holds.** These are `AUTO_APPROVAL_BLOCKERS` in `risk.ts`, also in `private.risk_evaluate`. The stored assessment lists each one that fails, under `autoApproval.blockers`.

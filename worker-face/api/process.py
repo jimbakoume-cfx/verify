@@ -23,7 +23,7 @@ _ROOT = str(Path(__file__).resolve().parent.parent)
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from verify_face import log  # noqa: E402
+from verify_face import log, models  # noqa: E402
 from verify_face.pipeline import analyse  # noqa: E402
 from verify_face.runner import ConfigError, client_from_env, run_ring  # noqa: E402
 
@@ -40,7 +40,9 @@ def ring() -> tuple[int, dict[str, bool]]:
     except ConfigError as err:
         log.event(f"ring_failed.{err.code}")
         return 500, {"ok": False}
-    summary = run_ring(client, analyse)
+    # The models load in the background while the ring claims and fetches; a ring with no job (the
+    # warm-up rung when a face check starts) only loads them.
+    summary = run_ring(client, analyse, preload=models.preload)
     log.event(
         f"ring_done.{summary.stopped}",
         claimed=summary.claimed,

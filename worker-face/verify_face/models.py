@@ -104,6 +104,13 @@ def recogniser() -> tuple[Any, float]:
         return _recogniser, time.monotonic() - started
 
 
+def preload() -> None:
+    """Both models, loaded now (a ring starts this in the background: a warm-up ring with no job leaves
+    the instance ready for the face check that follows; fixes after the PM's first real test)."""
+    landmarker()
+    recogniser()
+
+
 def reset() -> None:
     """Forget the loaded models (tests)."""
     global _landmarker, _recogniser

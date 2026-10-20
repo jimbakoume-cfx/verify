@@ -692,7 +692,8 @@ CASES = [
     {"declaredDocument": "passport", "photos": ["passport-expired.jpg"],
      "consistency": {"flags": ["document_expired"], "provisional": [], "basis": "mrz", "mismatches": []}},
     {"declaredDocument": "passport", "photos": ["passport-mismatch.jpg"],
-     "consistency": {"flags": ["mrz_print_mismatch"], "provisional": [], "basis": "mrz", "mismatches": ["name"]}},
+     # A printed name that differs is a provisional note (fixes after the PM's first real test).
+     "consistency": {"flags": [], "provisional": ["mrz_print_mismatch"], "basis": "mrz", "mismatches": ["name"]}},
 ]
 
 

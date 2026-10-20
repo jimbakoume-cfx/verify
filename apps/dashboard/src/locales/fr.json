@@ -519,8 +519,22 @@
     "framesOf": "{{n}} sur {{total}}",
     "processing": "Temps de traitement",
     "coldStart": "modèles chargés d'abord",
+    "sinceJob": "De la vérification du visage à ce résultat",
+    "metrics": {
+      "title": "Mesures par image (pour le réglage)",
+      "body": "Les nombres utilisés par la décision, image par image : la rotation de la tête (lacet, + = la gauche de l'usager) et son inclinaison (tangage, + = vers le haut) en degrés, le score de sourire, la largeur de la bouche rapportée aux yeux, l'ouverture des yeux et le score de clignement. Chaque action est jugée sur son étape et les premières images qui suivent, par rapport à la position neutre de l'usager lui-même. Provisoire : pas encore réglé sur de vrais usagers.",
+      "frame": "Image",
+      "step": "Étape",
+      "yaw": "Lacet (°)",
+      "pitch": "Tangage (°)",
+      "smile": "Sourire",
+      "mouthWidth": "Bouche / yeux",
+      "eyeOpenness": "Ouverture des yeux",
+      "blink": "Clignement",
+      "neutral": "Position neutre de l'usager"
+    },
     "engine": "Moteur",
-    "livenessClean": "Chaque action vue dans son étape ; rien d'autre à signaler.",
+    "livenessClean": "Chaque action vue dans son étape (ou juste après) ; rien d'autre à signaler.",
     "problems": {
       "action_not_done": {
         "title": "Action non vue.",
@@ -682,6 +696,7 @@
     "title": "Risque et décision",
     "intro": "Ce que les règles recommandent à partir des vérifications, avec chaque signal et son poids, et la version des seuils utilisée. Aujourd'hui, une personne décide chaque dossier.",
     "notAssessedBadge": "Non évalué",
+    "recommendationLabel": "Recommandation",
     "recommendation": {
       "approve": "Recommandé : approuver",
       "review": "Recommandé : examiner",
@@ -697,7 +712,12 @@
     "unknownShape": "Cette évaluation vient d'une version plus récente des règles. Rechargez la page.",
     "score": "Score",
     "firmScore": "Signaux fermes seuls",
-    "band": "Zone du score",
+    "band": "Zone du score (le score seul, pas une décision)",
+    "bandValue": {
+      "approve": "Sous le seuil d'approbation (ou égal)",
+      "review": "Entre les deux seuils",
+      "reject": "Au seuil de refus ou au-dessus"
+    },
     "version": "Version des seuils",
     "versionNumber": "Version {{version}}",
     "assessedAt": "Évalué",
@@ -747,6 +767,7 @@
       "date_logic": "Dates contradictoires",
       "number_format": "Format de numéro inattendu",
       "manual_review_document": "Toujours vérifié par une personne",
+      "print_name_mismatch": "Nom imprimé différent des lignes de code (note provisoire : lecture OCR)",
       "unrecognised_document": "Document non reconnu",
       "mrz_unreadable_server": "Lignes de code non lues par le serveur",
       "mrz_phone_flag": "Lecture des lignes de code sur le téléphone signalée",

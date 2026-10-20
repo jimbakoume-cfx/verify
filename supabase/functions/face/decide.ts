@@ -15,12 +15,15 @@ import {
   type FlatPlaneResult,
   type LivenessAction,
   type LivenessActionDetails,
+  type LivenessBaseline,
   type LivenessDetails,
+  LIVENESS_METRIC_FRAMES_MAX,
+  type LivenessTiming,
   LIVENESS_EVAL_PROBLEMS,
   type LivenessEvalProblem,
 } from "../_shared/contract.ts";
 
-export const LIVENESS_EVAL_VERSION = "liveness-eval-v1";
+export const LIVENESS_EVAL_VERSION = "liveness-eval-v2";
 export const FACE_MATCH_VERSION = "face-match-v1";
 /** The model behind every similarity (stored with each result, so a model change is never mixed up). */
 export const FACE_MATCH_MODEL = "auraface-v1/glintr100";
@@ -57,7 +60,7 @@ export interface FaceMatchDecision {
  */
 export function decideFaceMatch(
   evidence: FaceMatchEvidence,
-  context: { documentCaptureId: string; engine: string; timing: { ms: number; cold: boolean } },
+  context: { documentCaptureId: string; engine: string; timing: LivenessTiming },
 ): FaceMatchDecision {
   const problems = new Set<FaceMatchProblem>();
   const { portrait, selfie, similarity } = evidence;
@@ -99,27 +102,47 @@ export function decideFaceMatch(
 }
 
 // ---------------------------------------------------------------------------
-// Liveness (M6)
+// Liveness (M6; liveness-eval-v2 after the PM's first real test, 2026-10-20)
 // ---------------------------------------------------------------------------
+// What the first real test showed (the PM's own face, a low-end phone; per-frame measures only): the
+// yaw sign convention held (a turn to the rider's own left measured +35°), but the rider did each action
+// about one step late: the turn asked in step 2 happened in step 3's frames, and look up and smile were
+// not in any frame. Each action was judged on its own step's 4 frames only, against fixed cut-offs set
+// on drawn faces. v2: an action may still be seen in the first frames of the next step (the rider reads
+// the prompt, then moves); every measure is taken against the rider's own neutral (the median of the
+// frames where that measure should not move), not one frame; cut-offs set for a real person; and the
+// per-frame measures are kept in the details (generic angles and scores, never a landmark or a pixel)
+// so the next tests can tune them.
 /**
  * Yaw sign of a rider's own "left": the frames are the camera's own picture (not mirrored), so turning
  * to one's left points the nose to the image's right, a positive yaw (contract.ts FaceFrameMeasure).
+ * Confirmed by the PM's first real test (the rider app grabs frames from the unmirrored video; only its
+ * preview is mirrored with CSS, and "left" on a mirrored preview is the rider's own left too).
  */
 export const TURN_LEFT_YAW_SIGN = 1;
-/** A head turn counts from this many degrees away from the reference frame. */
-export const TURN_MIN_DEG = 15;
-/** Looking up counts from this many degrees above the reference frame. */
-export const LOOK_UP_MIN_DEG = 10;
-/** A blink: MediaPipe's eyeBlink score at least this, or the eye aspect ratio down to this share of the reference's. */
+/** A head turn counts from this many degrees away from the rider's neutral. */
+export const TURN_MIN_DEG = 12;
+/** Looking up counts from this many degrees above the rider's neutral. */
+export const LOOK_UP_MIN_DEG = 8;
+/** A blink: MediaPipe's eyeBlink score at least this, or the eye aspect ratio down to this share of the neutral's. */
 export const BLINK_MIN_SCORE = 0.5;
-export const BLINK_OPENNESS_RATIO = 0.6;
+export const BLINK_OPENNESS_RATIO = 0.65;
 /**
- * A smile: MediaPipe's mouthSmile score at least this and this much above the reference frame's, or the
- * mouth at least this much wider than in the reference frame (a closed-lip smile scores lower).
+ * A smile: MediaPipe's mouthSmile score at least this and this much above the rider's neutral, or the
+ * mouth at least this much wider than in the neutral (a closed-lip smile scores lower), measured only on
+ * frames facing the camera (a turned head changes the mouth's width against the eyes').
  */
-export const SMILE_MIN_SCORE = 0.5;
-export const SMILE_MIN_RISE = 0.2;
+export const SMILE_MIN_SCORE = 0.35;
+export const SMILE_MIN_RISE = 0.15;
 export const SMILE_WIDTH_RATIO = 1.08;
+/** Blink and smile by the mesh's ratios only on frames within these angles of the neutral pose. */
+export const EXPRESSION_MAX_YAW_DEG = 15;
+export const EXPRESSION_MAX_PITCH_DEG = 12;
+/**
+ * The rider reacts late: the first frames of the next step (or of the capture's tail) still count for an
+ * action. With the app's schedule (one frame every 0.7-0.8 s), 2 frames are about 1.5 s of delay.
+ */
+export const ACTION_LAG_FRAMES = 2;
 /** The flat-plane test is measured on frames turned or tilted at least this far from the reference. */
 export const FLAT_PLANE_MIN_YAW_DEG = 12;
 export const FLAT_PLANE_MIN_PITCH_DEG = 8;
@@ -127,6 +150,7 @@ export const FLAT_PLANE_MIN_PITCH_DEG = 8;
  * Median planar residual under this: the face moved as one flat plane (a print or a screen). On the
  * canonical face, a real head turned 12° gives about 0.035 and a flat one stays at the landmark noise
  * (under 0.02 with 1 px of noise on a 100 px face): worker-face/tests/test_geometry.py. PROVISIONAL.
+ * The PM's real head turned 35° gave 0.13.
  */
 export const FLAT_PLANE_MAX_RESIDUAL = 0.025;
 /**
@@ -177,58 +201,124 @@ function round(value: number, digits: number): number {
 
 const single = (m: FaceFrameMeasure) => m.faces === 1;
 const num = (value: number | null): value is number => value !== null && Number.isFinite(value);
+const roundOrNull = (value: number | null, digits: number) => (num(value) ? round(value, digits) : null);
 
-/** One action, judged on the frames of its own step against the reference frame. */
+/** The rider's own neutral for each measure (LivenessBaseline): where the head and face rest. */
+export function baselineOf(m: FaceFrameMeasure | null): LivenessBaseline {
+  return {
+    yaw: m?.yaw ?? null,
+    pitch: m?.pitch ?? null,
+    smile: m?.smile ?? null,
+    mouthWidth: m?.mouthWidth ?? null,
+    eyeOpenness: m?.eyeOpenness ?? null,
+  };
+}
+
+type Measure = keyof LivenessBaseline;
+
+const nearPose = (m: FaceFrameMeasure, reference: FaceFrameMeasure | null) =>
+  reference === null || !num(reference.yaw) || !num(reference.pitch) ||
+  (num(m.yaw) && num(m.pitch) && Math.abs(m.yaw - reference.yaw) <= NEUTRAL_POSE_DEG &&
+    Math.abs(m.pitch - reference.pitch) <= NEUTRAL_POSE_DEG);
+/** The measures each action moves: a frame of that action's step is no neutral for them. */
+const MOVES: Record<LivenessAction, readonly Measure[]> = {
+  turn_left: ["yaw"],
+  turn_right: ["yaw"],
+  look_up: ["pitch"],
+  blink: ["eyeOpenness"],
+  smile: ["smile", "mouthWidth"],
+};
+
+/** Frames within this many degrees of the reference pose count toward the rider's neutral. */
+export const NEUTRAL_POSE_DEG = 8;
+
+/**
+ * The neutral of each measure for an action: the median over the frames with one face, outside this
+ * action's own window, posed near the reference frame (NEUTRAL_POSE_DEG: a rider late with a turn must
+ * not move the neutral of the others), whose step does not ask for a movement of that measure (step 0,
+ * the other actions); the reference frame's value when there is none.
+ */
+export function actionBaseline(
+  measures: readonly FaceFrameMeasure[],
+  stepOf: ReadonlyMap<number, number>,
+  actions: readonly LivenessAction[],
+  window: ReadonlySet<number>,
+  reference: FaceFrameMeasure | null,
+): LivenessBaseline {
+  const ref = baselineOf(reference);
+  const out = { ...ref };
+  for (const key of Object.keys(ref) as Measure[]) {
+    const values = measures
+      .filter((m) => single(m) && !window.has(m.index) && stepOf.has(m.index) && nearPose(m, reference))
+      .filter((m) => {
+        const step = stepOf.get(m.index)!;
+        return step === 0 || !MOVES[actions[step - 1]]?.includes(key);
+      })
+      .map((m) => m[key])
+      .filter(num);
+    out[key] = median(values) ?? ref[key];
+  }
+  return out;
+}
+
+/**
+ * One action, judged on its window (its own step's frames and the first ACTION_LAG_FRAMES frames after
+ * it) against the rider's neutral. `ownStep`: the frames of its own step that may show it turned the
+ * other way (wrong_direction); by default the whole window.
+ */
 export function judgeAction(
   action: LivenessAction,
-  stepFrames: readonly FaceFrameMeasure[],
-  reference: FaceFrameMeasure | null,
+  windowFrames: readonly FaceFrameMeasure[],
+  baseline: LivenessBaseline,
+  ownStep: readonly FaceFrameMeasure[] = windowFrames,
 ): { details: LivenessActionDetails; problem: LivenessEvalProblem | null } {
-  const frames = stepFrames.filter(single);
-  const base = (pick: (m: FaceFrameMeasure) => number | null, fallback: number) => {
-    const value = reference ? pick(reference) : null;
-    return num(value) ? value : fallback;
-  };
+  const frames = windowFrames.filter(single);
   const result = (outcome: LivenessActionDetails["result"], peak: number | null, problem: LivenessEvalProblem | null) => ({
     details: { action, result: outcome, framesWithFace: frames.length, peak: peak === null ? null : round(peak, 3) },
     problem,
   });
   if (frames.length === 0) return result("unclear", null, "action_unclear");
+  const facing = (m: FaceFrameMeasure) =>
+    (!num(baseline.yaw) || !num(m.yaw) || Math.abs(m.yaw - baseline.yaw) <= EXPRESSION_MAX_YAW_DEG) &&
+    (!num(baseline.pitch) || !num(m.pitch) || Math.abs(m.pitch - baseline.pitch) <= EXPRESSION_MAX_PITCH_DEG);
 
   if (action === "turn_left" || action === "turn_right" || action === "look_up") {
     const isTurn = action !== "look_up";
     const sign = action === "turn_left" ? TURN_LEFT_YAW_SIGN : action === "turn_right" ? -TURN_LEFT_YAW_SIGN : 1;
     const minimum = isTurn ? TURN_MIN_DEG : LOOK_UP_MIN_DEG;
-    const baseline = base((m) => (isTurn ? m.yaw : m.pitch), 0);
-    const moves = frames.map((m) => (isTurn ? m.yaw : m.pitch)).filter(num).map((v) => sign * (v - baseline));
+    const zero = (isTurn ? baseline.yaw : baseline.pitch) ?? 0;
+    const move = (m: FaceFrameMeasure) => {
+      const v = isTurn ? m.yaw : m.pitch;
+      return num(v) ? sign * (v - zero) : null;
+    };
+    const moves = frames.map(move).filter(num);
     if (moves.length === 0) return result("unclear", null, "action_unclear");
     const peak = Math.max(...moves);
     if (peak >= minimum) return result("pass", peak, null);
-    if (Math.min(...moves) <= -minimum) return result("fail", peak, "wrong_direction");
+    const against = ownStep.filter(single).map(move).filter(num);
+    if (against.length > 0 && Math.min(...against) <= -minimum) return result("fail", peak, "wrong_direction");
     return result("fail", peak, "action_not_done");
   }
 
   if (action === "blink") {
     const scores = frames.map((m) => m.blink).filter(num);
-    const openness = frames.map((m) => m.eyeOpenness).filter(num);
+    const openness = frames.filter(facing).map((m) => m.eyeOpenness).filter(num);
     if (scores.length === 0 && openness.length === 0) return result("unclear", null, "action_unclear");
     const peak = scores.length ? Math.max(...scores) : null;
-    const reference_openness = reference && num(reference.eyeOpenness) ? reference.eyeOpenness : null;
-    const closed = reference_openness !== null && openness.length > 0 &&
-      Math.min(...openness) <= BLINK_OPENNESS_RATIO * reference_openness;
+    const closed = num(baseline.eyeOpenness) && openness.length > 0 &&
+      Math.min(...openness) <= BLINK_OPENNESS_RATIO * baseline.eyeOpenness;
     if ((peak !== null && peak >= BLINK_MIN_SCORE) || closed) return result("pass", peak, null);
     return result("fail", peak, "action_not_done");
   }
 
   // smile
   const scores = frames.map((m) => m.smile).filter(num);
-  const widths = frames.map((m) => m.mouthWidth).filter(num);
+  const widths = frames.filter(facing).map((m) => m.mouthWidth).filter(num);
   if (scores.length === 0 && widths.length === 0) return result("unclear", null, "action_unclear");
   const peak = scores.length ? Math.max(...scores) : null;
-  const baseline = base((m) => m.smile, 0);
-  const referenceWidth = reference && num(reference.mouthWidth) ? reference.mouthWidth : null;
-  const wider = referenceWidth !== null && widths.length > 0 && Math.max(...widths) >= SMILE_WIDTH_RATIO * referenceWidth;
-  if ((peak !== null && peak >= SMILE_MIN_SCORE && peak - baseline >= SMILE_MIN_RISE) || wider) return result("pass", peak, null);
+  const rest = baseline.smile ?? 0;
+  const wider = num(baseline.mouthWidth) && widths.length > 0 && Math.max(...widths) >= SMILE_WIDTH_RATIO * baseline.mouthWidth;
+  if ((peak !== null && peak >= SMILE_MIN_SCORE && peak - rest >= SMILE_MIN_RISE) || wider) return result("pass", peak, null);
   return result("fail", peak, "action_not_done");
 }
 
@@ -294,9 +384,10 @@ export function passiveCues(frames: readonly FaceFrameMeasure[]): LivenessEvalPr
 
 /**
  * fail: an action was not done, or done the other way (the landmarks saw the face and it did not do
- * what was asked, in its step). flag: anything else that needs a person's eye (an action without a
+ * what was asked, in its window). flag: anything else that needs a person's eye (an action without a
  * face, a missing reference, the consistency and the provisional cues). pass: every action seen,
- * nothing else.
+ * nothing else. Never a reject on its own: M8 counts any outcome but pass as the provisional
+ * liveness_flag (review).
  */
 export function decideLiveness(
   evidence: FaceLivenessEvidence,
@@ -306,17 +397,29 @@ export function decideLiveness(
     /** Every frame of the job, from the database (index and step). */
     frames: readonly FrameStep[];
     engine: string;
-    timing: { ms: number; cold: boolean };
+    timing: LivenessTiming;
   },
 ): LivenessDecision {
   const stepOf = new Map(context.frames.map((f) => [f.index, f.step]));
   const measures = [...evidence.frames].sort((a, b) => a.index - b.index);
+  const known = measures.filter((m) => stepOf.has(m.index));
   const reference = measures.find((m) => m.index === evidence.referenceIndex && single(m)) ?? null;
   const problems = new Set<LivenessEvalProblem>();
   if (!reference) problems.add("no_reference");
 
+  const windows: number[][] = [];
   const actions = context.actions.map((action, i) => {
-    const judged = judgeAction(action, measures.filter((m) => stepOf.get(m.index) === i + 1), reference);
+    const step = i + 1;
+    const own = known.filter((m) => stepOf.get(m.index) === step);
+    const late = known.filter((m) => stepOf.get(m.index) === step + 1).slice(0, ACTION_LAG_FRAMES);
+    const window = [...own, ...late];
+    windows.push(window.map((m) => m.index));
+    // A turn the other way right after the opposite turn is the rider coming back: not wrong_direction.
+    const previous = context.actions[i - 1];
+    const returning = previous !== undefined && previous !== action && MOVES[previous][0] === MOVES[action][0];
+    const ownJudged = returning ? own.slice(ACTION_LAG_FRAMES) : own;
+    const baseline = actionBaseline(known, stepOf, context.actions, new Set(window.map((m) => m.index)), reference);
+    const judged = judgeAction(action, window, baseline, ownJudged);
     if (judged.problem) problems.add(judged.problem);
     return judged.details;
   });
@@ -328,6 +431,7 @@ export function decideLiveness(
   const ordered = LIVENESS_EVAL_PROBLEMS.filter((p) => problems.has(p));
   const failed = ordered.includes("action_not_done") || ordered.includes("wrong_direction");
   const passed = actions.filter((a) => a.result === "pass").length;
+  const neutral = actionBaseline(known, stepOf, context.actions, new Set(), reference);
   return {
     outcome: failed ? "fail" : ordered.length > 0 ? "flag" : "pass",
     score: context.actions.length ? round(passed / context.actions.length, 4) : 0,
@@ -343,6 +447,29 @@ export function decideLiveness(
       flatPlaneScore: plane.score,
       problems: ordered,
       timing: context.timing,
+      // Generic per-frame numbers for tuning (fixes after the PM's first real test): angles and scores
+      // only, never a landmark, a crop or a pixel.
+      metrics: {
+        baseline: {
+          yaw: roundOrNull(neutral.yaw, 2),
+          pitch: roundOrNull(neutral.pitch, 2),
+          smile: roundOrNull(neutral.smile, 4),
+          mouthWidth: roundOrNull(neutral.mouthWidth, 4),
+          eyeOpenness: roundOrNull(neutral.eyeOpenness, 4),
+        },
+        windows,
+        frames: measures.slice(0, LIVENESS_METRIC_FRAMES_MAX).map((m) => ({
+          index: m.index,
+          step: stepOf.get(m.index) ?? null,
+          faces: m.faces,
+          yaw: roundOrNull(m.yaw, 2),
+          pitch: roundOrNull(m.pitch, 2),
+          blink: roundOrNull(m.blink, 4),
+          eyeOpenness: roundOrNull(m.eyeOpenness, 4),
+          smile: roundOrNull(m.smile, 4),
+          mouthWidth: roundOrNull(m.mouthWidth, 4),
+        })),
+      },
     },
   };
 }

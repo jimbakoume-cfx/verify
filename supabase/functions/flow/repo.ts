@@ -360,6 +360,13 @@ export function createFlowRepo(db: SupabaseClient): FlowRepo {
       // No settings row: the worker claims nothing either (fail closed).
       return data?.enabled_for_real_sessions === true;
     },
+
+    async faceEnabledForRealSessions() {
+      const { data, error } = await db.from("worker_settings").select("face_enabled_for_real_sessions").limit(1)
+        .maybeSingle<{ face_enabled_for_real_sessions: boolean }>();
+      if (error) throw dbError("worker_settings.select", error);
+      return data?.face_enabled_for_real_sessions === true;
+    },
   };
 }
 

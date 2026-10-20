@@ -1082,10 +1082,10 @@
         "passport-mismatch.jpg"
       ],
       "consistency": {
-        "flags": [
+        "flags": [],
+        "provisional": [
           "mrz_print_mismatch"
         ],
-        "provisional": [],
         "basis": "mrz",
         "mismatches": [
           "name"

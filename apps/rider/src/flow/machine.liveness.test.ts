@@ -43,7 +43,7 @@ const chosen = run(
   { type: "document/chosen", session: session() },
 );
 
-/** Both sides of the old CNI sent and checked: the face check comes next. */
+/** Both sides of the old CNI accepted: the face check comes at once, the photos sent meanwhile. */
 function atLiveness(): FlowState {
   return run(
     chosen,
@@ -56,7 +56,6 @@ function atLiveness(): FlowState {
     { type: "upload/sideDone", side: "document_front" },
     { type: "upload/sideDone", side: "document_back" },
     { type: "upload/sent" },
-    { type: "checks/ok" },
   );
 }
 
@@ -65,12 +64,16 @@ describe("the face check (M5)", () => {
     expect(chosen.livenessDone).toBe(false);
   });
 
-  it("comes after the server's checks, before the submit", () => {
+  it("comes right after the photos (PM, 2026-10-20: no wait between), then the checks, then the submit", () => {
     const state = atLiveness();
     expect(state.screen).toEqual({ name: "liveness" });
     expect(state.upload.status).toBe("idle");
-    const submitting = run(state, LIVENESS_DONE);
-    expect(submitting).toMatchObject({ livenessDone: true, screen: { name: "upload" } });
+    // The server's checks were not read yet: the answer means nothing on this screen.
+    expect(run(state, { type: "checks/ok" })).toBe(state);
+    const checking = run(state, LIVENESS_DONE);
+    expect(checking).toMatchObject({ livenessDone: true, screen: { name: "checking" } });
+    const submitting = run(checking, { type: "checks/ok" });
+    expect(submitting).toMatchObject({ screen: { name: "upload" } });
     expect(submitting.upload).toEqual({ status: "queued", stage: "submit", progress: null });
   });
 
@@ -95,7 +98,7 @@ describe("the face check (M5)", () => {
   });
 
   it("is asked for again when the submit finds no face check on the server", () => {
-    let state = run(atLiveness(), LIVENESS_DONE, {
+    let state = run(atLiveness(), LIVENESS_DONE, { type: "checks/ok" }, {
       type: "upload/started",
       progress: { done: 6, total: 7, phase: "submit", photo: 0, photos: 2, attempt: 1 },
     });

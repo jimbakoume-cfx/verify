@@ -6,9 +6,10 @@ import { InternalError, type Logger } from "../_shared/log.ts";
 
 /**
  * Why a worker is rung: the rider chose a document (warm-up) or a photo was accepted (the AI worker);
- * a face check was recorded (the face worker, M6/M7).
+ * a face check started (face_warm_up: the face worker loads its models while the rider follows the
+ * prompts, fixes after the PM's first real test) or was recorded (the face worker, M6/M7).
  */
-export type RingReason = "warm_up" | "capture" | "face_check";
+export type RingReason = "warm_up" | "capture" | "face_warm_up" | "face_check";
 
 /**
  * Rings in the background. `onFailure` runs when the ring could not reach the worker (so the photo is
