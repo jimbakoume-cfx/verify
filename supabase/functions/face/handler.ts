@@ -16,6 +16,7 @@ import {
   type FaceResultResponse,
   type LivenessAction,
   LIVENESS_EVAL_CHECK_NAME,
+  type LivenessTiming,
   WORKER_SIGNATURE_WINDOW_S,
 } from "../_shared/contract.ts";
 import { sha256Hex } from "../_shared/crypto.ts";
@@ -78,6 +79,8 @@ export interface FaceJobContext {
   actions: LivenessAction[];
   /** The inputs handed out at the last claim (empty before any claim). */
   inputs: { captureId: string; role: "frame" | "document"; index: number | null; step: number | null }[];
+  /** When the job was created (the frames recorded); missing from a database before the real-test fixes. */
+  createdAt?: string | null;
 }
 
 export interface FaceResultRecord {
@@ -212,6 +215,12 @@ export function createFaceHandler(deps: FaceDeps): Handler {
     if (job.status === "superseded" || !job.live) throw new HttpError(410, "image_gone");
     if (job.kind !== result.kind) throw badRequest("kind is not the job's.");
     const frames = job.inputs.filter((input) => input.role === "frame");
+    // How long the case waited for this result (fixes after the PM's first real test: the rider's
+    // result must come within 10 s of the end of the face check). Logged and kept with the check.
+    const created = job.createdAt ? Date.parse(job.createdAt) : Number.NaN;
+    const sinceJobMs = Number.isFinite(created) ? Math.min(86_400_000, Math.max(0, now().getTime() - created)) : undefined;
+    const timing: LivenessTiming = sinceJobMs === undefined ? { ...result.timing } : { ...result.timing, sinceJobMs };
+    log.info?.("face.result_timing", { kind: result.kind, ...timing });
 
     let record: Omit<FaceResultRecord, "kid" | "jobId" | "attempt">;
     if (result.kind === "liveness") {
@@ -223,7 +232,7 @@ export function createFaceHandler(deps: FaceDeps): Handler {
         actions: job.actions,
         frames: frames.map((f) => ({ index: f.index ?? -1, step: f.step ?? -1 })),
         engine: result.engine,
-        timing: result.timing,
+        timing,
       });
       record = {
         checkName: LIVENESS_EVAL_CHECK_NAME,
@@ -241,7 +250,7 @@ export function createFaceHandler(deps: FaceDeps): Handler {
         const frame = frames.find((f) => f.captureId === evidence.selfie.captureId);
         if (!frame || frame.index !== evidence.selfie.frameIndex) throw badRequest("faceMatch.selfie is not a frame of the job.");
       }
-      const decision = decideFaceMatch(evidence, { documentCaptureId: document.captureId, engine: result.engine, timing: result.timing });
+      const decision = decideFaceMatch(evidence, { documentCaptureId: document.captureId, engine: result.engine, timing });
       record = {
         checkName: FACE_MATCH_CHECK_NAME,
         version: FACE_MATCH_VERSION,

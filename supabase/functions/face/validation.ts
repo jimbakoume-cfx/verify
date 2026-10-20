@@ -10,6 +10,7 @@ import {
   type FaceLivenessEvidence,
   type FaceMatchEvidence,
   type FaceResultRequest,
+  type FaceWorkerTiming,
   LIVENESS_LIMITS,
 } from "../_shared/contract.ts";
 import { isOneOf, isPlainObject, isUuid } from "../_shared/http.ts";
@@ -181,11 +182,19 @@ export function validateResultRequest(body: Record<string, unknown>): Validation
   if (typeof body.engine !== "string" || body.engine.length < 1 || body.engine.length > FACE_LIMITS.maxEngineLength || !ENGINE_RE.test(body.engine)) {
     return bad("engine must be a short build label.");
   }
-  if (!isPlainObject(body.timing) || extraKey(body.timing, ["ms", "cold"]) !== undefined) return bad("timing must be {ms, cold}.");
+  // fetchMs and wallMs since the fixes after the PM's first real test; an older worker sends neither.
+  if (!isPlainObject(body.timing) || extraKey(body.timing, ["ms", "cold", "fetchMs", "wallMs"]) !== undefined) {
+    return bad("timing must be {ms, cold, fetchMs?, wallMs?}.");
+  }
   if (!isIntegerIn(body.timing.ms, 0, MAX_TIMING_MS) || typeof body.timing.cold !== "boolean") {
     return bad(`timing.ms must be an integer from 0 to ${MAX_TIMING_MS}, timing.cold a boolean.`);
   }
-  const timing = { ms: body.timing.ms, cold: body.timing.cold };
+  const timing: FaceWorkerTiming = { ms: body.timing.ms, cold: body.timing.cold };
+  for (const key of ["fetchMs", "wallMs"] as const) {
+    if (body.timing[key] === undefined) continue;
+    if (!isIntegerIn(body.timing[key], 0, MAX_TIMING_MS)) return bad(`timing.${key} must be an integer from 0 to ${MAX_TIMING_MS}.`);
+    timing[key] = body.timing[key] as number;
+  }
   const base = { jobId: body.jobId.toLowerCase(), attempt: body.attempt, kind: body.kind, engine: body.engine, timing };
   if (body.kind === "liveness") {
     if (body.faceMatch !== null) return bad("faceMatch must be null for a liveness job.");

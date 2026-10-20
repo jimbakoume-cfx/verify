@@ -117,6 +117,52 @@ def queue(fake: FakeFunction, *items: tuple[dict, dict[str, bytes]]) -> None:
         fake.images.update(images)
 
 
+def shared_face_check() -> tuple[tuple[dict, dict[str, bytes]], tuple[dict, dict[str, bytes]]]:
+    """A face check's two jobs, as the database hands them out: the same frames, the document for the match."""
+    live, images = claim("liveness")
+    match, match_images = claim("face_match")
+    document = match["inputs"][-1]
+    match["inputs"] = [dict(i) for i in live["inputs"]] + [document]
+    return (live, images), (match, {document["captureId"]: match_images[document["captureId"]]})
+
+
+def test_a_face_check_s_two_jobs_fetch_the_frames_once_in_parallel(fake, client):
+    """Fixes after the PM's first real test: the frames were fetched one by one, twice (about 20 s)."""
+    first, second = shared_face_check()
+    queue(fake, first, second)
+    summary = run_ring(client, fake_analyse)
+    assert (summary.claimed, summary.recorded) == (2, 2)
+    # 13 frames for the liveness job; only the document for the face match (same captures, same SHA-256).
+    assert len(fake.image_requests) == 13 + 1
+    assert fake.image_requests[-1]["captureId"] == second[0]["inputs"][-1]["captureId"]
+    for result in fake.results:
+        assert set(result["timing"]) == {"ms", "cold", "fetchMs", "wallMs"}
+        assert result["timing"]["wallMs"] >= result["timing"]["fetchMs"] >= 0
+
+
+def test_a_cached_frame_is_reused_only_with_the_same_sha256(fake, client):
+    first, second = shared_face_check()
+    second[0]["inputs"][3]["sha256"] = "0" * 64  # another photo under the same id: fetched (and refused)
+    queue(fake, first, second)
+    summary = run_ring(client, fake_analyse)
+    assert summary.recorded == 1 and summary.rejected == 1
+
+
+def test_the_models_load_in_the_background_even_without_a_job(fake, client):
+    calls = []
+    summary = run_ring(client, fake_analyse, preload=lambda: calls.append("loaded"))
+    assert summary.stopped == "no_job" and calls == ["loaded"]
+
+
+def test_a_failed_preload_never_stops_the_ring(fake, client, logs):
+    def broken():
+        raise RuntimeError("no models")
+
+    queue(fake, claim("liveness"))
+    assert run_ring(client, fake_analyse, preload=broken).recorded == 1
+    assert any("preload_failed" in line for line in logs)
+
+
 def test_a_ring_processes_every_job_then_stops_on_204(fake, client):
     queue(fake, claim("liveness"), claim("face_match"))
     summary = run_ring(client, fake_analyse)
@@ -133,8 +179,8 @@ def test_an_input_gone_meanwhile_skips_the_job(fake, client):
     queue(fake, (c, images))
     summary = run_ring(client, fake_analyse)
     assert (summary.gone, summary.recorded) == (1, 0)
-    # It stopped at the missing frame: the rest were not fetched.
-    assert len(fake.image_requests) == 6
+    # Fetched in parallel; nothing is analysed or sent for the job.
+    assert len(fake.image_requests) == 13 and fake.results == []
 
 
 def test_bytes_that_are_not_the_upload_are_never_decoded(fake, client, logs):

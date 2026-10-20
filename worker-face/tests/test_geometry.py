@@ -125,3 +125,46 @@ def test_shape_distance_same_face_versus_another():
 
 def test_render_canonical_flat_has_no_depth():
     assert np.ptp(g.render_canonical(0, 0, flat=True)[:, 2]) == pytest.approx(0, abs=1e-9)
+
+
+# -- Mirror conventions (fixes after the PM's first real test) --------------------------------------
+def _mirror_index() -> np.ndarray:
+    """For each canonical point, its mirror image across the face's vertical axis (left eye <-> right eye)."""
+    c = g.canonical_face()
+    mirrored = c * np.array([-1.0, 1.0, 1.0])
+    return np.array([int(np.argmin(((c - p) ** 2).sum(axis=1))) for p in mirrored])
+
+
+def mirror_frame(points: np.ndarray, width: float) -> np.ndarray:
+    """What the face mesh reports on a horizontally mirrored picture (a selfie preview drawn into the
+    frame): every point flipped across the picture, and each point's label taken by its mirror twin
+    (the mesh always calls the eye on the picture's left the subject's right eye)."""
+    flipped = points.copy()
+    flipped[:, 0] = width - flipped[:, 0]
+    return flipped[_mirror_index()]
+
+
+def test_mirror_index_is_an_involution_that_swaps_the_eyes():
+    m = _mirror_index()
+    assert (m[m] == np.arange(len(m))).all()
+    assert m[g.EYE_IMAGE_LEFT["outer"]] == g.EYE_IMAGE_RIGHT["outer"] and m[g.NOSE_TIP] == g.NOSE_TIP
+
+
+@pytest.mark.parametrize("yaw", [-30, -15, 15, 30])
+def test_a_turn_reads_the_same_magnitude_and_the_opposite_sign_on_a_mirrored_frame(yaw):
+    """The rider app sends the camera's own (unmirrored) picture: a turn to the rider's left is a positive
+    yaw. Were a phone to hand over a mirrored picture, the same turn would read negative: the face
+    function would answer "wrong way" (docs/M6_SPEC.md, PM test step 5), never "not done"."""
+    points = g.render_canonical(yaw=yaw, size=480)
+    measured, pitch, _ = g.head_pose(points)
+    mirrored, mirrored_pitch, _ = g.head_pose(mirror_frame(points, 480))
+    assert np.sign(measured) == np.sign(yaw) and abs(measured - yaw) < 2
+    assert np.sign(mirrored) == -np.sign(yaw) and abs(mirrored + yaw) < 2
+    # Mirroring never changes the tilt.
+    assert abs(mirrored_pitch - pitch) < 1
+
+
+@pytest.mark.parametrize("pitch", [-12, 10])
+def test_a_tilt_is_the_same_on_a_mirrored_frame(pitch):
+    points = g.render_canonical(pitch=pitch, size=480)
+    assert abs(g.head_pose(mirror_frame(points, 480))[1] - pitch) < 2

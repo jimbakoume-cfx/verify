@@ -6,9 +6,13 @@ import {
   type FaceMatchEvidence,
   LIVENESS_EVAL_DETAIL_KEYS,
   LIVENESS_EVAL_PROBLEMS,
+  LIVENESS_BASELINE_KEYS,
+  LIVENESS_FRAME_METRIC_KEYS,
   PROVISIONAL_LIVENESS_PROBLEMS,
 } from "../_shared/contract.ts";
 import {
+  ACTION_LAG_FRAMES,
+  baselineOf,
   BLINK_MIN_SCORE,
   consistencyProblems,
   decideFaceMatch,
@@ -72,6 +76,7 @@ const noFace = (index: number): FaceFrameMeasure => ({
 
 const LEFT = TURN_LEFT_YAW_SIGN * 24; // the yaw of a rider turned to their own left
 const REFERENCE = frame(0);
+const NEUTRAL = baselineOf(REFERENCE);
 
 describe("judgeAction", () => {
   it.each([
@@ -94,27 +99,38 @@ describe("judgeAction", () => {
     ["turn_left", [noFace(1), frame(2, { faces: 2, yaw: LEFT })], "unclear", "action_unclear"],
     ["turn_left", [], "unclear", "action_unclear"],
   ] as const)("%s on %j: %s", (action, frames, result, problem) => {
-    const judged = judgeAction(action, frames, REFERENCE);
+    const judged = judgeAction(action, frames, NEUTRAL);
     expect(judged.details.result).toBe(result);
     expect(judged.problem).toBe(problem);
     expect(judged.details.action).toBe(action);
   });
 
-  it("measures turns from the reference frame, not from zero", () => {
+  it("measures turns from the rider's neutral, not from zero", () => {
     // The rider already faced the camera a little to the left: the turn must go further.
-    const reference = frame(0, { yaw: LEFT / 2 });
-    expect(judgeAction("turn_left", [frame(1, { yaw: LEFT })], reference).details.result).toBe("fail");
-    expect(judgeAction("turn_left", [frame(1, { yaw: LEFT * 1.5 })], reference).details.result).toBe("pass");
+    const neutral = baselineOf(frame(0, { yaw: LEFT / 2 }));
+    expect(judgeAction("turn_left", [frame(1, { yaw: LEFT / 2 + TURN_MIN_DEG - 1 })], neutral).details.result).toBe("fail");
+    expect(judgeAction("turn_left", [frame(1, { yaw: LEFT / 2 + TURN_MIN_DEG })], neutral).details.result).toBe("pass");
+  });
+
+  it("judges a smile or a blink by the mesh only on frames facing the camera (a turn narrows the mouth against the eyes)", () => {
+    expect(judgeAction("smile", [frame(1, { yaw: 35, smile: 0.05, mouthWidth: 0.7 })], NEUTRAL).details.result).toBe("fail");
+    expect(judgeAction("blink", [frame(1, { yaw: 35, blink: 0.1, eyeOpenness: 0.1 })], NEUTRAL).details.result).toBe("fail");
+  });
+
+  it("wrong_direction only from the frames it is given for that (its own step)", () => {
+    const window = [frame(1, { yaw: 0 }), frame(2, { yaw: -LEFT })];
+    expect(judgeAction("turn_left", window, NEUTRAL).problem).toBe("wrong_direction");
+    expect(judgeAction("turn_left", window, NEUTRAL, [window[0]]).problem).toBe("action_not_done");
   });
 
   it("reports the peak in the asked direction, rounded, and the frames with one face", () => {
-    const judged = judgeAction("turn_right", [frame(1, { yaw: -20.12345 }), frame(2, { faces: 2, yaw: -40 }), noFace(3)], REFERENCE);
+    const judged = judgeAction("turn_right", [frame(1, { yaw: -20.12345 }), frame(2, { faces: 2, yaw: -40 }), noFace(3)], NEUTRAL);
     expect(judged.details).toEqual({ action: "turn_right", result: "pass", framesWithFace: 1, peak: 20.123 });
   });
 
   it("a smile needs to rise from the reference: a rider smiling throughout does not pass", () => {
-    const reference = frame(0, { smile: 0.6 });
-    expect(judgeAction("smile", [frame(1, { smile: 0.7 })], reference).details.result).toBe("fail");
+    const neutral = baselineOf(frame(0, { smile: 0.6 }));
+    expect(judgeAction("smile", [frame(1, { smile: 0.7 })], neutral).details.result).toBe("fail");
   });
 });
 
@@ -201,8 +217,8 @@ describe("decideLiveness", () => {
       challengeId: context.challengeId,
       engine: "face-1/test",
       actions: [
-        { action: "turn_left", result: "pass", framesWithFace: 4, peak: 24 },
-        { action: "blink", result: "pass", framesWithFace: 4, peak: 0.8 },
+        { action: "turn_left", result: "pass", framesWithFace: 6, peak: 24 },
+        { action: "blink", result: "pass", framesWithFace: 6, peak: 0.8 },
         { action: "smile", result: "pass", framesWithFace: 4, peak: 0.8 },
       ],
       frames: 13,
@@ -211,8 +227,95 @@ describe("decideLiveness", () => {
       flatPlaneScore: 0.06,
       problems: [],
       timing: { ms: 900, cold: false },
+      metrics: decision.details.metrics,
     });
     expect(Object.keys(decision.details)).toEqual([...LIVENESS_EVAL_DETAIL_KEYS]);
+    // Each action's window: its own step, then the first frames of the next one (the rider reacts late).
+    expect(decision.details.metrics?.windows).toEqual([[1, 2, 3, 4, 5, 6], [5, 6, 7, 8, 9, 10], [9, 10, 11, 12]]);
+    expect(decision.details.metrics?.baseline).toEqual({ yaw: 0, pitch: 0, smile: 0.05, mouthWidth: 0.57, eyeOpenness: 0.3 });
+    expect(decision.details.metrics?.frames).toHaveLength(13);
+    expect(decision.details.metrics?.frames[2]).toEqual({
+      index: 2, step: 1, faces: 1, yaw: 24, pitch: 0, blink: 0.05, eyeOpenness: 0.3, smile: 0.05, mouthWidth: 0.57,
+    });
+    expect(Object.keys(decision.details.metrics!.frames[0])).toEqual([...LIVENESS_FRAME_METRIC_KEYS]);
+  });
+
+  // The PM's first real test (2026-10-20, the PM's own face, a low-end phone): the per-frame measures the
+  // worker sent (generic angles and scores only), challenge look_up, turn_left, smile, frames 1 + 4 + 4 + 4.
+  // The rider was a step late: the turn asked in step 2 shows in step 3's frames (yaw +35: the sign
+  // convention held), and neither the look up nor the smile is in any frame.
+  const PM_ACTIONS = ["look_up", "turn_left", "smile"] as const;
+  const PM: [number, number, number, number, number][] = [
+    // [yaw, pitch, smile, mouthWidth, eyeOpenness]
+    [-1.67, -4.79, 0.0046, 0.6118, 0.2712],
+    [-1.93, -4.43, 0.0035, 0.6198, 0.279], [-1.96, -3.59, 0.0037, 0.6086, 0.2797], [-2.1, -3.39, 0.0038, 0.6092, 0.2757],
+    [-1.93, -3.68, 0.0034, 0.6136, 0.2861],
+    [-2.54, -4.86, 0.0014, 0.602, 0.3208], [-2.14, -3.17, 0.0021, 0.6219, 0.2382], [-1.98, -1.7, 0.0035, 0.6164, 0.2666],
+    [-2.12, -2.49, 0.0028, 0.6119, 0.256],
+    [14.49, 0.73, 0.0036, 0.6169, 0.2744], [34.45, 5.25, 0.0031, 0.6405, 0.2641], [35.23, 5.19, 0.0018, 0.6317, 0.2754],
+    [5.22, -3.7, 0.0044, 0.6117, 0.2533],
+  ];
+  const pmFrames = PM.map(([yaw, pitch, smile, mouthWidth, eyeOpenness], index) =>
+    frame(index, { yaw, pitch, smile, mouthWidth, eyeOpenness, blink: 0.12, planarResidual: index === 0 ? 0 : index >= 9 && index <= 11 ? 0.13 : 0.006 })
+  );
+
+  it("the PM's first real test: v1 saw no action at all; v2 sees the late turn, and still fails what was never done", () => {
+    const decision = decideLiveness({ referenceIndex: 0, frames: pmFrames }, { ...context, actions: PM_ACTIONS });
+    expect(decision.details.actions.map((a) => [a.action, a.result])).toEqual([["look_up", "fail"], ["turn_left", "pass"], ["smile", "fail"]]);
+    expect(decision.details.actions[1].peak).toBeGreaterThan(30);
+    // Never rejects on its own: "fail" is the provisional liveness_flag for M8 (review).
+    expect(decision.outcome).toBe("fail");
+    expect(decision.details.problems).toEqual(["action_not_done"]);
+    expect(decision.details.flatPlane).toBe("depth");
+    // The neutral is the rider's own resting pose, not moved by the late turn.
+    expect(decision.details.metrics?.baseline.yaw).toBeCloseTo(-1.96, 1);
+    expect(decision.details.metrics?.baseline.pitch).toBeLessThan(-3);
+  });
+
+  it("the same rider on the v2 schedule (late but complete): every action passes", () => {
+    // 1 + 4 + 4 + 5 frames (the app's tail frame); each action done about one frame late.
+    const steps14 = Array.from({ length: 14 }, (_, i) => ({ index: i, step: i === 0 ? 0 : Math.min(3, Math.floor((i - 1) / 4) + 1) }));
+    const at = (i: number, o: Partial<FaceFrameMeasure>) => frame(i, { yaw: -2, pitch: -4.8, smile: 0.004, mouthWidth: 0.61, eyeOpenness: 0.27, ...o });
+    const frames = steps14.map(({ index }) =>
+      [2, 3, 4, 5].includes(index) ? at(index, { pitch: 7, planarResidual: 0.05 })
+      : [6, 7, 8, 9].includes(index) ? at(index, { yaw: 30, planarResidual: 0.12 })
+      : [11, 12, 13].includes(index) ? at(index, { smile: 0.62, mouthWidth: 0.69 })
+      : at(index, {})
+    );
+    const decision = decideLiveness({ referenceIndex: 0, frames }, { ...context, actions: PM_ACTIONS, frames: steps14 });
+    expect(decision.details.actions.map((a) => a.result)).toEqual(["pass", "pass", "pass"]);
+    expect(decision.outcome).toBe("pass");
+  });
+
+  it("frames are the camera's own picture: a rider's left turn is a positive yaw; a mirrored frame would read the other way", () => {
+    // The rider app grabs frames from the unmirrored video (only its preview is mirrored): a turn to the
+    // rider's own left points the nose to the image's right, a positive yaw (worker-face test_geometry.py
+    // checks the same on synthetic landmarks, mirrored and not).
+    const turned = (yaw: number) => steps.map(({ index, step }) => frame(index, step === 1 ? { yaw, planarResidual: 0.06 } : step === 2 ? { blink: 0.8 } : step === 3 ? { smile: 0.8 } : {}));
+    expect(decideLiveness({ referenceIndex: 0, frames: turned(TURN_LEFT_YAW_SIGN * 25) }, context).outcome).toBe("pass");
+    const mirrored = decideLiveness({ referenceIndex: 0, frames: turned(-TURN_LEFT_YAW_SIGN * 25) }, context);
+    expect(mirrored.details.problems).toContain("wrong_direction");
+  });
+
+  it("an action may still be seen in the first frames of the next step, never later", () => {
+    const late = (lag: number) =>
+      steps.map(({ index, step }) =>
+        index === 4 + lag ? frame(index, { yaw: LEFT, planarResidual: 0.06 }) : frame(index, step === 2 ? { blink: 0.8 } : step === 3 ? { smile: 0.8 } : {})
+      );
+    expect(decideLiveness({ referenceIndex: 0, frames: late(ACTION_LAG_FRAMES) }, context).details.actions[0].result).toBe("pass");
+    expect(decideLiveness({ referenceIndex: 0, frames: late(ACTION_LAG_FRAMES + 1) }, context).details.actions[0].result).toBe("fail");
+  });
+
+  it("a turn back after the opposite turn is not a wrong direction", () => {
+    const lr = ["turn_left", "turn_right", "smile"] as const;
+    const frames = steps.map(({ index, step }) =>
+      step === 1 ? frame(index, { yaw: LEFT, planarResidual: 0.06 })
+      // The rider is still turned left in the first frames of the turn right, then turns right.
+      : step === 2 ? frame(index, { yaw: index <= 6 ? LEFT : -LEFT, planarResidual: 0.06 })
+      : step === 3 ? frame(index, { smile: 0.8 }) : frame(index)
+    );
+    const decision = decideLiveness({ referenceIndex: 0, frames }, { ...context, actions: lr });
+    expect(decision.details.actions.map((a) => a.result)).toEqual(["pass", "pass", "pass"]);
   });
 
   it("fail: the actions in the wrong order (each is judged in its own step)", () => {
@@ -244,7 +347,8 @@ describe("decideLiveness", () => {
   });
 
   it("flag: no face in an action's frames, and no reference", () => {
-    const frames = done().map((m) => (m.index === 0 || (m.index >= 5 && m.index <= 8) ? noFace(m.index) : m));
+    // No face in the blink's step nor in its late frames (the first two of the smile's step).
+    const frames = done().map((m) => (m.index === 0 || (m.index >= 5 && m.index <= 10) ? noFace(m.index) : m));
     const decision = decideLiveness({ referenceIndex: null, frames }, context);
     expect(decision.outcome).toBe("flag");
     expect(decision.details.problems).toEqual(["action_unclear", "no_reference", "face_missing"]);
@@ -320,15 +424,19 @@ describe("decideFaceMatch", () => {
 // node:fs through a variable, so that type checkers without Node's types (deno check) skip it.
 const nodeFs = "node:fs";
 const { readFileSync } = (await import(/* @vite-ignore */ nodeFs)) as { readFileSync(path: URL, encoding: "utf8"): string };
-const sql = readFileSync(new URL("../../migrations/20261020000000_m6_m7_face.sql", import.meta.url), "utf8");
+const sql = readFileSync(new URL("../../migrations/20261022000000_real_test_fixes.sql", import.meta.url), "utf8");
 
-describe("the database refuses any other key or code (supabase/migrations/20261020000000_m6_m7_face.sql)", () => {
+describe("the database refuses any other key or code (supabase/migrations/20261022000000_real_test_fixes.sql)", () => {
   const list = (values: readonly string[]) => `array[${values.map((v) => `'${v}'`).join(", ")}]`;
   const sorted = (values: readonly string[]) => [...values].sort();
   const squash = (text: string) => text.replace(/\s+/g, " ");
 
   it("the liveness details' keys, sorted as private.face_details_valid compares them", () => {
     expect(squash(sql)).toContain(squash(list(sorted(LIVENESS_EVAL_DETAIL_KEYS))));
+    // A result of liveness-eval-v1 (no metrics) stays valid.
+    expect(squash(sql)).toContain(squash(list(sorted(LIVENESS_EVAL_DETAIL_KEYS.filter((k) => k !== "metrics")))));
+    expect(squash(sql)).toContain(squash(list(sorted(LIVENESS_FRAME_METRIC_KEYS))));
+    expect(squash(sql)).toContain(squash(list(sorted(LIVENESS_BASELINE_KEYS))));
   });
 
   it("the face match details' keys", () => {
